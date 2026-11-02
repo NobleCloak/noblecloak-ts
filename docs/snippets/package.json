@@ -1,0 +1,23 @@
+{
+  "name": "@noblecloak/docs-snippets",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The code samples of the how-to guides under docs/how-to, typechecked and run against the mock.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf coverage .turbo"
+  },
+  "dependencies": {
+    "@noblecloak/client": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@noblecloak/spec": "workspace:*"
+  }
+}

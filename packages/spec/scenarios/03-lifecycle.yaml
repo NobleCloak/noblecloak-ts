@@ -1,0 +1,241 @@
+- id: lifecycle-proxied-tool-run-scoped
+  title: Decide-created lifecycle for a proxied tool inside a run - step_up, resolve, Resumption without a token, then allow with the same actor.run_id
+  tags: [both, lifecycle]
+  needs: [approver]
+  requires: [approvals, runs]
+  steps:
+    - name: the caller opens a run
+      as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: external } }
+      expect: { status: 201 }
+      save: { run_id: data.id }
+    - name: decide opens the obligation with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          actor: { run_id: '${run_id}' }
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'proxied ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 't-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.resume_token_will_issue, equals: false }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the approver resolves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, reason: fine, expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.resolution, equals: approved }
+    - name: the creating principal reads the Resumption, which echoes the continuation
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation.correlation.thread, equals: 't-${uniq}' }
+          - { path: data.tool_ref, equals: '${proxied_tool}' }
+          - { path: data.obligation_kind, equals: tool_invocation }
+          - { path: data.action_digest, equals: '${digest}' }
+          - { path: data.resume_token, exists: false }
+    - name: a second decide between resolve and consume, in the same run, is allow, since the gateway can admit a proxy obligation created under run scope
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          actor: { run_id: '${run_id}' }
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'proxied ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 't-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.approval.id, equals: '${approval_id}' }
+- id: lifecycle-proxied-tool-principal-scoped
+  title: Decide-created lifecycle for a proxied tool with no run - the repeat decision after approval stays step_up, because a proxy obligation without a run cannot be admitted by the gateway; the caller must open a run
+  tags: [both, lifecycle]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: decide opens the obligation with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'proxied ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 't-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.resume_token_will_issue, equals: false }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the approver resolves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, reason: fine, expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.resolution, equals: approved }
+    - name: the creating principal reads the Resumption, which echoes the continuation
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation.correlation.thread, equals: 't-${uniq}' }
+          - { path: data.tool_ref, equals: '${proxied_tool}' }
+          - { path: data.obligation_kind, equals: tool_invocation }
+          - { path: data.action_digest, equals: '${digest}' }
+          - { path: data.resume_token, exists: false }
+    - name: a second decide between resolve and consume is still step_up with approval.state approved, never allow
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'proxied ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 't-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, equals: '${approval_id}' }
+          - { path: data.approval.state, equals: approved }
+          - { path: data.approval.resume_token_will_issue, equals: false }
+- id: lifecycle-external-tool
+  title: Decide-created lifecycle for an external tool - Resumption with a token, decide does not consume, /consume does
+  tags: [both, lifecycle]
+  needs: [approver]
+  requires: [approvals, records.chain]
+  steps:
+    - name: register the external tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:conf:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect:
+        status: 201
+        body:
+          - { path: data.transport, equals: external }
+    - name: decide
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:conf:${uniq}', arguments: { to: 'a@example.com' } }
+          continuation: { kind: vercel_ai, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.resume_token_will_issue, equals: true }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: resolve
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: Resumption carries a resume_token
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.resume_token, exists: true }
+          - { path: data.tool_ref, equals: 'ext:conf:${uniq}' }
+      save: { token: data.resume_token }
+    - name: a decide between resolve and consume is step_up with approval.state approved
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:conf:${uniq}', arguments: { to: 'a@example.com' } }
+          continuation: { kind: vercel_ai, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.state, equals: approved }
+          - { path: data.approval.id, equals: '${approval_id}' }
+    - name: the following consume still succeeds - decide did not consume
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          resume_token: '${token}'
+          action: { tool_ref: 'ext:conf:${uniq}', arguments: { to: 'a@example.com' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+    - name: the Resumption is not readable after consumption
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 409, problem: already_resumed }
+    - name: the consumed obligation with no outcome is queryable
+      as: creator
+      request: { method: GET, path: '/v1/approvals?state=consumed&outcome=missing' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${approval_id}' } }
+    - name: the outcome record links by approval_id
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          tool_ref: 'ext:conf:${uniq}'
+          decision: step_up
+          approval_id: '${approval_id}'
+          outcome: { status: succeeded, summary: sent }
+      expect:
+        status: 201
+        body:
+          - { path: data.approval_id, equals: '${approval_id}' }
+          - { path: data.attestation, equals: asserted }
+      save: { record_id: data.id }
+    - name: the approval now names its outcome
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.outcome_record_id, equals: '${record_id}' }
+    - name: the chain links approval and outcome
+      as: creator
+      request: { method: GET, path: '/v1/records/${record_id}/chain' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.id, equals: '${approval_id}' }
+          - { path: data.outcome.id, equals: '${record_id}' }
+          - { path: data.prompt.id, equals: null }
+          - { path: data.prompt.reason, exists: true }

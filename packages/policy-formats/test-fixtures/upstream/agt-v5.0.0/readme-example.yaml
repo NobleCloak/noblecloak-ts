@@ -1,0 +1,20 @@
+agent_control_specification_version: "0.3.1-beta"
+metadata:
+  name: email-agent
+policies:
+  email_policy:
+    type: rego
+    bundle: ./policy
+    query: data.email_agent.verdict
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    policy_target_kind: tool_args
+    tool_name_from: "$.tool_call.name"
+    policy:
+      id: email_policy
+tools:
+  send_email:
+    type: Tool
+    id: send_email
+    clearance: internal

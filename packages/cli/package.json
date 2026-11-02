@@ -1,0 +1,38 @@
+{
+  "name": "@noblecloak/cli",
+  "version": "0.1.1",
+  "description": "The noblecloak command line: create, list, rotate and revoke an organisation's service principals and write the credential file an agent loads.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NobleCloak/noblecloak-ts.git",
+    "directory": "packages/cli"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "bin": {
+    "noblecloak": "./dist/noblecloak.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist coverage .turbo"
+  },
+  "dependencies": {
+    "@noblecloak/client": "workspace:*"
+  }
+}

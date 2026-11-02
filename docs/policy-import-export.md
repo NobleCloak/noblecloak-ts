@@ -1,0 +1,79 @@
+# Importing and exporting tool policies
+
+Tool policies can leave and come back as files: **Cedar** (in NobleCloak's dialect) or an **AGT manifest** (an Agent
+Control Specification manifest whose `pre_tool_call` binds an inline Cedar policy set). The converter is
+`@noblecloak/policy-formats`; the Permissions module (`@noblecloak/react/permissions`) puts it on screen as an import
+and export panel. This page says what each direction does, what a file cannot carry, and what an import changes. The
+mapping itself, statement by statement, is in the converter's README.
+
+## Turning the panel on
+
+The panel is `PolicyRoundTrip`, or `Permissions`' `roundTrip` prop. The app passes the converter in, so an app that
+does not use the panel never bundles it:
+
+```tsx
+<Permissions
+  controller={policies}
+  roundTrip={{
+    formats: () => import('@noblecloak/policy-formats'),
+    // Only to import: the importer parses Cedar with @cedar-policy/cedar-wasm (about 4.4 MB), loaded on the first import.
+    loadImporter: () => import('@noblecloak/policy-formats/import'),
+  }}
+/>
+```
+
+Without `loadImporter` the panel exports only. A browser app that imports files installs `@cedar-policy/cedar-wasm`
+4.14.0 and, where its bundler does not load WebAssembly from that package's default entry, passes a parser it has
+initialised as `cedar`.
+
+## Export
+
+- **Cedar**: every published tool policy, or one policy; for one policy with a pending draft, the draft if you choose
+  it, and a policy never published as the draft it is. Every `tool_invocation` form is carried.
+- **AGT manifest**: every published tool policy and every listed tool that can be called (a withdrawn tool, or one of
+  a status the page does not know, is left out of the catalog, so AGT refuses it as the service does; a policy that
+  still names one is reported, since a target engine may allow it). A manifest binds one policy set, so it replaces
+  whatever the host has bound there, and AGT fails a call to a tool missing from its catalog closed. Choose the AGT
+  release: 5.0 (the latest release, the default) or main.
+
+Before the file is downloaded the panel shows the **export report**: what was not exported at all, what was exported
+but is not enforced as NobleCloak enforces it, and file-wide notes (for example, that the target engine denies a call
+no statement matches). The file opens with the same report as a comment block, so it says itself what it lost. What a
+file cannot carry:
+
+- `ask` and `escalate` need an approval, which a plain Cedar engine and AGT 5.0's own dispatcher do not have; they are
+  written so the engine denies the call (fail closed), and an import reads them back as `ask` and `escalate`.
+- `on_deny`, `expires_after` and approver groups travel as annotations, which a Cedar engine does not enforce.
+- AGT names no end user, so a policy for a user, role, group or service is not exported to AGT.
+- Policies of other kinds (duplicate requests, spending) are never exported.
+- A policy whose tools the service did not state cannot be written; the report and the file name it.
+
+## Import
+
+Paste a file or choose one. The panel tells Cedar from an AGT manifest by its shape, reads it, and shows the **import
+report**, always: what was not imported, what was imported in part, and statements whose body and annotations
+disagree (a conflict: nothing of that statement is imported). Then, for each policy in the file:
+
+- **Matched or new.** A statement this converter wrote names the policy it came from. That policy, when it is among
+  the tool policies the page lists for you, is the one the import updates; otherwise the policy is saved as a new one.
+- **What it would change.** The policy is compared with the version a save would replace: the pending draft when
+  there is one, else the published version. Each difference is listed; a policy with none is left alone. When the
+  service did not say which tools that version governs, the panel says so and offers no save.
+- **Save as a draft.** Saving writes the change as a draft, never as the version in force, and records where it came
+  from (the file's format and the SHA-256 of its bytes, `origin`; for pasted text, of the text as pasted, which a
+  browser may have changed, for example in its line endings). A policy created this way is marked imported. A
+  draft is saved only over the version it was compared with; if that changed meanwhile, the save is refused.
+- **Then the usual flow.** Open the saved policy to run it as a dry run and to publish it, where publishing is
+  offered.
+
+A form the service says it does not enforce (`policy_forms` in its capabilities) is shown and not offered for saving.
+A refusal the service gives anyway is shown with its reason. Where policies cannot be authored, an import is shown,
+with its report and its changes, and nothing is saved.
+
+## Where each piece comes from
+
+`PolicyWrite.origin` and `Policy.origin` (where an imported version came from), `Policy.draft_version` (whether a
+published policy has a pending draft), `Capabilities.policy_forms` (the forms a service enforces), and the policy
+routes: `GET /v1/policies`, `GET /v1/policies/{id}/versions`, `POST /v1/policies`, `PUT /v1/policies/{id}`,
+`POST /v1/policies/{id}/simulate`, `POST /v1/policies/{id}/publish`, and `GET /v1/tools` for the catalog of an AGT
+manifest. The conversion happens in the browser; no import or export route is called.

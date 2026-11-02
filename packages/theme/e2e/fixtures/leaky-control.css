@@ -1,0 +1,50 @@
+/*
+ * The negative control of the leak and no-network tests: a stylesheet with the three leaks the design system's
+ * built CSS has (a remote font import, a preflight-style element reset, and unprefixed semantic variables on
+ * :root). House-written to reproduce them; not a copy of the design system's or Tailwind's output. Both tests
+ * must fail against it. The README records the one run against the design system's own build (0.4.0).
+ */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap');
+
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --primary: #0b57d0;
+  --border: #e5e5e5;
+  --radius: 0.5rem;
+}
+
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0 solid;
+}
+
+html {
+  line-height: 1.5;
+  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
+
+h1,
+h2 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background-color: transparent;
+  border-radius: 0;
+}

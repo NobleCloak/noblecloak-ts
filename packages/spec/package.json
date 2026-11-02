@@ -1,0 +1,64 @@
+{
+  "name": "@noblecloak/spec",
+  "version": "0.10.0",
+  "description": "The NobleCloak module API contract: the OpenAPI document, a mock server and a conformance suite.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NobleCloak/noblecloak-ts.git",
+    "directory": "packages/spec"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "bin": {
+    "nc-conform": "./dist/cli/nc-conform.js",
+    "nc-mock": "./dist/cli/nc-mock.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./openapi.public.yaml": "./dist/openapi.public.yaml",
+    "./corpus": "./corpus/arg-digest-pairs.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "corpus",
+    "fixtures",
+    "scenarios",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json && bun run build:public",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist coverage .turbo",
+    "spec:lint": "bun src/cli/lint.ts",
+    "build:public": "bun src/cli/build-public.ts",
+    "conformance:mock": "bun src/cli/conformance-mock.ts",
+    "generate:fixtures": "bun src/cli/generate-fixtures.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@noblecloak/client": "workspace:*",
+    "@rocksolidknowledge/authzen-client": "1.0.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "hono": "4.13.14",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-core": "1.24.0",
+    "@stoplight/spectral-functions": "1.11.0",
+    "@stoplight/spectral-parsers": "1.0.5",
+    "@stoplight/spectral-rulesets": "1.23.0"
+  }
+}

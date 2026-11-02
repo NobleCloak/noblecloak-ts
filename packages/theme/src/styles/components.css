@@ -1,0 +1,891 @@
+/*
+ * @noblecloak/theme primitives. Hand-written; no reset of the host page, no import, no web font.
+ *
+ * Scope: every selector starts with `.nc-root`, and every element a primitive renders carries `nc-ui` plus its
+ * own class, so nothing here reaches an element outside the root or one of @noblecloak/react's module elements.
+ *
+ * Cascade: these rules are unlayered on purpose. A host's unlayered rules beat any rule inside an `@layer`
+ * (CSS Cascade 5, "Cascade Layers": normal declarations in no layer win over those in a layer), so a layered
+ * theme would lose to a host's bare `button { ... }`. Unlayered, `.nc-root .nc-x` (two classes) outranks a
+ * host's element and single-class rules and its `* { all: unset }`. A host `!important` still wins; that is
+ * the host's call.
+ *
+ * Scoped reset: `.nc-root` sets the inherited text properties (alignment, line height, spacing, case) once,
+ * and `.nc-root .nc-ui` sets the box and resets each element to inherit them, so a hostile host (a universal
+ * `all: unset`, a preflight reset, element rules on `button` or `div`) cannot change them. The module inherits
+ * the host's font family and size on purpose (`--nc-font-sans` unset means inherit), and its visibility: the
+ * root does not set `visibility`, so a host that hides an ancestor hides the module, and `hidden` on the root
+ * hides it.
+ */
+
+.nc-root {
+  display: block;
+  box-sizing: border-box;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-align: start;
+  text-indent: 0;
+  text-transform: none;
+  white-space: normal;
+  cursor: auto;
+}
+
+/* `display: block` above would beat the browser's `[hidden] { display: none }`; the host can still hide the root. */
+.nc-root[hidden] {
+  display: none;
+}
+
+.nc-root .nc-ui {
+  /* The browser's own display for the element (block for a div, inline for a span), whatever a host set. */
+  display: revert;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0 solid var(--nc-i-border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  word-spacing: inherit;
+  text-align: inherit;
+  text-decoration: none;
+  text-indent: inherit;
+  text-shadow: none;
+  text-transform: inherit;
+  box-shadow: none;
+  opacity: 1;
+  visibility: inherit;
+  list-style: none;
+  vertical-align: baseline;
+  white-space: inherit;
+  cursor: inherit;
+  outline: none;
+  appearance: none;
+}
+
+.nc-root .nc-ui:focus-visible {
+  outline: 2px solid var(--nc-i-ring);
+  outline-offset: 2px;
+}
+
+/* Button */
+
+.nc-root .nc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-height: 2.25em;
+  padding: 0.375em 0.875em;
+  border-width: 1px;
+  border-color: var(--nc-i-accent);
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-accent);
+  color: var(--nc-i-accent-fg);
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nc-root .nc-btn[data-variant='secondary'] {
+  border-color: var(--nc-i-border);
+  background: var(--nc-i-bg);
+  color: var(--nc-i-fg);
+}
+
+.nc-root .nc-btn[data-variant='ghost'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--nc-i-fg);
+}
+
+.nc-root .nc-btn[data-variant='destructive'] {
+  border-color: var(--nc-i-danger);
+  background: var(--nc-i-danger);
+  color: var(--nc-i-danger-fg);
+}
+
+.nc-root .nc-btn[data-variant='link'] {
+  min-height: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--nc-i-accent);
+  font-weight: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.nc-root .nc-btn[data-variant='secondary']:hover:not(:disabled),
+.nc-root .nc-btn[data-variant='ghost']:hover:not(:disabled) {
+  background: var(--nc-i-subtle);
+}
+
+.nc-root .nc-btn[data-size='sm'] {
+  min-height: 1.875em;
+  padding: 0.25em 0.625em;
+  font-size: 0.875em;
+}
+
+.nc-root .nc-btn[data-size='lg'] {
+  min-height: 2.75em;
+  padding: 0.5em 1.5em;
+}
+
+.nc-root .nc-btn[data-size='icon'] {
+  width: 2.25em;
+  padding: 0;
+}
+
+.nc-root .nc-btn:disabled,
+.nc-root .nc-input:disabled,
+.nc-root .nc-textarea:disabled,
+.nc-root .nc-select:disabled,
+.nc-root .nc-checkbox:disabled,
+.nc-root .nc-switch:disabled,
+.nc-root .nc-toggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Form fields: Input, Textarea, Select, Label */
+
+.nc-root .nc-field {
+  display: grid;
+  gap: 0.375em;
+}
+
+.nc-root .nc-label {
+  display: inline-block;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.nc-root .nc-input,
+.nc-root .nc-textarea,
+.nc-root .nc-select {
+  display: block;
+  width: 100%;
+  min-height: 2.25em;
+  padding: 0.375em 0.625em;
+  border-width: 1px;
+  border-color: var(--nc-i-muted);
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-bg);
+  color: var(--nc-i-fg);
+  cursor: text;
+}
+
+.nc-root .nc-textarea {
+  min-height: 4.5em;
+  resize: vertical;
+}
+
+.nc-root .nc-input[data-variant='code'] {
+  font-family: var(--nc-i-font-mono);
+}
+
+.nc-root .nc-input::placeholder,
+.nc-root .nc-textarea::placeholder {
+  color: var(--nc-i-muted);
+  opacity: 1;
+}
+
+.nc-root .nc-input[aria-invalid='true'],
+.nc-root .nc-textarea[aria-invalid='true'],
+.nc-root .nc-select[aria-invalid='true'] {
+  border-color: var(--nc-i-danger);
+  border-width: 2px;
+}
+
+.nc-root .nc-field-error {
+  display: block;
+  color: var(--nc-i-danger);
+}
+
+.nc-root .nc-select {
+  /* The browser's own default for a select, set here so a host's `all: unset` cannot remove it. */
+  align-items: center;
+  padding-inline-end: 2em;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--nc-i-fg) 50%),
+    linear-gradient(135deg, var(--nc-i-fg) 50%, transparent 50%);
+  background-position:
+    right 1em center,
+    right 0.7em center;
+  background-size: 0.3em 0.3em;
+  background-repeat: no-repeat;
+}
+
+/* Checkbox (native input) */
+
+.nc-root .nc-checkbox {
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 1.125em;
+  height: 1.125em;
+  border-width: 2px;
+  border-color: var(--nc-i-muted);
+  border-radius: calc(var(--nc-i-radius) / 2);
+  background: var(--nc-i-bg);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.nc-root .nc-checkbox::before {
+  content: '';
+  width: 0.3em;
+  height: 0.6em;
+  border: solid var(--nc-i-accent-fg);
+  border-width: 0 0.15em 0.15em 0;
+  transform: translateY(-0.08em) rotate(45deg);
+  visibility: hidden;
+}
+
+.nc-root .nc-checkbox:checked,
+.nc-root .nc-checkbox:indeterminate {
+  border-color: var(--nc-i-accent);
+  background: var(--nc-i-accent);
+}
+
+.nc-root .nc-checkbox:checked::before {
+  visibility: visible;
+}
+
+.nc-root .nc-checkbox:indeterminate::before {
+  width: 0.6em;
+  height: 0;
+  border-width: 0 0 0.15em;
+  transform: none;
+  visibility: visible;
+}
+
+/* Switch (button role=switch) */
+
+.nc-root .nc-switch {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  width: 2.25em;
+  height: 1.25em;
+  padding: 0.125em;
+  border-width: 1px;
+  border-color: var(--nc-i-muted);
+  border-radius: 999px;
+  background: var(--nc-i-subtle);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.nc-root .nc-switch-thumb {
+  display: block;
+  width: 0.875em;
+  height: 0.875em;
+  border-radius: 999px;
+  background: var(--nc-i-muted);
+  transition: margin-inline-start 120ms ease;
+}
+
+.nc-root .nc-switch[aria-checked='true'] {
+  border-color: var(--nc-i-accent);
+  background: var(--nc-i-accent);
+}
+
+.nc-root .nc-switch[aria-checked='true'] .nc-switch-thumb {
+  background: var(--nc-i-accent-fg);
+  /* A logical offset, so the thumb moves to the inline end in right-to-left text too. */
+  margin-inline-start: 1em;
+}
+
+/* Alert */
+
+.nc-root .nc-alert {
+  display: grid;
+  gap: 0.25em;
+  padding: 0.75em 1em;
+  border-width: 1px;
+  border-inline-start-width: 6px;
+  border-color: var(--nc-i-border);
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-bg);
+  color: var(--nc-i-fg);
+}
+
+.nc-root .nc-alert[data-variant='danger'] {
+  border-color: var(--nc-i-danger);
+}
+
+.nc-root .nc-alert[data-variant='success'] {
+  border-color: var(--nc-i-success);
+}
+
+.nc-root .nc-alert[data-variant='warning'] {
+  border-color: var(--nc-i-warning);
+}
+
+.nc-root .nc-alert[data-variant='danger'][data-solid='true'] {
+  background: var(--nc-i-danger);
+  color: var(--nc-i-danger-fg);
+}
+
+.nc-root .nc-alert-title {
+  display: block;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.nc-root .nc-alert-description {
+  display: block;
+}
+
+/* Tabs: a toggle-button group (aria-pressed), the shape of the Pending/Recent switch */
+
+.nc-root .nc-toggle-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25em;
+  padding: 0.25em;
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-subtle);
+}
+
+/*
+ * A toggle is rendered by the Button slot, so it also carries `nc-btn`; this rule comes after the Button rules
+ * and takes back what `.nc-btn` sets that a toggle does not have (the fill, the minimum height, the centring and
+ * the no-wrap), so a toggle looks as it did when it was a plain button.
+ */
+.nc-root .nc-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: normal;
+  gap: normal;
+  min-height: auto;
+  padding: 0.25em 0.75em;
+  border-width: 1px;
+  border-color: transparent;
+  border-radius: var(--nc-i-radius);
+  background: none;
+  color: var(--nc-i-fg);
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: inherit;
+  cursor: pointer;
+  user-select: auto;
+}
+
+/* Selected is marked by a fill and a border, never by colour alone (forced colours: see the end of the file). */
+.nc-root .nc-toggle[aria-pressed='true'] {
+  border-color: var(--nc-i-accent);
+  background: var(--nc-i-accent);
+  color: var(--nc-i-accent-fg);
+}
+
+/* Card */
+
+.nc-root .nc-card {
+  display: block;
+  border-width: 1px;
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-surface);
+  color: var(--nc-i-fg);
+}
+
+.nc-root .nc-card-header {
+  display: grid;
+  gap: 0.25em;
+  padding: 1em 1em 0.5em;
+}
+
+.nc-root .nc-card-title {
+  display: block;
+  font-size: 1.125em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.nc-root .nc-card-description {
+  display: block;
+  color: var(--nc-i-muted);
+}
+
+.nc-root .nc-card-content {
+  display: block;
+  padding: 0.5em 1em;
+}
+
+.nc-root .nc-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.5em 1em 1em;
+}
+
+/* Badge */
+
+.nc-root .nc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625em 0.5em;
+  border-width: 1px;
+  border-color: transparent;
+  border-radius: 999px;
+  background: var(--nc-i-subtle);
+  color: var(--nc-i-fg);
+  font-size: 0.8125em;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.nc-root .nc-badge[data-variant='accent'] {
+  color: var(--nc-i-accent);
+  border-color: var(--nc-i-accent);
+}
+
+.nc-root .nc-badge[data-variant='danger'] {
+  color: var(--nc-i-danger);
+  border-color: var(--nc-i-danger);
+}
+
+.nc-root .nc-badge[data-variant='success'] {
+  color: var(--nc-i-success);
+  border-color: var(--nc-i-success);
+}
+
+.nc-root .nc-badge[data-variant='warning'] {
+  color: var(--nc-i-warning);
+  border-color: var(--nc-i-warning);
+}
+
+.nc-root .nc-badge[data-variant='outline'] {
+  border-color: var(--nc-i-border);
+  background: transparent;
+}
+
+/* Dialog (native <dialog>, opened with showModal(): a DOM descendant of the root, so no portal) */
+
+.nc-root .nc-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(32em, calc(100% - 2em));
+  /* The browser gives a dialog a max-width; a host's `all: unset` removes it, so it is set here. */
+  max-width: calc(100% - 2em);
+  max-height: calc(100% - 2em);
+  height: fit-content;
+  margin: auto;
+  padding: 1.25em;
+  overflow: auto;
+  border-width: 1px;
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-surface);
+  color: var(--nc-i-fg);
+  box-shadow: 0 0.5em 2em rgb(0 0 0 / 0.3);
+}
+
+.nc-root .nc-dialog[open] {
+  display: grid;
+  gap: 1em;
+}
+
+.nc-root .nc-dialog:not([open]) {
+  display: none;
+}
+
+.nc-root .nc-dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.nc-root .nc-dialog-header {
+  display: grid;
+  gap: 0.25em;
+}
+
+.nc-root .nc-dialog-title {
+  display: block;
+  font-size: 1.125em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.nc-root .nc-dialog-description {
+  display: block;
+  color: var(--nc-i-muted);
+}
+
+.nc-root .nc-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+/* DataTable */
+
+.nc-root .nc-table-root {
+  display: grid;
+  gap: 0.75em;
+  width: 100%;
+}
+
+.nc-root .nc-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.nc-root .nc-table-scroll {
+  display: block;
+  overflow-x: auto;
+  border-width: 1px;
+  border-radius: var(--nc-i-radius);
+}
+
+.nc-root .nc-table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.nc-root .nc-tr {
+  display: table-row;
+  border-bottom-width: 1px;
+}
+
+.nc-root .nc-tbody > .nc-tr:last-child {
+  border-bottom-width: 0;
+}
+
+.nc-root .nc-thead {
+  display: table-header-group;
+}
+
+.nc-root .nc-tbody {
+  display: table-row-group;
+}
+
+.nc-root .nc-th,
+.nc-root .nc-td {
+  display: table-cell;
+  padding: 0.5em 0.75em;
+  text-align: start;
+  vertical-align: middle;
+}
+
+.nc-root .nc-th {
+  color: var(--nc-i-muted);
+  font-weight: 600;
+}
+
+.nc-root .nc-th[data-align='right'],
+.nc-root .nc-td[data-align='right'] {
+  text-align: end;
+}
+
+.nc-root .nc-th[data-align='center'],
+.nc-root .nc-td[data-align='center'] {
+  text-align: center;
+}
+
+.nc-root .nc-th-select,
+.nc-root .nc-td-select {
+  width: 2.5em;
+}
+
+/* The sort header is rendered by the Button slot (it also carries `nc-btn`); this rule takes back the button look. */
+.nc-root .nc-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: normal;
+  gap: 0.25em;
+  min-height: auto;
+  padding: 0;
+  border-width: 0;
+  border-color: var(--nc-i-border);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  cursor: pointer;
+  user-select: auto;
+}
+
+.nc-root .nc-tbody > .nc-tr[data-clickable='true'] {
+  cursor: pointer;
+}
+
+.nc-root .nc-tbody > .nc-tr:hover,
+.nc-root .nc-tbody > .nc-tr[data-selected='true'] {
+  background: var(--nc-i-subtle);
+}
+
+.nc-root .nc-tr:focus-visible {
+  outline-offset: -2px;
+}
+
+.nc-root .nc-table-empty {
+  display: block;
+  padding: 1em 0;
+  color: var(--nc-i-muted);
+  text-align: center;
+}
+
+/* Pagination */
+
+.nc-root .nc-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+.nc-root .nc-pagination-label {
+  display: inline-block;
+  margin-inline-end: 0.5em;
+  color: var(--nc-i-muted);
+}
+
+/* EmptyState */
+
+.nc-root .nc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+  padding: 2.5em 1em;
+  text-align: center;
+}
+
+.nc-root .nc-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3em;
+  height: 3em;
+  border-radius: 999px;
+  background: var(--nc-i-subtle);
+  color: var(--nc-i-muted);
+}
+
+.nc-root .nc-empty-title {
+  display: block;
+  font-size: 1.125em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.nc-root .nc-empty-description {
+  display: block;
+  max-width: 28em;
+  color: var(--nc-i-muted);
+}
+
+.nc-root .nc-empty-action {
+  display: block;
+  margin-top: 0.5em;
+}
+
+/* Skeleton and Spinner */
+
+.nc-root .nc-skeleton {
+  display: block;
+  min-height: 1em;
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-subtle);
+  animation: nc-pulse 1.5s ease-in-out infinite;
+}
+
+.nc-root .nc-spinner {
+  display: inline-block;
+  flex: none;
+  width: 1.5em;
+  height: 1.5em;
+  border-width: 0.1875em;
+  border-color: var(--nc-i-subtle);
+  border-top-color: var(--nc-i-accent);
+  border-radius: 999px;
+  vertical-align: middle;
+  animation: nc-spin 0.8s linear infinite;
+}
+
+.nc-root .nc-spinner[data-size='sm'] {
+  width: 1em;
+  height: 1em;
+  border-width: 0.125em;
+}
+
+.nc-root .nc-spinner[data-size='lg'] {
+  width: 2em;
+  height: 2em;
+}
+
+.nc-root .nc-btn .nc-spinner {
+  width: 1em;
+  height: 1em;
+  border-width: 0.125em;
+  border-color: currentColor;
+  border-top-color: transparent;
+}
+
+@keyframes nc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes nc-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nc-root .nc-skeleton,
+  .nc-root .nc-spinner {
+    animation-duration: 0s;
+    animation-iteration-count: 1;
+  }
+
+  .nc-root .nc-switch-thumb {
+    transition: none;
+  }
+}
+
+/* Tooltip (rendered beside its trigger, inside the root: no portal) */
+
+.nc-root .nc-tooltip-anchor {
+  display: inline-block;
+  position: relative;
+}
+
+.nc-root .nc-tooltip {
+  display: block;
+  position: absolute;
+  bottom: calc(100% + 0.375em);
+  left: 50%;
+  z-index: 1;
+  width: max-content;
+  max-width: 20em;
+  padding: 0.25em 0.5em;
+  border-width: 1px;
+  border-radius: var(--nc-i-radius);
+  background: var(--nc-i-surface);
+  color: var(--nc-i-fg);
+  font-size: 0.875em;
+  line-height: 1.25;
+  transform: translateX(-50%);
+}
+
+/* A transparent bridge over the gap below the tip, so the pointer can move from the trigger onto the tip. */
+.nc-root .nc-tooltip::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 0.5em;
+}
+
+.nc-root .nc-tooltip[hidden] {
+  display: none;
+}
+
+/* Avatar */
+
+.nc-root .nc-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.5em;
+  height: 2.5em;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--nc-i-subtle);
+  color: var(--nc-i-fg);
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.nc-root .nc-avatar-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Separator */
+
+.nc-root .nc-separator {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: 1px;
+  background: var(--nc-i-border);
+}
+
+.nc-root .nc-separator[data-orientation='vertical'] {
+  width: 1px;
+  height: auto;
+  align-self: stretch;
+}
+
+/* Hiding */
+
+/*
+ * Every primitive sets its own display, which would beat the browser's `[hidden] { display: none }`; this rule
+ * (more specific than any of them) keeps the `hidden` attribute working. `hidden="until-found"` is left to the
+ * browser, which keeps the box and hides its content.
+ */
+.nc-root .nc-ui[hidden]:not([hidden='until-found']) {
+  display: none;
+}
+
+/* Forced colours */
+
+/*
+ * Forced colours (Windows High Contrast) replace backgrounds and border colours with the system's, which would
+ * draw a switch's on and off, and a selected and unselected tab, alike. These states keep their own system
+ * colours: the selected or on state in Highlight, the thumb in CanvasText (HighlightText when on).
+ */
+@media (forced-colors: active) {
+  .nc-root .nc-switch {
+    forced-color-adjust: none;
+    border-color: CanvasText;
+    background: Canvas;
+  }
+
+  .nc-root .nc-switch-thumb {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+
+  .nc-root .nc-switch[aria-checked='true'] {
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .nc-root .nc-switch[aria-checked='true'] .nc-switch-thumb {
+    background: HighlightText;
+  }
+
+  .nc-root .nc-toggle[aria-pressed='true'] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+}

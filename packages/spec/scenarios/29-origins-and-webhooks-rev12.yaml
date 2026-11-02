@@ -1,0 +1,477 @@
+# Rev 12: registered browser origins govern CORS, and a webhook delivery is a signed CloudEvent.
+# Registering origins and managing webhooks are an administrator's, so these scenarios need `admin`.
+# The delivery scenarios read the mock's outbox through a control step: a deployment under test offers no
+# such read, so they are skipped there (an `unconfigured` skip), while the routes they use are covered by
+# `routes-webhooks` and the scenarios in 08-routes.yaml.
+- id: origins-preflight-any-registered
+  title: A preflight from an origin any organisation registered is answered with that origin, and reveals nothing about who registered it
+  tags: [both]
+  requires: origins
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com'] }
+      expect: { status: 200 }
+    - name: the preflight carries no token
+      as: none
+      request:
+        method: OPTIONS
+        path: /v1/approvals
+        headers:
+          Origin: 'https://app.${uniq}.example.com'
+          Access-Control-Request-Method: GET
+      expect:
+        status: [200, 204]
+        undocumented: true
+        headers:
+          - { name: Access-Control-Allow-Origin, matches: '^https://app\.${uniq}\.example\.com$' }
+          - { name: Vary, matches: 'Origin' }
+    - name: an origin nobody registered is not answered with itself
+      as: none
+      request:
+        method: OPTIONS
+        path: /v1/approvals
+        headers:
+          Origin: 'https://nobody.${uniq}.example.com'
+          Access-Control-Request-Method: GET
+      expect:
+        status: [200, 204, 401, 403, 404]
+        undocumented: true
+        headers:
+          - { name: Access-Control-Allow-Origin, exists: false }
+    - name: leave no origin registered
+      as: admin
+      request: { method: PUT, path: /v1/origins, body: { origins: [] } }
+      expect: { status: 200 }
+- id: origins-actual-request-org-checked
+  title: An actual request is checked against the caller's organisation, not the union a preflight is answered against
+  tags: [both, negative]
+  requires: origins
+  needs: [admin, other_org]
+  steps:
+    - as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com'] }
+      expect: { status: 200 }
+    - name: the registering organisation is served and told the origin
+      as: admin
+      request:
+        method: GET
+        path: /v1/origins
+        headers: { Origin: 'https://app.${uniq}.example.com' }
+      expect:
+        status: 200
+        headers:
+          - { name: Access-Control-Allow-Origin, matches: '^https://app\.${uniq}\.example\.com$' }
+    - name: another organisation, with an origin only the first registered, is refused
+      as: other_org
+      request:
+        method: GET
+        path: /v1/origins
+        headers: { Origin: 'https://app.${uniq}.example.com' }
+      expect:
+        status: 403
+        problem: forbidden
+        headers:
+          - { name: Access-Control-Allow-Origin, exists: false }
+    - name: the same request without an Origin is served
+      as: other_org
+      request: { method: GET, path: /v1/origins }
+      expect: { status: 200 }
+    - name: leave no origin registered
+      as: admin
+      request: { method: PUT, path: /v1/origins, body: { origins: [] } }
+      expect: { status: 200 }
+- id: origins-must-be-exact
+  title: A registered origin is exact; one with a trailing slash, a path, a wildcard or a plain http scheme is refused, never normalised
+  tags: [both, negative]
+  requires: origins
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://keep.${uniq}.example.com'] }
+      expect: { status: 200 }
+    - name: a trailing slash
+      as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com/'] }
+      expect: { status: 400, problem: invalid_request }
+    - name: a path
+      as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com/app'] }
+      expect: { status: 400, problem: invalid_request }
+    - name: a wildcard
+      as: admin
+      request: { method: PUT, path: /v1/origins, body: { origins: ['https://*.example.com'] } }
+      expect: { status: 400, problem: invalid_request }
+    - name: http on a host that is not local
+      as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['http://app.${uniq}.example.com'] }
+      expect: { status: 400, problem: invalid_request }
+    - name: a default port
+      as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com:443'] }
+      expect: { status: 400, problem: invalid_request }
+    - name: an upper-case host
+      as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://APP.${uniq}.example.com'] }
+      expect: { status: 400, problem: invalid_request }
+    - name: one inexact origin refuses the whole write, and the set is unchanged
+      as: admin
+      request: { method: GET, path: /v1/origins }
+      expect:
+        status: 200
+        body:
+          - { path: data.origins, equals: ['https://keep.${uniq}.example.com'] }
+    - name: the exact forms are accepted, http for localhost included
+      as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com:8443', 'http://localhost:3000'] }
+      expect:
+        status: 200
+        body:
+          - {
+              path: data.origins,
+              equals: ['https://app.${uniq}.example.com:8443', 'http://localhost:3000'],
+            }
+    - name: leave no origin registered
+      as: admin
+      request: { method: PUT, path: /v1/origins, body: { origins: [] } }
+      expect: { status: 200 }
+- id: origins-and-webhooks-administrators-only
+  title: Registering origins and creating, listing and deleting webhooks are an administrator's; an organisation's other principals read origins
+  tags: [both, negative]
+  requires: [origins, webhooks]
+  needs: [admin]
+  steps:
+    - name: a service principal cannot register origins
+      as: creator
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://nope.${uniq}.example.com'] }
+      expect: { status: 403, problem: forbidden }
+    - name: a service principal cannot create a webhook
+      as: creator
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/adm/${uniq}', events: [record.appended] }
+      expect: { status: 403, problem: forbidden }
+    - name: an administrator can
+      as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/adm/${uniq}', events: [record.appended] }
+      expect: { status: 201 }
+      save: { webhook_id: data.id }
+    - name: a service principal cannot list or delete it
+      as: creator
+      request: { method: GET, path: /v1/webhooks }
+      expect: { status: 403, problem: forbidden }
+    - as: creator
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 403, problem: forbidden }
+    - as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }
+- id: webhook-delivery-signed
+  title: A delivery is a CloudEvent signed with the Resumption scheme; the signature verifies against the key set and covers data
+  tags: [both, negative, resumption]
+  requires: [webhooks, approvals]
+  needs: [admin, approver]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:wh:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: write,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/sig/${uniq}', events: [approval.resolved] }
+      expect: { status: 201 }
+      save: { webhook_id: data.id, webhook_url: data.url }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wh:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: openai_agents, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - name: read the delivery the deployment owes the webhook
+      control: { deliveries: { webhook_id: '${webhook_id}', url: '${webhook_url}' } }
+      save: { deliveries: deliveries }
+      expect_body:
+        - { path: deliveries, length: 1 }
+        - { path: deliveries.0.type, equals: approval.resolved }
+        - { path: deliveries.0.subject, equals: '${approval_id}' }
+        - { path: deliveries.0.specversion, equals: '1.0' }
+        - { path: deliveries.0.data.approval_id, equals: '${approval_id}' }
+        - { path: deliveries.0.data.state, equals: approved }
+    - as: none
+      request: { method: GET, path: /.well-known/jwks.json }
+      expect: { status: 200 }
+      save: { jwks: '$' }
+    - name: the genuine delivery verifies and its signed payload is the object it travels with
+      verify:
+        kind: webhook_delivery
+        object: '${deliveries.0}'
+        jwks: '${jwks}'
+        result: valid
+    - name: a tampered data fails
+      verify:
+        kind: webhook_delivery
+        object: '${deliveries.0}'
+        jwks: '${jwks}'
+        tamper: data
+        result: bad_signature
+    - as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }
+- id: webhook-delivery-thin
+  title: Every event is thin - data holds exactly its members, names the resource and never carries arguments
+  tags: [hosted, negative]
+  only: hosted
+  requires: [webhooks, approvals, policies]
+  needs: [admin, approver]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:wt:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: write,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body:
+          {
+            url: '${callback_base_url}/thin/${uniq}',
+            events: [approval.resolved, record.appended, policy.published],
+          }
+      expect: { status: 201 }
+      save: { webhook_id: data.id, webhook_url: data.url }
+    - name: an approval resolves
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wt:${uniq}', arguments: { secret_value: 'do-not-leak-${uniq}' } }
+          continuation: { kind: openai_agents, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: rejected, expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - name: a record is appended
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ext:wt:${uniq}', decision: allow, prompt_id: 'pr-${uniq}' }
+      expect: { status: 201 }
+      save: { record_id: data.id }
+    - name: a policy is published
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          name: 'thin ${uniq}'
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:wt:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - name: the three deliveries are thin
+      control: { deliveries: { webhook_id: '${webhook_id}', url: '${webhook_url}' } }
+      expect_body:
+        - { path: deliveries, length: 3 }
+        - { path: deliveries, contains_where: { key: type, equals: approval.resolved } }
+        - { path: deliveries, contains_where: { key: type, equals: record.appended } }
+        - { path: deliveries, contains_where: { key: type, equals: policy.published } }
+        - { path: deliveries, contains_where: { key: subject, equals: '${approval_id}' } }
+        - { path: deliveries, contains_where: { key: subject, equals: '${record_id}' } }
+        - { path: deliveries, contains_where: { key: subject, equals: '${policy_id}' } }
+        - {
+            path: deliveries,
+            contains_members: { type: approval.resolved, 'data.approval_id': '${approval_id}' },
+          }
+        - {
+            path: deliveries,
+            contains_members: { type: record.appended, 'data.record_id': '${record_id}' },
+          }
+        - {
+            path: deliveries,
+            contains_members: { type: policy.published, 'data.policy_id': '${policy_id}' },
+          }
+        - {
+            path: deliveries.0,
+            keys_exactly:
+              [specversion, id, type, source, subject, time, datacontenttype, data, signature],
+          }
+        - { path: deliveries.0.type, equals: approval.resolved }
+        - {
+            path: deliveries.0.data,
+            keys_exactly: [approval_id, state, resolution, resolved_at, tool_ref],
+          }
+        - {
+            path: deliveries.1,
+            keys_exactly:
+              [specversion, id, type, source, subject, time, datacontenttype, data, signature],
+          }
+        - { path: deliveries.1.type, equals: record.appended }
+        - { path: deliveries.1.data, keys_exactly: [record_id, tool_ref, decision, ts] }
+        - {
+            path: deliveries.2,
+            keys_exactly:
+              [specversion, id, type, source, subject, time, datacontenttype, data, signature],
+          }
+        - { path: deliveries.2.type, equals: policy.published }
+        - { path: deliveries.2.data, keys_exactly: [policy_id, kind, version, published_at] }
+        - { path: deliveries, lacks_key: arguments }
+        - { path: deliveries, lacks_key: secret_value }
+        - { path: deliveries, lacks_key: prompt_id }
+    - as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }
+- id: webhook-disabled-gets-nothing
+  title: A disabled webhook reads as disabled and gets no deliveries
+  tags: [both, negative]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/off/${uniq}', events: [record.appended] }
+      expect:
+        status: 201
+        body:
+          - { path: data.state, equals: active }
+      save: { webhook_id: data.id, webhook_url: data.url }
+    - name: the deployment disables it
+      control: { disable_webhook: '${webhook_id}' }
+    - as: admin
+      request: { method: GET, path: /v1/webhooks }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_members: { id: '${webhook_id}', state: disabled } }
+    - name: an event it subscribes to happens
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ext:off:${uniq}', decision: allow }
+      expect: { status: 201 }
+    - name: nothing is owed to it
+      control: { deliveries: { webhook_id: '${webhook_id}', url: '${webhook_url}' } }
+      expect_body:
+        - { path: deliveries, length: 0 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }
+- id: webhook-delivery-org-scoped
+  title: A webhook is owed the events of its own organisation and none of another's
+  tags: [hosted, negative]
+  only: hosted
+  requires: [webhooks]
+  needs: [admin, other_org]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/scoped/${uniq}', events: [record.appended] }
+      expect: { status: 201 }
+      save: { webhook_id: data.id, webhook_url: data.url }
+    - name: another organisation appends a record
+      as: other_org
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ext:scoped:other:${uniq}', decision: allow }
+      expect: { status: 201 }
+      save: { other_record_id: data.id }
+    - name: nothing about it is owed to this organisation's webhook
+      control: { deliveries: { webhook_id: '${webhook_id}', url: '${webhook_url}' } }
+      expect_body:
+        - { path: deliveries, length: 0 }
+        - { path: deliveries, lacks_where: { key: subject, equals: '${other_record_id}' } }
+    - name: this organisation appends a record
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ext:scoped:own:${uniq}', decision: allow }
+      expect: { status: 201 }
+      save: { own_record_id: data.id }
+    - name: exactly one delivery is owed, for its own record
+      control: { deliveries: { webhook_id: '${webhook_id}', url: '${webhook_url}' } }
+      expect_body:
+        - { path: deliveries, length: 1 }
+        - { path: deliveries.0.subject, equals: '${own_record_id}' }
+    - as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }

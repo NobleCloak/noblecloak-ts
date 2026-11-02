@@ -1,0 +1,18 @@
+/*
+ * Opt-in brand fonts for @noblecloak/theme: import `@noblecloak/theme/fonts.css` beside `index.css` only if you
+ * want them. This file is the one stylesheet in the package that makes a network request: it loads Space
+ * Grotesk and JetBrains Mono (SIL Open Font License 1.1) from Google Fonts, which needs `fonts.googleapis.com`
+ * in the page's `style-src` and `fonts.gstatic.com` in its `font-src`. To self-host instead, skip this file and
+ * set --nc-font-sans and --nc-font-mono to your own families (set with this file loaded, they win too).
+ */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap');
+
+/*
+ * The brand families are fallbacks inside var(), so a --nc-font-sans or --nc-font-mono the host sets on an
+ * ancestor or on the root still wins. The doubled class outranks tokens.css's `.nc-root` rule whichever file
+ * loads first.
+ */
+.nc-root.nc-root {
+  font-family: var(--nc-font-sans, 'Space Grotesk', ui-sans-serif, system-ui, sans-serif);
+  --nc-i-font-mono: var(--nc-font-mono, 'JetBrains Mono', ui-monospace, monospace);
+}

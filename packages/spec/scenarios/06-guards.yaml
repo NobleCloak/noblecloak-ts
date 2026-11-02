@@ -1,0 +1,59 @@
+- id: idempotency-records
+  title: A replayed POST /v1/records with the same Idempotency-Key returns the original id and appends nothing
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'rec-${uniq}' }
+        body: { tool_ref: 'rec:${uniq}', decision: allow, prompt_id: 'p-${uniq}' }
+      expect: { status: 201 }
+      save: { first: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'rec-${uniq}' }
+        body: { tool_ref: 'rec:${uniq}', decision: allow, prompt_id: 'p-${uniq}' }
+      expect:
+        status: 201
+        body:
+          - { path: data.id, equals: '${first}' }
+    - name: nothing was appended twice
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=rec:${uniq}&limit=200' }
+      expect: { status: 200, body: [{ path: data, length: 1 }] }
+    - name: the same key with a different body is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'rec-${uniq}' }
+        body: { tool_ref: 'rec:${uniq}', decision: deny, prompt_id: 'q-${uniq}' }
+      expect: { status: 422, problem: idempotency_key_reuse }
+- id: idempotency-appends-once
+  title: A replay appends exactly one record
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'once-${uniq}' }
+        body: { tool_ref: 'rec:${uniq}', decision: allow, prompt_id: 'once-${uniq}' }
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'once-${uniq}' }
+        body: { tool_ref: 'rec:${uniq}', decision: allow, prompt_id: 'once-${uniq}' }
+      expect: { status: 201 }
+    - name: count the records carrying this prompt
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=rec:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }

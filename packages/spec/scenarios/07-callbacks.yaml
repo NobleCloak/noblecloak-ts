@@ -1,0 +1,563 @@
+- id: callback-unroutable-loopback
+  title: A callback_url of https://127.0.0.1/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-loopback ${uniq}' } }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://127.0.0.1/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://127.0.0.1/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-loopback-webhooks
+  title: A callback_url of https://127.0.0.1/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://127.0.0.1/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-metadata
+  title: A callback_url of https://169.254.169.254/latest/meta-data is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-metadata ${uniq}' } }
+          continuation:
+            {
+              kind: webhook,
+              delivery: push,
+              callback_url: 'https://169.254.169.254/latest/meta-data',
+            }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            {
+              kind: webhook,
+              delivery: push,
+              callback_url: 'https://169.254.169.254/latest/meta-data',
+            }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-metadata-webhooks
+  title: A callback_url of https://169.254.169.254/latest/meta-data is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://169.254.169.254/latest/meta-data', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-rfc1918
+  title: A callback_url of https://10.0.0.1/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-rfc1918 ${uniq}' } }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://10.0.0.1/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://10.0.0.1/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-rfc1918-webhooks
+  title: A callback_url of https://10.0.0.1/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://10.0.0.1/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-hostname-resolving-to-loopback
+  title: A callback_url of https://localtest.me/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            {
+              tool_ref: '${proxied_tool}',
+              arguments: { title: 'ssrf-hostname-resolving-to-loopback ${uniq}' },
+            }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://localtest.me/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://localtest.me/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-hostname-resolving-to-loopback-webhooks
+  title: A callback_url of https://localtest.me/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://localtest.me/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-hostname-embedding-metadata-ip
+  title: A callback_url of https://169.254.169.254.nip.io/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            {
+              tool_ref: '${proxied_tool}',
+              arguments: { title: 'ssrf-hostname-embedding-metadata-ip ${uniq}' },
+            }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://169.254.169.254.nip.io/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://169.254.169.254.nip.io/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-hostname-embedding-metadata-ip-webhooks
+  title: A callback_url of https://169.254.169.254.nip.io/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://169.254.169.254.nip.io/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-ipv6-loopback
+  title: A callback_url of https://[::1]/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-ipv6-loopback ${uniq}' } }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://[::1]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://[::1]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-ipv6-loopback-webhooks
+  title: A callback_url of https://[::1]/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://[::1]/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-localhost-name
+  title: A callback_url of https://localhost/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-localhost-name ${uniq}' } }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://localhost/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://localhost/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-localhost-name-webhooks
+  title: A callback_url of https://localhost/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://localhost/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-ipv4-mapped-loopback
+  title: A callback_url of https://[::ffff:7f00:1]/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            {
+              tool_ref: '${proxied_tool}',
+              arguments: { title: 'ssrf-ipv4-mapped-loopback ${uniq}' },
+            }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://[::ffff:7f00:1]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://[::ffff:7f00:1]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-ipv4-mapped-loopback-webhooks
+  title: A callback_url of https://[::ffff:7f00:1]/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://[::ffff:7f00:1]/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-ipv4-mapped-metadata
+  title: A callback_url of https://[::ffff:a9fe:a9fe]/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            {
+              tool_ref: '${proxied_tool}',
+              arguments: { title: 'ssrf-ipv4-mapped-metadata ${uniq}' },
+            }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://[::ffff:a9fe:a9fe]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://[::ffff:a9fe:a9fe]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-ipv4-mapped-metadata-webhooks
+  title: A callback_url of https://[::ffff:a9fe:a9fe]/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://[::ffff:a9fe:a9fe]/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-trailing-dot-localhost
+  title: A callback_url of https://localhost./hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            {
+              tool_ref: '${proxied_tool}',
+              arguments: { title: 'ssrf-trailing-dot-localhost ${uniq}' },
+            }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://localhost./hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://localhost./hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-trailing-dot-localhost-webhooks
+  title: A callback_url of https://localhost./hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://localhost./hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-nat64-metadata
+  title: A callback_url of https://[64:ff9b::a9fe:a9fe]/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-nat64-metadata ${uniq}' } }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://[64:ff9b::a9fe:a9fe]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://[64:ff9b::a9fe:a9fe]/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-nat64-metadata-webhooks
+  title: A callback_url of https://[64:ff9b::a9fe:a9fe]/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://[64:ff9b::a9fe:a9fe]/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-dashed-hostname-embedding-loopback
+  title: A callback_url of https://127-0-0-1.nip.io/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            {
+              tool_ref: '${proxied_tool}',
+              arguments: { title: 'ssrf-dashed-hostname-embedding-loopback ${uniq}' },
+            }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://127-0-0-1.nip.io/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://127-0-0-1.nip.io/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-dashed-hostname-embedding-loopback-webhooks
+  title: A callback_url of https://127-0-0-1.nip.io/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://127-0-0-1.nip.io/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-public-accepted
+  title: A public https callback is accepted by /v1/continuations/test and the guard follows no special-casing of https
+  tags: [both, ssrf]
+  requires: approvals
+  serves_delivery: push
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: '${callback_base_url}/noblecloak' }
+      expect:
+        status: 200
+        body:
+          - { path: data.valid, equals: true }
+    - name: plain http is refused by the schema
+      as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'http://hooks.example.com/noblecloak' }
+      expect: { status: 400 }
+    - name: a push continuation needs a callback_url
+      as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push }
+      expect: { status: 400, problem: invalid_request }
+- id: callback-unroutable-decimal-ip
+  title: A callback_url of https://2130706433/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-decimal ${uniq}' } }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://2130706433/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://2130706433/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-decimal-ip-webhooks
+  title: A callback_url of https://2130706433/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://2130706433/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-userinfo-masking-loopback
+  title: A callback_url of https://example.com@127.0.0.1/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-userinfo ${uniq}' } }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://example.com@127.0.0.1/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation:
+            { kind: webhook, delivery: push, callback_url: 'https://example.com@127.0.0.1/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-userinfo-masking-loopback-webhooks
+  title: A callback_url of https://example.com@127.0.0.1/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://example.com@127.0.0.1/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-single-label-host
+  title: A callback_url of https://intranet/hook is 400 callback_unroutable on POST /v1/approvals and POST /v1/continuations/test
+  tags: [both, negative, ssrf]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ssrf-single-label ${uniq}' } }
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://intranet/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body:
+          continuation: { kind: webhook, delivery: push, callback_url: 'https://intranet/hook' }
+      expect: { status: 400, problem: callback_unroutable }
+- id: callback-unroutable-single-label-host-webhooks
+  title: A callback_url of https://intranet/hook is 400 callback_unroutable on POST /v1/webhooks
+  tags: [both, negative, ssrf]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: 'https://intranet/hook', events: [approval.resolved] }
+      expect: { status: 400, problem: callback_unroutable }

@@ -1,0 +1,92 @@
+{
+  "version": "1.0.0",
+  "description": "Test vectors for the argument digest: sha256 of the RFC 8785 canonical form of the arguments as sent. Derived by vendoring; do not hand-edit.",
+  "arg_digest": "lowercase_hex(SHA-256(UTF8(JCS(arguments_as_sent))))",
+  "pairs": [
+    {
+      "id": "args-01",
+      "arguments_json": "{\"name\":\"Zo\\u00eb\"}",
+      "arg_digest": "6bd0ee7972d372ec1f8a3cc44302e5449751305d73c2b69b5a79c62f88a4ca77"
+    },
+    {
+      "id": "args-02",
+      "arguments_json": "{\"name\":\"Zoe\\u0308\"}",
+      "arg_digest": "9fb3189e040f5e12ee47144344bfe1f0ec301e5e6f1ae43238a8b5d2d5a733b4"
+    },
+    {
+      "id": "args-03",
+      "arguments_json": "{\"amount\":1000,\"currency\":\"USD\",\"to\":\"acct_42\"}",
+      "arg_digest": "030a387060bbcef91fa0ddc9f346d262b587e8e4e35b2e81e461829b28f151b3"
+    },
+    {
+      "id": "args-04",
+      "arguments_json": "{ \"to\": \"acct_42\", \"currency\": \"USD\", \"amount\": 1000 }",
+      "arg_digest": "030a387060bbcef91fa0ddc9f346d262b587e8e4e35b2e81e461829b28f151b3"
+    },
+    {
+      "id": "args-05",
+      "arguments_json": "{\"amount\":1000.0,\"currency\":\"USD\",\"to\":\"acct_42\"}",
+      "arg_digest": "030a387060bbcef91fa0ddc9f346d262b587e8e4e35b2e81e461829b28f151b3"
+    },
+    {
+      "id": "args-06",
+      "arguments_json": "{\"amount\":1000.01,\"currency\":\"USD\",\"to\":\"acct_42\"}",
+      "arg_digest": "c0d93c8705a56ac8a3a25fcb55109c42e2563132e0e8d56a3d06345786fc2728"
+    },
+    {
+      "id": "args-07",
+      "arguments_json": "{}",
+      "arg_digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "id": "args-08",
+      "arguments_json": "{\"cursor\":null}",
+      "arg_digest": "3c9044d681238bb3549d10390d62469b5ccbb6f4c8d1afb3d118d19ed776e7ea"
+    },
+    {
+      "id": "args-09",
+      "arguments_json": "{\"title\":\"Checkout 500s\",\"labels\":[\"bug\",\"p1\"],\"body\":\"line 1\\nline 2\"}",
+      "arg_digest": "191af1bd5dd5feff942278034e7a45b19603c8f62bda82b902089a44832e6877"
+    },
+    {
+      "id": "args-10",
+      "arguments_json": "{\"command\":\"ls -la\",\"timeout\":120000,\"description\":\"List files\"}",
+      "arg_digest": "26c226e7a3c78de16e1243451a7f6e0f7fd3983f67dd21a1be3418417d3e0b6d"
+    },
+    {
+      "id": "args-11",
+      "arguments_json": "{\"teamId\":\"ENG\",\"title\":\"Z\\u00fcrich office\"}",
+      "arg_digest": "408174e563a8a75ed1dc25ce98f0b34aa563122dc2c39383f373320f04ec803f"
+    },
+    {
+      "id": "args-12",
+      "arguments_json": "{\"to\":[\"a@example.com\"],\"subject\":\"a::b\"}",
+      "arg_digest": "3bae97a563d46ea3f0dc3e65d2337a7ba3a70922014d15adf03969646412f68d"
+    },
+    {
+      "id": "args-13",
+      "arguments_json": "{\"quantity\":5,\"unit_price\":19.99}",
+      "arg_digest": "4c9da209467d2f71dc21755b872231e43b59a3f2a4ac2be2e8cfa7109b7c7ba3"
+    },
+    {
+      "id": "args-14",
+      "arguments_json": "{\"q\":\"x\"}",
+      "arg_digest": "a69fbbcf7209c6f659a75067c9fa03037c2ae23f55a6f854d5994209129bbbf6"
+    },
+    {
+      "id": "args-15",
+      "arguments_json": "{\"one\":1.0,\"rate\":0.1,\"sum\":0.30000000000000004,\"tiny\":1e-7,\"neg_zero\":-0.0,\"max_safe\":9007199254740991,\"min_safe\":-9007199254740991}",
+      "arg_digest": "2ef6f0b00f7082fa11a9b9ff0ec91edbb9fa8e92d51c0b0dbac19fe1b0842adf"
+    },
+    {
+      "id": "args-16",
+      "arguments_json": "{\"\\ufb33\":\"dalet\",\"\\ud83d\\ude00\":\"grin\",\"a\":\"ascii\"}",
+      "arg_digest": "b0a9dd41569205893fd3f8021bf018eaad1e9f1837b2135fcb2e45188b0ab440"
+    },
+    {
+      "id": "args-17",
+      "arguments_json": "{\"lines\":[{\"sku\":\"B-2\",\"qty\":2,\"meta\":{\"z\":true,\"a\":[null,{\"y\":1,\"x\":[]}]}},{\"sku\":\"A-1\",\"qty\":1}],\"customer\":{\"name\":\"Ren\\u00e9e\",\"tags\":[]}}",
+      "arg_digest": "7b0e256a3ca00adf079105205dc08a22d8c67007d107a14fa57d938142f98225"
+    }
+  ]
+}

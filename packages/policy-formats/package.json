@@ -1,0 +1,59 @@
+{
+  "name": "@noblecloak/policy-formats",
+  "version": "0.1.4",
+  "description": "Converts NobleCloak tool policies to and from Cedar and AGT (ACS manifest with a Cedar policy set), with a report of everything a format cannot carry.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NobleCloak/noblecloak-ts.git",
+    "directory": "packages/policy-formats"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./import": {
+      "types": "./dist/import.d.ts",
+      "import": "./dist/import.js"
+    },
+    "./schemas/noblecloak.cedarschema": "./schemas/noblecloak.cedarschema",
+    "./schemas/agt.cedarschema": "./schemas/agt.cedarschema"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json && bun tools/assert-dist.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist coverage .turbo"
+  },
+  "dependencies": {
+    "@noblecloak/client": "workspace:*",
+    "canonicalize": "5.1.0",
+    "yaml": "2.9.1"
+  },
+  "peerDependencies": {
+    "@cedar-policy/cedar-wasm": "4.14.0"
+  },
+  "peerDependenciesMeta": {
+    "@cedar-policy/cedar-wasm": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@cedar-policy/cedar-wasm": "4.14.0",
+    "ajv": "8.20.0"
+  }
+}

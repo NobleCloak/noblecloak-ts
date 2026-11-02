@@ -1,0 +1,38 @@
+{
+  "name": "@noblecloak/cards",
+  "version": "0.1.0",
+  "description": "One approval card model, built from a NobleCloak approval read and rendered to Slack Block Kit and Adaptive Cards, with the click payload helpers.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NobleCloak/noblecloak-ts.git",
+    "directory": "packages/cards"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist coverage .turbo"
+  },
+  "dependencies": {
+    "@noblecloak/client": "workspace:*"
+  }
+}

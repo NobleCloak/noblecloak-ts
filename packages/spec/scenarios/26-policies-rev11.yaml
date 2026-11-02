@@ -1,0 +1,634 @@
+# Rev 11: policies. The pending draft's version, retiring and discarding, simulating as a subject, the
+# tightest-wins rule and where an imported policy came from. Authoring needs an administrator, so every
+# scenario here needs it, and each registers its own organisation-owned tool so that its policies meet no
+# other policy's (tool, subject) pair. A scenario that needs a role the administrator holds names it with the
+# `admin_role` fixture (`nc-conform --admin-role`); without it the scenario is skipped as unconfigured. Each
+# names the subject types its drafts use in `serves_policy_subject_type`, so a deployment whose `policy_forms`
+# does not list one skips it by capability rather than refusing a draft it may refuse.
+- id: policy-draft-version-names-the-pending-draft
+  title: A published policy with a pending draft names the draft's version in draft_version, on the read and on its list row, and not once the draft is published
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  needs: [admin]
+  steps:
+    - name: register the tool the policy governs
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:dv:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:dv:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201, body: [{ path: data.draft_version, exists: false }] }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200, body: [{ path: data.draft_version, exists: false }] }
+    - name: a write after the publish is the pending draft
+      as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:dv:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 200 }
+      save: { draft: data.version }
+    - name: the read names it
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: published }
+          - { path: data.draft_version, equals: '${draft}' }
+    - name: so does its row of the list
+      as: admin
+      request: { method: GET, path: '/v1/policies?tool=ext:dv:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - path: data
+            contains_members: { id: '${policy_id}', draft_version: '${draft}' }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - name: published, there is no pending draft
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect: { status: 200, body: [{ path: data.draft_version, exists: false }] }
+- id: policy-retire-and-discard
+  title: Where a hosted deployment advertises policies.retire, an administrator retires a published policy and discards drafts, and a policy never published is not retired
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  features: [policies.retire]
+  serves_policy_subject_type: role
+  needs: [admin]
+  fixtures: [admin_role]
+  steps:
+    - name: register the tool the policies govern
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rt:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:rt:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { retired_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${retired_id}/publish' }
+      expect: { status: 200 }
+      save: { retired_version: data.version }
+    - name: an administrator retires it
+      as: admin
+      request: { method: POST, path: '/v1/policies/${retired_id}/retire' }
+      expect: { status: 200, body: [{ path: data.retired_at, exists: true }] }
+    - name: a retired policy is not read
+      as: admin
+      request: { method: GET, path: '/v1/policies/${retired_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: nor listed
+      as: admin
+      request: { method: GET, path: '/v1/policies?tool=ext:rt:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${retired_id}' } }
+    - name: its versions stay, each saying when it was retired
+      as: admin
+      request: { method: GET, path: '/v1/policies/${retired_id}/versions' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.version, equals: '${retired_version}' }
+          - { path: data.0.retired_at, exists: true }
+    - name: register a tool of its own for the policies below, so none meets the retired one's pair
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rk:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a draft never published
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:rk:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { draft_id: data.id }
+    - name: is not retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${draft_id}/retire' }
+      expect: { status: 400, problem: invalid_request }
+    - name: discarding it deletes it
+      as: admin
+      request: { method: DELETE, path: '/v1/policies/${draft_id}/draft' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: GET, path: '/v1/policies/${draft_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: a published policy
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:rk:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { kept_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${kept_id}/publish' }
+      expect: { status: 200 }
+    - name: with no pending draft has none to discard
+      as: admin
+      request: { method: DELETE, path: '/v1/policies/${kept_id}/draft' }
+      expect: { status: 404, problem: not_found }
+    - as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${kept_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:rk:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 200 }
+    - name: its pending draft is discarded, and the published version stays
+      as: admin
+      request: { method: DELETE, path: '/v1/policies/${kept_id}/draft' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: GET, path: '/v1/policies/${kept_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.config.mode, equals: ask }
+          - { path: data.draft_version, exists: false }
+- id: negative-policy-retire-needs-an-administrator
+  title: A member of the organisation who is not an administrator is 403 forbidden when it retires a policy or discards a draft
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  features: [policies.retire]
+  needs: [admin, member]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rn:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:rn:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - name: a member cannot discard the draft
+      as: member
+      request: { method: DELETE, path: '/v1/policies/${policy_id}/draft' }
+      expect: { status: 403, problem: forbidden }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - name: nor retire the policy
+      as: member
+      request: { method: POST, path: '/v1/policies/${policy_id}/retire' }
+      expect: { status: 403, problem: forbidden }
+    - name: it is still in force
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: published }] }
+- id: tenancy-policy-retire-isolated
+  title: Another organisation cannot retire an organisation's policy or discard its draft
+  tags: [hosted, negative, tenancy]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  features: [policies.retire]
+  needs: [admin, other_org]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rti:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:rti:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: other_org
+      request: { method: DELETE, path: '/v1/policies/${policy_id}/draft' }
+      expect: { status: 404, problem: not_found }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - as: other_org
+      request: { method: POST, path: '/v1/policies/${policy_id}/retire' }
+      expect: { status: 404, problem: not_found }
+    - name: it is still in force for its organisation
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: published }] }
+- id: negative-simulate-as-a-subject
+  title: An administrator simulates as a role and as the organisation and gets that holder's result; a member is 403, and a service subject is 422 unsupported_policy_form
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  needs: [admin, member]
+  fixtures: [admin_role]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ss:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a role policy that denies
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:ss:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - name: as the role, the policy decides
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body:
+          subject: { type: role, id: '${admin_role}' }
+          action: { tool_ref: 'ext:ss:${uniq}', arguments: { q: 'as role ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.policy.id, equals: '${policy_id}' }
+          - path: data.considered.policies
+            contains_members: { id: '${policy_id}', result: deny }
+    - name: as the organisation alone, the role policy does not match
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body:
+          subject: { type: organization }
+          action: { tool_ref: 'ext:ss:${uniq}', arguments: { q: 'as org ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${policy_id}' } }
+    - name: a member may not simulate as a subject
+      as: member
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body:
+          subject: { type: role, id: '${admin_role}' }
+          action: { tool_ref: 'ext:ss:${uniq}', arguments: {} }
+      expect: { status: 403, problem: forbidden }
+    - name: a service is not a subject a simulation takes
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body:
+          subject: { type: service, id: '00000000-0000-4000-8000-0000000005e5' }
+          action: { tool_ref: 'ext:ss:${uniq}', arguments: {} }
+      expect: { status: 422, problem: unsupported_policy_form }
+- id: simulate-as-an-agent
+  title: Where a deployment simulates as an agent, the result is that agent's policies, the everyone role's and the organisation's, never another role's; a deployment that cannot simulate it answers 422 unsupported_policy_form, which is conformant
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: [agent, role, organization]
+  needs: [admin]
+  fixtures: [admin_role]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:sa:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a policy for the agent that denies
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: agent, id: '00000000-0000-4000-8000-00000000a6e7' }]
+          targets: { tools: ['ext:sa:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { agent_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${agent_policy}/publish' }
+      expect: { status: 200 }
+    - name: a role policy that allows, which an agent does not hold
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:sa:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 201 }
+      save: { role_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${role_policy}/publish' }
+      expect: { status: 200 }
+    - name: an organisation policy that asks, which an agent holds with the organisation
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: organization }]
+          targets: { tools: ['ext:sa:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { org_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${org_policy}/publish' }
+      expect: { status: 200 }
+    - name: a policy on the everyone role, which every holder holds, an agent included
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:sa:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 201 }
+      save: { everyone_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${everyone_policy}/publish' }
+      expect: { status: 200 }
+    - name: the deployment simulates as an agent, or says it cannot
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          subject: { type: agent, id: '00000000-0000-4000-8000-00000000a6e7' }
+          action: { tool_ref: 'ext:sa:${uniq}', arguments: { q: 'as agent ${uniq}' } }
+      expect: { status: [200, 422] }
+      gate:
+        status: 200
+        reason: 'the deployment does not simulate as an agent (422 unsupported_policy_form naming subject)'
+        otherwise:
+          status: 422
+          problem: unsupported_policy_form
+          member: subject
+          # A rev 12 deployment sends no member, and names it in detail.
+          detail_matches: '\bsubject\b'
+    - name: as the agent, its own policy decides, the everyone role's is considered and no other role's is
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          subject: { type: agent, id: '00000000-0000-4000-8000-00000000a6e7' }
+          action: { tool_ref: 'ext:sa:${uniq}', arguments: { q: 'as agent ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${agent_policy}', result: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${org_policy}', result: ask }
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: always_allow }
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${role_policy}' } }
+- id: policies-tightest-wins-composes-and-marks-contributors
+  title: Where a deployment advertises policies.tightest_wins, an allow for the administrator itself and a deny for a role it holds compose to deny, and considered marks the deny as what contributed
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: [role, user]
+  features: [policies.tightest_wins]
+  needs: [admin]
+  fixtures: [admin_role]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:tw:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a deny for a role the administrator holds, which says who wrote it
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:tw:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { deny_id: data.id, admin_id: data.updated_by.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${deny_id}/publish' }
+      expect: { status: 200 }
+    - name: a draft that allows the administrator by its own id
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: user, id: '${admin_id}' }]
+          targets: { tools: ['ext:tw:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 201 }
+      save: { allow_id: data.id }
+    - name: the tightest wins, whichever subject is the more specific
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${allow_id}/simulate
+        body: { action: { tool_ref: 'ext:tw:${uniq}', arguments: { q: 'tw ${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.policy.id, equals: '${deny_id}' }
+          - { path: data.considered.composed.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${deny_id}', result: deny, contributed: true }
+          - path: data.considered.policies
+            contains_members: { id: '${allow_id}', result: always_allow }
+          - path: data.considered.policies
+            lacks_members: { id: '${allow_id}', contributed: true }
+- id: policy-origin-marks-an-import
+  title: A create that carries origin is source imported and reads the same origin back; a later version written without it keeps source imported and has no origin
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:po:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:po:${uniq}'] }
+          config: { mode: ask }
+          origin:
+            {
+              format: cedar,
+              digest: 0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0,
+            }
+      expect:
+        status: 201
+        body:
+          - { path: data.source, equals: imported }
+          - path: data.origin
+            equals_canonical:
+              {
+                format: cedar,
+                digest: 0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0,
+              }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - name: a version written without origin
+      as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:po:${uniq}'] }
+          config: { mode: always_allow }
+      expect:
+        status: 200
+        body:
+          - { path: data.source, equals: imported }
+          - { path: data.origin, exists: false }
+    - name: the imported version keeps its origin
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}/versions' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.origin, exists: false }
+          - { path: data.1.origin.format, equals: cedar }

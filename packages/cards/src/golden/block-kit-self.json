@@ -1,0 +1,167 @@
+{
+  "text": "Approval request: payments.refund",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": "Approval request",
+        "emoji": false
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "plain_text",
+        "text": "Payables Agent (for Dana Ruiz) is asking to call `payments.refund`",
+        "emoji": false
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "plain_text",
+          "text": "Tool: payments.refund",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Level: write",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Kind: tool_invocation",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Requester: Dana Ruiz (u-dana)",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Waiting on: 2: Priya (u-priya), u-sam",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Agent: Payables Agent (agent-7) (parent agent-1)",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Run: run-5 (governed)",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Scope: scope-1",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Policy: pol-1 (version 3)",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Continuation: resume_run",
+          "emoji": false
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "plain_text",
+          "text": "Created: 2026-10-30T09:00:00Z",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Expires: 2026-10-31T09:00:00Z",
+          "emoji": false
+        },
+        {
+          "type": "plain_text",
+          "text": "Digest: sha256:3f2a9c0d11",
+          "emoji": false
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "```\n{\n  \"amount\": 42,\n  \"ticket\": \"T-9\"\n}\n```",
+        "verbatim": true
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "plain_text",
+          "text": "You're approving your own agent's request",
+          "emoji": false
+        }
+      ]
+    },
+    {
+      "type": "input",
+      "block_id": "nc.input.reason",
+      "optional": true,
+      "label": {
+        "type": "plain_text",
+        "text": "Note (optional)",
+        "emoji": false
+      },
+      "element": {
+        "type": "plain_text_input",
+        "action_id": "reason",
+        "multiline": true,
+        "max_length": 1000
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Approve",
+            "emoji": false
+          },
+          "action_id": "approve",
+          "style": "primary",
+          "value": "{\"v\":1,\"approval_id\":\"11111111-1111-4111-8111-11111111111a\",\"sent_message_id\":\"22222222-2222-4222-8222-22222222222b\",\"expected_action_digest\":\"sha256:3f2a9c0d11\"}"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Deny",
+            "emoji": false
+          },
+          "action_id": "deny",
+          "style": "danger",
+          "value": "{\"v\":1,\"approval_id\":\"11111111-1111-4111-8111-11111111111a\",\"sent_message_id\":\"22222222-2222-4222-8222-22222222222b\",\"expected_action_digest\":\"sha256:3f2a9c0d11\"}"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open in Approvals",
+            "emoji": false
+          },
+          "action_id": "nc.open",
+          "url": "https://approvals.example.com/approvals/11111111-1111-4111-8111-11111111111a"
+        }
+      ]
+    }
+  ]
+}

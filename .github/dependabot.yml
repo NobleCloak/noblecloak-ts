@@ -1,0 +1,54 @@
+# Every dependency in package.json and every action SHA is pinned exactly, so a Dependabot pull
+# request (or a hand bump that regenerates bun.lock) is the only way one moves. There is
+# deliberately no `allow:` block: an allowlist hides every dependency it does not name. Three
+# pins sit outside what these ecosystems update: bun (`packageManager`), Node (`.node-version`)
+# and the digest-pinned actionlint image in ci.yml. The weekly toolchain-currency workflow fails
+# when one of those lags.
+#
+# Grouping follows the private template: one pull
+# request per ecosystem per week, so a weekly run costs at most three CI builds, not one build per
+# dependency. Every pull request here starts four workflows (ci, preview, stranger-install,
+# private-dep-guard), which is why a run per dependency was a CI storm.
+#
+# Security updates are a separate Dependabot feature with no bun support: they arrive as
+# `npm_and_yarn` pull requests that edit package.json and cannot write bun.lock, so they always
+# fail `bun install --frozen-lockfile`. Apply the bump by hand (bun install regenerates the lock),
+# fold it into a normal pull request and close Dependabot's with a comment.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      # Majors included: every action is SHA-pinned with a version comment, and actionlint plus
+      # repo-policy.test.ts check the result.
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    versioning-strategy: increase
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+      major:
+        update-types: [major]
+    # The only dependencies held behind their latest major. Each is a recorded pin in
+    # CONTRIBUTING.md "Toolchain pins" with the condition that lifts it; repo-policy.test.ts fails
+    # if an entry here has no such record, and the pins section fails if a pin moves without it.
+    ignore:
+      # Held at 6.x until typescript-eslint supports TypeScript 7 (its peer range is checked on
+      # every typescript-eslint bump, which the pins section must name).
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # Tracks the Node LTS line in .node-version; the toolchain-currency workflow goes red when a
+      # newer LTS exists, and both move in that pull request.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']

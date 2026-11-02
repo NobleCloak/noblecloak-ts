@@ -1,0 +1,15 @@
+NobleCloak UI
+Copyright 2026 NobleCloak
+
+This product includes software developed by NobleCloak (https://www.noblecloak.com).
+
+== Third-party ==
+Runtime dependencies of the published packages. None is copied into this repository or bundled into a
+published file; each is installed from the registry under its own licence.
+
+@noblecloak/client
+canonicalize 5.1.0 - Apache-2.0 - https://github.com/erdtman/canonicalize
+  An RFC 8785 (JSON Canonicalization Scheme) implementation. Computes the argument digest.
+  Chosen so the digest rests on an open, permissively licensed implementation of the RFC.
+openapi-fetch 0.17.0 - MIT - https://github.com/openapi-ts/openapi-typescript
+  The typed fetch wrapper under the module API client.

@@ -1,0 +1,4 @@
+[install]
+# Hoisted layout: Astro's prerender output imports its own dependencies (e.g. `cookie`) as bare
+# specifiers from the project, which bun's isolated linker does not expose.
+linker = "hoisted"

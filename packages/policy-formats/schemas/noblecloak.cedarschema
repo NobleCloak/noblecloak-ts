@@ -1,0 +1,14 @@
+namespace NobleCloak {
+  entity Organization;
+  entity Group in [Organization];
+  entity Role in [Organization];
+  entity User in [Group, Role, Organization];
+  entity Service in [Group, Role, Organization];
+  entity Agent in [Group, Role, Organization];
+  entity Tool;
+  action "tool_invocation" appliesTo {
+    principal: [User, Service, Agent],
+    resource: [Tool],
+    context: {}
+  };
+}

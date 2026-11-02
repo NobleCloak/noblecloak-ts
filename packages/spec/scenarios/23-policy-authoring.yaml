@@ -1,0 +1,327 @@
+# Rev 10: authoring a policy. Authoring needs an administrator, so every authoring step runs as admin
+# and every scenario here needs it: without an administrator's token a real run would author as the
+# creator and be refused, which says nothing. Each scenario first registers its own organisation-owned
+# tool, and its policies target that tool alone, so a publish never meets another policy's (tool, subject)
+# pair, in this run or an earlier one.
+- id: policy-authoring-targets-name-state-and-versions
+  title: An administrator authors a policy with a name and targets; it reads as a draft until published, a write after the publish is the next version, and the read keeps the published one until that is published
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  needs: [admin]
+  steps:
+    - name: register the tool the policy governs
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pa:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: author a draft
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          name: 'conformance ${uniq}'
+          description: Asks before the conformance tool runs.
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pa:${uniq}'] }
+          config: { mode: ask }
+      expect:
+        status: 201
+        body:
+          - { path: data.kind, equals: tool_invocation }
+          - { path: data.name, equals: 'conformance ${uniq}' }
+          - { path: data.state, equals: draft }
+          - { path: data.published_at, equals: null }
+          - { path: data.targets.tools, equals: ['ext:pa:${uniq}'] }
+      save: { policy_id: data.id }
+    - name: a never-published policy reads as its draft
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: draft }
+          - { path: data.published_at, equals: null }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: published }
+          - { path: data.published_at, not_equals: null }
+          - { path: data.config.mode, equals: ask }
+      save: { first_version: data.version }
+    - name: a write after the publish is a draft of the next version
+      as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          name: 'conformance ${uniq}'
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pa:${uniq}'] }
+          config: { mode: always_allow }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: draft }
+          - { path: data.published_at, equals: null }
+          - { path: data.config.mode, equals: always_allow }
+    - name: the read keeps the published version
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: published }
+          - { path: data.version, equals: '${first_version}' }
+          - { path: data.config.mode, equals: ask }
+    - name: the versions list the pending draft first, then the published version
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}/versions' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+          - { path: data.0.published_at, equals: null }
+          - { path: data.0.config.mode, equals: always_allow }
+          - { path: data.1.version, equals: '${first_version}' }
+          - { path: data.1.published_at, not_equals: null }
+    - name: publishing the draft makes it the version in force
+      as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: published }
+          - { path: data.config.mode, equals: always_allow }
+          - { path: data.version, not_equals: '${first_version}' }
+    - name: both versions are published, newest first
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}/versions' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+          - { path: data.0.config.mode, equals: always_allow }
+          - { path: data.0.published_at, not_equals: null }
+          - { path: data.1.version, equals: '${first_version}' }
+    - name: the list finds it by kind, tool, subject type and state
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pa:${uniq}&subject_type=role&state=published&limit=200'
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${policy_id}' } }
+    - name: and leaves it out of another kind
+      as: admin
+      request: { method: GET, path: '/v1/policies?kind=duplicate_requests&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${policy_id}' } }
+- id: negative-policy-authoring-needs-an-administrator
+  title: A member of the organisation who is not an administrator, and a service principal, are 403 forbidden when they author, replace or publish a policy
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  needs: [admin, member]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pn:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a member cannot author
+      as: member
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pn:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 403, problem: forbidden }
+    - name: nor can a service principal
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pn:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 403, problem: forbidden }
+    - name: an administrator can
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pn:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - name: a member cannot replace it
+      as: member
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pn:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 403, problem: forbidden }
+    - name: nor can a service principal
+      as: creator
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pn:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 403, problem: forbidden }
+    - name: a member cannot publish it
+      as: member
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 403, problem: forbidden }
+    - name: nor can a service principal
+      as: creator
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 403, problem: forbidden }
+    - name: it is still the administrator's unpublished draft
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.published_at, equals: null }
+          - { path: data.config.mode, equals: ask }
+- id: negative-simulate-lists-the-policies-it-considered
+  title: Simulating a draft lists, in considered, the draft with the subject that matched the caller, and the decision they composed to
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ps:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    # The administrator is matched by its own id (a user subject), so the scenario does not depend on how
+    # a deployment recognises administrators. A write records who made it (`updated_by`).
+    - name: a draft, which says who wrote it
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:ps:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201, body: [{ path: data.updated_by.kind, equals: user }] }
+      save: { policy_id: data.id, admin_id: data.updated_by.id }
+    - name: the draft asks the administrator itself first
+      as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: user, id: '${admin_id}' }]
+          targets: { tools: ['ext:ps:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 200 }
+      save: { policy_version: data.version }
+    - name: simulated for the administrator, it is the policy that decides
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body: { action: { tool_ref: 'ext:ps:${uniq}', arguments: { q: 'sim ${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.enforced, equals: false }
+          - { path: data.policy.id, equals: '${policy_id}' }
+          - { path: data.considered.composed.decision, equals: step_up }
+          - path: data.considered.policies
+            contains_members:
+              id: '${policy_id}'
+              version: '${policy_version}'
+              kind: tool_invocation
+              result: ask
+              subject: { type: user, id: '${admin_id}' }
+- id: negative-policy-config-must-fit-its-kind
+  title: A policy whose config does not fit its kind is 400 invalid_request
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pk:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a tool policy with a duplicate-requests config
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:pk:${uniq}'] }
+          config: { after_rejection: deny }
+      expect: { status: 400, problem: invalid_request }
+    - name: a duplicate-requests policy with a tool config
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: duplicate_requests
+          subjects: [{ type: organization }]
+          config: { mode: ask }
+      expect: { status: 400, problem: invalid_request }

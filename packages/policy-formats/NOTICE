@@ -1,0 +1,15 @@
+NobleCloak UI
+Copyright 2026 NobleCloak
+
+This product includes software developed by NobleCloak (https://www.noblecloak.com).
+
+== Third-party ==
+Runtime dependencies of the published packages. None is copied into this repository or bundled into a
+published file; each is installed from the registry under its own licence.
+
+@noblecloak/policy-formats
+canonicalize 5.1.0 - Apache-2.0 - https://github.com/erdtman/canonicalize
+  An RFC 8785 (JSON Canonicalization Scheme) implementation. Writes the canonical form of a policy
+  that a round trip compares, and the JSON inside the annotations an export writes.
+yaml 2.9.1 - ISC - https://github.com/eemeli/yaml
+  Parses AGT manifests on import and detects their format.

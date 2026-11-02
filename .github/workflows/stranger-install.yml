@@ -1,0 +1,57 @@
+# Proves the open-source property while the repository is private: a fresh runner with no
+# credentials installs, builds and tests from the public npm registry alone.
+#
+# actions/checkout needs the job's read-only token to clone a private repository; that is the only
+# step that uses it, and persist-credentials: false keeps it out of .git/config. Every step runs
+# with the token variables emptied (job-level env) and the job has contents: read only.
+name: stranger-install
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to the same ref (a Dependabot rebase, a fix-up) cancels the run it supersedes.
+concurrency:
+  group: stranger-install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stranger-install:
+    name: stranger-install
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ''
+      GH_TOKEN: ''
+      NODE_AUTH_TOKEN: ''
+      NPM_TOKEN: ''
+      # Read by both bun and npm (npm treats npm_config_* names case-insensitively).
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Assert no credentials are available
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          if npm whoami; then fail 'npm whoami succeeded: an npm credential is available'; fi
+          if gh auth status; then fail 'gh auth status succeeded: a GitHub credential is available'; fi
+          for rc in .npmrc "$HOME/.npmrc"; do
+            if [ -e "$rc" ]; then fail "$rc exists"; fi
+          done
+          if git config --get-regexp '^http\..*\.extraheader'; then
+            fail 'checkout left an auth header in git config'
+          fi
+          echo 'No npm or GitHub credentials are available to the install, build and test steps.'
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test

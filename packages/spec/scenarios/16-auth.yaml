@@ -1,0 +1,83 @@
+# These four check rules about the token, not about a family of routes, so they are part of the floor.
+# The last three need a token the run is given a flag for (--dpop-bound-token, --no-org-token,
+# --no-scope-token); without it they are skipped as unconfigured.
+- id: negative-dpop-scheme-unsupported
+  title: The DPoP authorization scheme is 401 dpop_unsupported on a deployment that verifies no proofs
+  tags: [both, negative, floor]
+  dpop: off
+  steps:
+    - as: creator
+      scheme: DPoP
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 401, problem: dpop_unsupported }
+- id: negative-dpop-bound-token-unsupported
+  title: A token that carries cnf.jkt is 401 dpop_unsupported on a deployment that verifies no proofs
+  tags: [both, negative, floor]
+  dpop: off
+  needs: [dpop_bound]
+  steps:
+    - as: dpop_bound
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 401, problem: dpop_unsupported }
+- id: negative-no-organisation-claim
+  title: A verified token with no organisation claim is 403 organization_context_required on an organisation-scoped route
+  tags: [both, negative, floor]
+  needs: [no_org]
+  steps:
+    - name: a read
+      as: no_org
+      request: { method: GET, path: /v1/records }
+      expect: { status: 403, problem: organization_context_required }
+    - name: capabilities
+      as: no_org
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 403, problem: organization_context_required }
+    - name: a write outside decisions
+      as: no_org
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: '${allow_tool}', decision: allow }
+      expect: { status: 403, problem: organization_context_required }
+    - name: a decision
+      as: no_org
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${allow_tool}', arguments: { q: 'no-org ${uniq}' } } }
+      expect: { status: 403, problem: organization_context_required }
+- id: negative-service-without-module-api-scope
+  title: A service principal's token without the module_api scope is 403 insufficient_scope
+  tags: [both, negative, floor]
+  needs: [no_scope]
+  steps:
+    - name: a read
+      as: no_scope
+      request: { method: GET, path: /v1/records }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: capabilities
+      as: no_scope
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: a write outside decisions
+      as: no_scope
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: '${allow_tool}', decision: allow }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: a decision
+      as: no_scope
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${allow_tool}', arguments: { q: 'no-scope ${uniq}' } } }
+      expect: { status: 403, problem: insufficient_scope }
+- id: dpop-optional-accepts-bearer
+  title: A deployment whose DPoP mode is optional still accepts a bearer token without a proof
+  tags: [both, floor]
+  dpop: optional
+  steps:
+    - as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 200, body: [{ path: data.dpop, equals: optional }] }

@@ -1,0 +1,658 @@
+- id: approval-arguments-state-withheld-before-not-enabled
+  title: A reader who is neither the creator nor eligible to approve is told `withheld` for a pending approval on a tool whose setting is off, where the creator and an eligible approver are told `not_enabled`
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver, member]
+  steps:
+    - name: register a tool the organisation shares, with the setting off
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:wbn:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wbn:${uniq}', arguments: { q: 'wbn-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { a_id: data.approval.id }
+    - name: the member who may not approve is told withheld, not the tool's setting
+      as: member
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: withheld }
+    - name: the creator is told the setting is off
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments_state, equals: not_enabled }
+    - name: an eligible approver is told the setting is off
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments_state, equals: not_enabled }
+- id: approval-list-rows-carry-arguments-state
+  title: Each row of the approval list carries `arguments_state` for an eligible approver (`shown`, `not_enabled`, `not_sent`) and never `arguments`
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: register a tool that shows its arguments
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:las-on:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - name: register a tool that does not
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:las-off:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval with arguments on the tool that shows them
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: 'ext:las-on:${uniq}'
+            arguments: { q: 'las-${uniq}' }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+    - name: the approver lists it - the state is shown, the arguments are not on the row
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&state=pending&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.arguments, exists: false }
+          - { path: data.0.arguments_state, equals: shown }
+    - name: a user opens an approval on the tool that does not
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: 'ext:las-off:${uniq}'
+            arguments: { q: 'las-${uniq}' }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+    - name: the approver lists it - not_enabled
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&state=pending&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.arguments, exists: false }
+          - { path: data.0.arguments_state, equals: not_enabled }
+    - name: a user opens an approval naming the digest only on the tool that shows them
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: 'ext:las-on:${uniq}'
+            arg_digest: '${uniq}${uniq}${uniq}${uniq}${uniq}0000'
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+    - name: the approver lists it - not_sent
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&state=pending&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.arguments, exists: false }
+          - { path: data.0.arguments_state, equals: not_sent }
+- id: approval-list-rows-withhold-before-not-enabled
+  title: A row of the approval list is `withheld` for a reader who is neither the creator nor eligible to approve, on a tool whose setting is off, and `not_enabled` for an eligible approver
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver, member]
+  steps:
+    - name: register a tool with the setting off
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:lwb:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: 'ext:lwb:${uniq}'
+            arguments: { q: 'lwb-${uniq}' }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+    - name: a member who may not approve lists it - withheld
+      as: member
+      request: { method: GET, path: '/v1/approvals?state=pending&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.arguments, exists: false }
+          - { path: data.0.arguments_state, equals: withheld }
+    - name: the eligible approver lists it - not_enabled
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&state=pending&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.arguments, exists: false }
+          - { path: data.0.arguments_state, equals: not_enabled }
+- id: negative-hidden-tool-clash-is-one-refusal
+  title: A colleague registering a reference held by another principal's hidden tool is 422 tool_ref_in_use whether it asks for a higher or a lower level and whether it asks for principal or organisation ownership, and the two answers carry nothing of the tool and differ only in request_id
+  tags: [both, negative, tenancy, floor]
+  tool_registration: any
+  needs: [member]
+  steps:
+    - name: a principal registers a tool of its own at the write level
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hc:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: principal
+      expect: { status: 201 }
+    - name: a colleague registers the reference at a higher level
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hc:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: admin
+          owner_kind: principal
+      expect:
+        status: 422
+        problem: tool_ref_in_use
+        body:
+          - { path: level, exists: false }
+          - { path: side_effect_level, exists: false }
+          - { path: owner, exists: false }
+          - { path: id, exists: false }
+      save: { high_title: title, high_detail: detail, high_type: type }
+    - name: and at a lower level, and is answered the same
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hc:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect:
+        status: 422
+        problem: tool_ref_in_use
+        body:
+          - { path: title, equals: '${high_title}' }
+          - { path: detail, equals: '${high_detail}' }
+          - { path: type, equals: '${high_type}' }
+          - { path: level, exists: false }
+          - { path: side_effect_level, exists: false }
+          - { path: owner, exists: false }
+          - { path: id, exists: false }
+    - name: and asking for organisation ownership at a higher level is answered the same
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hc:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: admin
+          owner_kind: org
+      expect:
+        status: 422
+        problem: tool_ref_in_use
+        body:
+          - { path: title, equals: '${high_title}' }
+          - { path: detail, equals: '${high_detail}' }
+          - { path: type, equals: '${high_type}' }
+          - { path: level, exists: false }
+          - { path: side_effect_level, exists: false }
+          - { path: owner, exists: false }
+          - { path: id, exists: false }
+    - name: and asking for organisation ownership at a lower level is answered the same
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hc:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect:
+        status: 422
+        problem: tool_ref_in_use
+        body:
+          - { path: title, equals: '${high_title}' }
+          - { path: detail, equals: '${high_detail}' }
+          - { path: type, equals: '${high_type}' }
+          - { path: level, exists: false }
+          - { path: side_effect_level, exists: false }
+          - { path: owner, exists: false }
+          - { path: id, exists: false }
+    - name: the registering principal, who can see the tool, is answered by level
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hc:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect: { status: 409, problem: side_effect_level_downgrade }
+- id: record-and-resumption-carry-no-names
+  title: A name appears only inside an approval - a record and the signed Resumption carry the principal's id and kind and never a display_name, while the approval itself names its principals
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:nn:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:nn:${uniq}', arguments: { q: 'nn-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - name: the approver approves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${a_id}/approve
+        body: { expected_action_digest: '${a_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: the approval names its requester and its approver
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.display_name, exists: true }
+          - { path: data.approver.display_name, exists: true }
+    - name: the Resumption names its approver by id and kind only
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${a_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approver.id, exists: true }
+          - { path: data.approver.kind, exists: true }
+          - { path: data.approver.display_name, exists: false }
+    - name: a record is appended
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'nn:${uniq}', decision: allow, context: { invocation_channel: headless } }
+      expect:
+        status: 201
+        body:
+          - { path: data.actor.id, exists: true }
+          - { path: data.actor.display_name, exists: false }
+      save: { record_id: data.id }
+    - name: and read back, single and listed, with no name on its actor
+      as: creator_user
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.actor.kind, exists: true }
+          - { path: data.actor.display_name, exists: false }
+    - name: the listed record
+      as: creator_user
+      request: { method: GET, path: '/v1/records?tool=nn:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.actor.display_name, exists: false }
+- id: approval-waiting-on-is-the-single-reads-alone
+  title: A pending approval tells its creator who it waits on on the single read, and neither the list row nor a stream event (an escalation, which leaves it pending) for the creator's own approval carries `waiting_on`
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  serves_resolution: escalated
+  needs: [creator_user, approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:wr:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval, and a stream of the user's own approvals is open while it does
+      stream_events:
+        as: creator_user
+        path: '/v1/approvals/stream'
+        during:
+          - name: the approval is opened
+            as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: 'ext:wr:${uniq}', arguments: { q: 'wr-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+            save: { wr_id: data.approval.id, wr_digest: data.action_digest }
+          - name: an approver escalates it, which leaves it pending and is an update the creator is sent
+            as: approver
+            request:
+              method: POST
+              path: '/v1/approvals/${wr_id}/resolve'
+              body: { resolution: escalated, expected_action_digest: '${wr_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${wr_id}'
+              body:
+                - { path: state, equals: pending }
+                - { path: waiting_on, exists: false }
+    - name: a second approval is opened for the single read and the list
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wr:${uniq}', arguments: { q: 'wr2-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { wr2_id: data.approval.id }
+    - name: the creator's single read says who it waits on
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${wr2_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.waiting_on.count, exists: true }
+    - name: the creator's list row for the same approval does not
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?state=pending&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${wr2_id}' }
+          - { path: data.0.waiting_on, exists: false }
+- id: negative-waiting-on-is-best-effort
+  title: With the eligibility lookup down, the creator's single read of their pending approval is still 200 and carries no `waiting_on`
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:wb:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wb:${uniq}', arguments: { q: 'wb-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { wb_id: data.approval.id }
+    - name: the deployment cannot determine who is eligible
+      control: { eligibility_lookup_down: true }
+    - name: the creator's read is still 200, and says only what does not depend on the lookup
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${wb_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${wb_id}' }
+          - { path: data.state, equals: pending }
+          - { path: data.waiting_on, exists: false }
+- id: tools-principal-owned-seen-by-administrator-users-only
+  title: An administrator user lists and reads a colleague's principal-owned tool, and a colleague who is not an administrator gets 404 for it and does not see it in the list
+  tags: [both, tenancy, floor]
+  tool_registration: any
+  needs: [admin, member, creator_user]
+  steps:
+    - name: a user registers a tool of their own
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:av:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect: { status: 201 }
+      save: { av_id: data.id }
+    - name: an administrator user lists it
+      as: admin
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${av_id}' } }
+    - name: and reads it
+      as: admin
+      request: { method: GET, path: '/v1/tools/${av_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${av_id}' }
+    - name: a colleague who is not an administrator does not see it in the list
+      as: creator_user
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${av_id}' } }
+    - name: and is told 404 on a read
+      as: creator_user
+      request: { method: GET, path: '/v1/tools/${av_id}' }
+      expect: { status: 404, problem: not_found }
+- id: negative-service-principal-does-not-see-a-users-private-tool
+  title: A service principal does not list or read a user's principal-owned tool, and still sees an organisation-owned tool and its own
+  tags: [both, negative, tenancy, floor]
+  tool_registration: any
+  needs: [member]
+  steps:
+    - name: a user registers a tool of their own
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:sp:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect: { status: 201 }
+      save: { sp_user_id: data.id }
+    - name: and one that is the organisation's
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:so:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+      save: { sp_org_id: data.id }
+    - name: the service principal registers a tool of its own
+      as: creator
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:sm:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect: { status: 201 }
+      save: { sp_own_id: data.id }
+    - name: it lists the organisation's tool and its own, and not the user's
+      as: creator
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${sp_org_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${sp_own_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${sp_user_id}' } }
+    - name: it reads the organisation's tool and its own
+      as: creator
+      request: { method: GET, path: '/v1/tools/${sp_org_id}' }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: '/v1/tools/${sp_own_id}' }
+      expect: { status: 200 }
+    - name: it is told 404 for the user's tool
+      as: creator
+      request: { method: GET, path: '/v1/tools/${sp_user_id}' }
+      expect: { status: 404, problem: not_found }
+- id: approval-names-its-agent
+  title: An approval opened by an actor that names an agent carries `agent.name`, the name the agent was registered under and never its id; an approval opened with no agent carries no `agent` member
+  tags: [both, lifecycle]
+  requires: [approvals, agents]
+  needs: [creator_user]
+  steps:
+    - name: register an agent
+      as: creator_user
+      request: { method: POST, path: /v1/agents, body: { name: 'Ledger agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { an_agent_id: data.id }
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:an:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: an approval is opened for the agent
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:an:${uniq}', arguments: { q: 'an-${uniq}' } }
+          actor: { agent_id: '${an_agent_id}' }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { an_id: data.approval.id }
+    - name: it names the agent by its name
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${an_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.agent.id, equals: '${an_agent_id}' }
+          - { path: data.agent.name, equals: 'Ledger agent ${uniq}' }
+          - { path: data.agent.name, not_equals: '${an_agent_id}' }
+    - name: an approval is opened with no agent
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:an:${uniq}', arguments: { q: 'an2-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { an2_id: data.approval.id }
+    - name: it carries no agent
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${an2_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.agent, exists: false }

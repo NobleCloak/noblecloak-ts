@@ -1,0 +1,512 @@
+# Rev 11: connections. A registration's URL fixes its tools' identity, one registration per server URL per
+# organisation, the credential tier and the organisation credential, refresh and discover, and what deleting a
+# registration does to its tools. Registration is an administrator's on a deployment that restricts it, so the
+# steps register as `admin`. A scenario that enumerates a server names a server the deployment can reach with
+# the `connection_server_url` fixture (`nc-conform --connection-server-url`), registers it, and deletes the
+# registration at its end; every other scenario registers a URL of its own, which nothing enumerates. The
+# organisation must not already have a registration of that server, and a scenario that fails before its last step
+# leaves its registration behind: delete it before the next run, or that run meets 409 connection_exists.
+- id: negative-connection-url-is-fixed
+  title: A connection's URL is its tools' identity, so a patch that names url is 400 invalid_request, on a registration without authentication and on a bearer one, and the name still changes; a URL carrying userinfo is refused
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'url ${uniq}'
+          url: 'https://url-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - name: the URL cannot change
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/connections/${connection_id}
+        body: { url: 'https://moved-${uniq}.example.com/mcp' }
+      expect: { status: 400, problem: invalid_request }
+    - as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.url, equals: 'https://url-${uniq}.example.com/mcp' }
+    - name: the name can
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/connections/${connection_id}
+        body: { name: 'renamed ${uniq}' }
+      expect: { status: 200, body: [{ path: data.name, equals: 'renamed ${uniq}' }] }
+    - name: nor that of a bearer registration
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'url bearer ${uniq}'
+          url: 'https://url-bearer-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: org_shared
+          org_credential: { token: 'org-${uniq}' }
+      expect: { status: 201 }
+      save: { bearer_id: data.id }
+    - as: admin
+      request:
+        method: PATCH
+        path: /v1/connections/${bearer_id}
+        body: { url: 'https://moved-bearer-${uniq}.example.com/mcp' }
+      expect: { status: 400, problem: invalid_request }
+    - name: a URL carries no credential
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'url creds ${uniq}'
+          url: 'https://someone:secret@url-creds-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 400, problem: invalid_request }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${bearer_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: negative-duplicate-server-url
+  title: A second registration of the same server, in another form, is 409 connection_exists naming the first; once the first is deleted the URL registers again
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'dup ${uniq}'
+          url: 'https://dup-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - name: the same server with a trailing slash
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'dup again ${uniq}'
+          url: 'https://dup-${uniq}.example.com/mcp/'
+          transport: mcp
+          owner_kind: org
+      expect:
+        status: 409
+        problem: connection_exists
+        body:
+          - { path: connection_id, equals: '${connection_id}' }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+    - name: a deleted registration is gone
+      as: admin
+      request: { method: GET, path: /v1/connections }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${connection_id}' } }
+    - name: and the URL registers again
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'dup ${uniq}'
+          url: 'https://dup-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { second_id: data.id }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${second_id}' }
+      expect: { status: 204 }
+- id: negative-connection-org-credential
+  title: An org_shared bearer registration takes an organisation credential from an administrator, needs one, never returns it, and refuses it on any other registration or from a member
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin, member]
+  steps:
+    - name: an administrator registers with the organisation credential
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'oc ${uniq}'
+          url: 'https://oc-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: org_shared
+          org_credential: { token: 'org-secret-${uniq}' }
+      expect:
+        status: 201
+        body:
+          - { path: data.status, equals: connected }
+          - { path: data.credential_tier, equals: org_shared }
+          - { path: data.auth_kind, equals: bearer }
+          - { path: data.org_credential, exists: false }
+      save: { connection_id: data.id }
+    - name: the credential is in no read
+      as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200, body: [{ path: data.org_credential, exists: false }] }
+    - name: an administrator rotates it
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/connections/${connection_id}
+        body: { org_credential: { token: 'rotated-${uniq}' } }
+      expect: { status: 200, body: [{ path: data.org_credential, exists: false }] }
+    - name: a member does not
+      as: member
+      request:
+        method: PATCH
+        path: /v1/connections/${connection_id}
+        body: { org_credential: { token: 'member-${uniq}' } }
+      expect: { status: 403, problem: forbidden }
+    - name: org_shared with bearer needs the credential
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'oc missing ${uniq}'
+          url: 'https://oc-missing-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: org_shared
+      expect: { status: 400, problem: invalid_request }
+    - name: an organisation credential needs a kind of authentication
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'oc none ${uniq}'
+          url: 'https://oc-none-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: none }
+          credential_tier: org_shared
+      expect: { status: 400, problem: invalid_request }
+    - name: a member never sends one
+      as: member
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'oc member ${uniq}'
+          url: 'https://oc-member-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: org_shared
+          org_credential: { token: 'member-${uniq}' }
+      expect: { status: 403, problem: forbidden }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: negative-member-cannot-change-org-connection
+  title: An organisation's registration is changed by its administrators only, on every deployment, so a member who sees it is 403 forbidden on rename, refresh and delete, and it is unchanged
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin, member]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'org change ${uniq}'
+          url: 'https://org-change-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - name: a member sees it
+      as: member
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200 }
+    - name: and does not rename it
+      as: member
+      request:
+        method: PATCH
+        path: /v1/connections/${connection_id}
+        body: { name: 'taken ${uniq}' }
+      expect: { status: 403, problem: forbidden }
+    - name: refresh it
+      as: member
+      request: { method: POST, path: '/v1/connections/${connection_id}/refresh' }
+      expect: { status: 403, problem: forbidden }
+    - name: or delete it
+      as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 403, problem: forbidden }
+    - name: it is unchanged
+      as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200, body: [{ path: data.name, equals: 'org change ${uniq}' }] }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: negative-principal-owned-connection-hidden
+  title: Where any principal may register its own connection, a principal-owned connection is read and listed by its owner and an administrator, and is 404 and unlisted to another member
+  tags: [both, negative]
+  requires: connections
+  serves_connection_transport: mcp
+  serves_connection_owner_kind: principal
+  connection_registration_who: any
+  needs: [admin, member, creator_user]
+  steps:
+    - as: member
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'mine ${uniq}'
+          url: 'https://mine-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: principal
+      expect: { status: 201, body: [{ path: data.owner.kind, equals: principal }] }
+      save: { connection_id: data.id }
+    - as: member
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200 }
+    - name: an administrator sees it
+      as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200 }
+    - name: a colleague does not
+      as: creator_user
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: creator_user
+      request: { method: GET, path: '/v1/connections?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${connection_id}' } }
+    - as: creator_user
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: negative-connection-registration-owner-kind-refused
+  title: Where the deployment does not register principal-owned connections, a principal-owned registration is 403 forbidden, even from an administrator
+  tags: [both, negative]
+  requires: connections
+  serves_connection_transport: mcp
+  unserved_connection_owner_kind: principal
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'own ${uniq}'
+          url: 'https://own-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: principal
+      expect: { status: 403, problem: forbidden }
+- id: negative-connection-registration-administrators-only
+  title: Where only administrators register connections, a member's registration is 403 forbidden
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  connection_registration_who: administrators
+  needs: [member]
+  steps:
+    - as: member
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'member ${uniq}'
+          url: 'https://member-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 403, problem: forbidden }
+- id: negative-unserved-connection-transport
+  title: A registration of a transport the deployment does not advertise in connection_transports is 400 invalid_request
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  unserved_connection_transport: a2a
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'a2a ${uniq}'
+          url: 'https://a2a-${uniq}.example.com/agent'
+          transport: a2a
+          owner_kind: org
+      expect: { status: 400, problem: invalid_request }
+- id: negative-connection-refresh-registers-its-tools
+  title: Refresh registers the tools the server offers, with the connection's transport and id; discover enumerates them live and registers nothing
+  tags: [both, negative]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin]
+  fixtures: [connection_server_url]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'refresh ${uniq}'
+          url: '${connection_server_url}'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect: { status: 200 }
+      save: { before: data }
+    - name: discover enumerates
+      as: admin
+      request: { method: POST, path: '/v1/connections/${connection_id}/discover' }
+      expect: { status: 200, body: [{ path: data.0.tool_ref, exists: true }] }
+    - name: and registers nothing
+      as: admin
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect: { status: 200, body: [{ path: data, equals: '${before}' }] }
+    - name: refresh registers
+      as: admin
+      request: { method: POST, path: '/v1/connections/${connection_id}/refresh' }
+      expect: { status: 200, body: [{ path: data.tool_count, exists: true }] }
+    - as: admin
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - path: data
+            contains_members: { connection_id: '${connection_id}', transport: mcp, status: active }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: negative-connection-delete-withdraws-and-readd-rebinds
+  title: Deleting a connection withdraws its tools, whose policies remain and list them as unenforced, and a decision for one is deny unknown_tool; registering the same server again makes them active under the same tool_ref
+  tags: [hosted, negative]
+  only: hosted
+  requires: [connections, policies]
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin]
+  fixtures: [connection_server_url]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'readd ${uniq}'
+          url: '${connection_server_url}'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/connections/${connection_id}/refresh' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect: { status: 200, body: [{ path: data.0.tool_ref, exists: true }] }
+      save: { tool_ref: data.0.tool_ref }
+    - name: a policy on one of its tools
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: user, id: '00000000-0000-4000-8000-${uniq}' }]
+          targets: { tools: ['${tool_ref}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+    - name: its tools are withdrawn, and keep the connection they came from
+      as: admin
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - path: data
+            contains_members: { tool_ref: '${tool_ref}', status: withdrawn }
+    - name: the policy remains, and lists the tool as unenforced
+      as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect: { status: 200, body: [{ path: data.unenforced_targets, contains: '${tool_ref}' }] }
+    - name: a decision for a withdrawn tool is deny unknown_tool
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${tool_ref}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: unknown_tool }
+    - name: the same server registered again
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'readd again ${uniq}'
+          url: '${connection_server_url}'
+          transport: mcp
+          owner_kind: org
+      expect: { status: 201 }
+      save: { second_id: data.id }
+    - name: makes its tools active under the same tool_ref
+      as: admin
+      request: { method: GET, path: '/v1/tools?connection=${second_id}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - path: data
+            contains_members: { tool_ref: '${tool_ref}', status: active }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${second_id}' }
+      expect: { status: 204 }

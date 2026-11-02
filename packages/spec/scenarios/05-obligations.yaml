@@ -1,0 +1,569 @@
+- id: dedupe-across-both-doors
+  title: Two identical POST /v1/approvals share one open obligation, and POST /v1/decisions joins it
+  tags: [both, dedupe]
+  requires: approvals
+  steps:
+    - name: the first approvals call opens the obligation
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'dedupe ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 201
+        body:
+          - { path: data.created, equals: true }
+      save: { approval_id: data.id }
+    - name: the second returns created false and the same id
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'dedupe ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.created, equals: false }
+          - { path: data.id, equals: '${approval_id}' }
+    - name: a decide for the same action joins the same obligation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'dedupe ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, equals: '${approval_id}' }
+          - { path: data.approval.created, equals: false }
+- id: continuation-multiplicity
+  title: A different continuation for the same open identity is 409 continuation_conflict; an identical one is created false
+  tags: [both, negative]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cont ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: a } }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id }
+    - name: a different continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cont ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: b } }
+      expect: { status: 409, problem: continuation_conflict }
+    - name: an identical continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cont ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: a } }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.created, equals: false }
+          - { path: data.approval.id, equals: '${approval_id}' }
+- id: creator-cannot-self-approve-through-either-door
+  title: The principal that created an obligation, through POST /v1/decisions or POST /v1/approvals, cannot resolve it
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: opened through POST /v1/approvals
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'self ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body:
+          {
+            expected_action_digest: '0000000000000000000000000000000000000000000000000000000000000000',
+          }
+      expect: { status: 403, problem: not_eligible }
+    - name: opened through POST /v1/decisions
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'self-d ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { decided_id: data.approval.id, decided_digest: data.action_digest }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${decided_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${decided_digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: neither obligation resolved
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${decided_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: creator-may-resolve-from-the-approver-surface
+  title: A person may resolve an obligation their own agent opened with a token issued to the approver surface; their own client's token still may not
+  tags: [both, lifecycle]
+  requires: approvals
+  self_approval_from_approver_surface: true
+  needs: [creator_user, approver_surface_token]
+  steps:
+    - name: the user opens an obligation through POST /v1/decisions
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'surface ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the same user's own token is still not eligible
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: the same user, from the approver surface, resolves it
+      as: approver_surface_token
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${approval_id}' }
+          - { path: data.state, equals: approved }
+          - { path: data.resolution, equals: approved }
+- id: approver-surface-token-cannot-open
+  title: A token issued to the approver surface resolves approvals and may not open one, through POST /v1/approvals or a step_up decision
+  tags: [both, negative]
+  requires: approvals
+  self_approval_from_approver_surface: true
+  needs: [approver_surface_token]
+  steps:
+    - name: the approver surface opens an obligation
+      as: approver_surface_token
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'surface-open ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 403, problem: forbidden }
+    - name: the approver surface opens an obligation through a step_up decision
+      as: approver_surface_token
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'surface-decide ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 403, problem: forbidden }
+- id: approver-surface-token-cannot-consume
+  title: A token issued to the approver surface resolves an approval and may not spend its Resumption
+  tags: [both, negative]
+  requires: approvals
+  self_approval_from_approver_surface: true
+  needs: [creator_user, approver_surface_token]
+  steps:
+    - name: register the external tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:conf:surface-${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the user opens an obligation through POST /v1/decisions
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:conf:surface-${uniq}', arguments: { to: 'a@example.com' } }
+          continuation: { kind: vercel_ai, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.resume_token_will_issue, equals: true }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the same user, from the approver surface, resolves it
+      as: approver_surface_token
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: the user reads the Resumption
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 200 }
+      save: { token: data.resume_token }
+    - name: the approver surface may not consume it
+      as: approver_surface_token
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          resume_token: '${token}'
+          action: { tool_ref: 'ext:conf:surface-${uniq}', arguments: { to: 'a@example.com' } }
+      expect: { status: 403, problem: forbidden }
+    - name: the user's own token still consumes it
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          resume_token: '${token}'
+          action: { tool_ref: 'ext:conf:surface-${uniq}', arguments: { to: 'a@example.com' } }
+      expect: { status: 200, body: [{ path: data.state, equals: consumed }] }
+- id: terminal-withdrawn-frees-identity
+  title: After withdraw, an identical decide opens a new obligation
+  tags: [both, lifecycle]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'withdraw ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.approval.created, equals: true }] }
+      save: { first: data.approval.id }
+    - as: creator
+      request: { method: POST, path: '/v1/approvals/${first}/withdraw' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: withdrawn }
+    - name: the withdrawn approval is not a resolution
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${first}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.resolution, exists: false }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'withdraw ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.created, equals: true }
+          - { path: data.approval.id, not_equals: '${first}' }
+- id: terminal-withdraw-requester-only
+  title: Only the requester may withdraw
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'wd-only ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id }
+    - as: approver
+      request: { method: POST, path: '/v1/approvals/${approval_id}/withdraw' }
+      expect: { status: 403 }
+- id: negative-resumption-after-withdraw
+  title: After an approved obligation is withdrawn, GET /v1/approvals/{id}/resumption is 409 obligation_withdrawn and /consume is refused
+  tags: [both, negative, lifecycle]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register the external tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:wd:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: decide
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wd:${uniq}', arguments: { to: 'a@example.com' } }
+          continuation: { kind: vercel_ai, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: approve
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: the requester withdraws the approved obligation
+      as: creator
+      request: { method: POST, path: '/v1/approvals/${approval_id}/withdraw' }
+      expect: { status: 200, body: [{ path: data.state, equals: withdrawn }] }
+    - name: the signed Resumption is no longer released
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 409, problem: obligation_withdrawn }
+- id: terminal-expiry-frees-identity
+  title: After a policy-set expiry elapses, an identical decide opens a new obligation and nothing is dispatched
+  tags: [both, lifecycle, needs-mock-control]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'expire ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.approval.created, equals: true }] }
+      save: { first: data.approval.id, digest: data.action_digest }
+    - advance_seconds: 7200
+    - name: the old obligation expired and cannot be resolved
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${first}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 409, problem: obligation_expired }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'expire ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.created, equals: true }
+          - { path: data.approval.id, not_equals: '${first}' }
+- id: runs-scope-the-obligation
+  title: An external run is a scope - the same action in the run and out of it are different obligations; a run you do not own is refused
+  tags: [both, runs]
+  needs: [approver]
+  requires: [runs, approvals]
+  steps:
+    - as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: external } }
+      expect:
+        status: 201
+        body:
+          - { path: data.kind, equals: external }
+          - { path: data.scope_id, exists: true }
+      save: { run_id: data.id }
+    - name: governed runs are created by the platform
+      as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: governed } }
+      expect: { status: 405, problem: governed_run_not_creatable }
+    - name: decide inside the run
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          actor: { run_id: '${run_id}' }
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'run ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.approval.created, equals: true }] }
+      save: { in_run: data.approval.id }
+    - name: the same action in the principal scope is another obligation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'run ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.created, equals: true }
+          - { path: data.approval.id, not_equals: '${in_run}' }
+    - name: the run is readable
+      as: creator
+      request: { method: GET, path: '/v1/runs/${run_id}' }
+      expect: { status: 200, body: [{ path: data.id, equals: '${run_id}' }] }
+    - name: another principal cannot select the run's scope
+      as: approver
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          actor: { run_id: '${run_id}' }
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'run ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 403 }
+- id: approvals-queue-and-detail
+  title: The queue lists a pending approval, approver=me hides the creator's own, and detail carries the digest
+  tags: [both]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'queue ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the approver sees it in their queue
+      as: approver
+      request: { method: GET, path: '/v1/approvals?state=pending&approver=me&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${approval_id}' } }
+    - name: the creator does not
+      as: creator
+      request: { method: GET, path: '/v1/approvals?state=pending&approver=me&limit=200' }
+      expect: { status: 200 }
+    - name: detail
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.action_digest, equals: '${digest}' }
+          - { path: data.tool_ref, equals: '${proxied_tool}' }
+          - { path: data.obligation_kind, equals: tool_invocation }
+    - name: wait returns the current state
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}/wait?timeout=0' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+    - name: the stream opens
+      as: approver
+      request: { method: GET, path: /v1/approvals/stream }
+      expect: { status: 200, stream: true }
+    - name: reject through the deny alias
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/deny
+        body: { reason: no, expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - { path: data.resolution, equals: rejected }
+- id: user-token-without-resolve-scope-is-insufficient-scope
+  title: Where a deployment advertises user_resolve_scope, a user's token without it cannot resolve, approve, deny or batch-resolve, and the same user with it can
+  tags: [both, negative]
+  requires: approvals
+  advertises: [user_resolve_scope]
+  needs: [creator_user, approver, approver_token_without_resolve_scope]
+  steps:
+    - name: the user opens an obligation through POST /v1/decisions
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'scope ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the approver's token without the scope cannot resolve
+      as: approver_token_without_resolve_scope
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: it cannot approve
+      as: approver_token_without_resolve_scope
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: it cannot deny
+      as: approver_token_without_resolve_scope
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: it cannot resolve a batch, and the whole call is refused
+      as: approver_token_without_resolve_scope
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${approval_id}',
+                resolution: approved,
+                expected_action_digest: '${digest}',
+              }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: the missing scope is answered before the approval is looked up
+      as: approver_token_without_resolve_scope
+      request:
+        method: POST
+        path: /v1/approvals/apr_does_not_exist/resolve
+        body:
+          {
+            resolution: approved,
+            expected_action_digest: '0000000000000000000000000000000000000000000000000000000000000000',
+          }
+      expect: { status: 403, problem: insufficient_scope }
+    - name: the same user still reads the approval, and nothing was resolved
+      as: approver_token_without_resolve_scope
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+    - name: the same user with the scope resolves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }

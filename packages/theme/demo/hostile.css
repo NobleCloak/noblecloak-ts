@@ -1,0 +1,125 @@
+/*
+ * A hostile host page: what a builder's app might already have when it embeds a module. A universal
+ * `all: unset`, a preflight-style reset and Tailwind-style utilities (house-written stand-ins, not Tailwind's
+ * own output), loud element rules, and variables named like the design system's and like ours. Nothing here
+ * is scoped. The end-to-end leak and inward tests and the preview's "hostile host" story load it.
+ */
+:root {
+  --background: #ff69b4;
+  --foreground: #00ff00;
+  --primary: #00ffff;
+  --border: #ff0000;
+  --radius: 0;
+  --nc-background: #800080;
+  --nc-primary: #00ff00;
+  --ncbg: #800080;
+}
+
+body :not(script, style, template, noscript) {
+  all: unset;
+}
+
+*,
+::before,
+::after {
+  box-sizing: content-box;
+  border: 0 solid var(--border);
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  display: block;
+  margin: 40px 0;
+  color: #ff8c00;
+  font-size: 44px;
+  font-weight: 900;
+  text-decoration: underline wavy;
+  text-transform: uppercase;
+}
+
+button,
+input,
+select,
+textarea,
+[type='button'],
+[type='checkbox'] {
+  display: inline-block;
+  padding: 20px;
+  border: 5px dotted #008000;
+  border-radius: 0;
+  background: #ffff00;
+  color: #800080;
+  font-size: 30px;
+  letter-spacing: 4px;
+  line-height: 3;
+  text-transform: uppercase;
+  cursor: crosshair;
+  appearance: auto;
+  opacity: 0.9;
+}
+
+div,
+span,
+section,
+nav,
+ul,
+li,
+table,
+thead,
+tbody,
+tr,
+td,
+th,
+label,
+dialog {
+  padding: 7px;
+  margin: 3px;
+  border: 2px solid #ff00ff;
+  background: #eeeeee;
+  color: #008080;
+  line-height: 3;
+  text-align: right;
+  letter-spacing: 2px;
+}
+
+a {
+  color: #ff0000;
+  text-decoration: none;
+}
+
+dialog {
+  position: static;
+  display: block;
+}
+
+::backdrop {
+  background: #00ff00;
+}
+
+/* Tailwind-style utilities. */
+.flex {
+  display: flex;
+}
+.p-4 {
+  padding: 1rem;
+}
+.rounded {
+  border-radius: var(--radius);
+}
+.bg-background {
+  background-color: var(--background);
+}
+.text-primary {
+  color: var(--primary);
+}
+.border {
+  border-width: 1px;
+  border-color: var(--border);
+}
+.btn {
+  background: #000000;
+  color: #ffffff;
+}

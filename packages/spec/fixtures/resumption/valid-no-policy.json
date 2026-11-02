@@ -1,0 +1,23 @@
+{
+  "description": "A well-formed Resumption with no `policy` member: no explicit policy matched and the default applied. Verification succeeds and returns the payload.",
+  "jws": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImZpeHR1cmUta2V5LTEifQ.eyJhY3Rpb25fZGlnZXN0IjoiNmJkMGVlNzk3MmQzNzJlYzFmOGEzY2M0NDMwMmU1NDQ5NzUxMzA1ZDczYzJiNjliNWE3OWM2MmY4OGE0Y2E3NyIsImFjdGlvbl9pZCI6ImFjdF8wMUpBRjNNOFhRIiwiYXBwcm92YWxfaWQiOiI1ZjBmNmEwZS03YTUyLTRmMGUtOGQ3OS0zZjdhM2E0ZDFjMTEiLCJhcHByb3ZlciI6eyJpZCI6InVzZXJfMmY4MSIsImtpbmQiOiJ1c2VyIn0sImNvbnRpbnVhdGlvbiI6eyJjb3JyZWxhdGlvbiI6eyJ0aHJlYWQiOiJ0aF8xIn0sImRlbGl2ZXJ5IjoicHVsbCIsImtpbmQiOiJsYW5nZ3JhcGgifSwiZXhwaXJlc19hdCI6IjIwOTktMDEtMDFUMDA6MDA6MDAuMDAwWiIsIm9ibGlnYXRpb25fa2luZCI6InRvb2xfaW52b2NhdGlvbiIsInJlc29sdXRpb24iOiJhcHByb3ZlZCIsInJlc29sdmVkX2F0IjoiMjAyNi0xMC0wNFQxMTo1ODowMC4wMDBaIiwicmVzdW1lX3Rva2VuIjoicnRfZml4dHVyZV9ub3RfYV9zZWNyZXQiLCJ0b29sX3JlZiI6Im1jcDp0cmFja2VyOmNyZWF0ZV9pc3N1ZSJ9.bHL3YPlWqP2seY7tVlhNU_BJeAEEUW48Ugmfeudzy5WTYJNC8TBQqvdEYGdhxE65ypABvsH70SoYU_-kU-MgAA",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "8UdENMN4RoibRtBjaH1fcOXNvBN8hjjisvAhniqK8jQ",
+        "y": "mwAuah7qulkKAg9Jy-rSJ0bSw3glzEJJEVv5tDRnegs",
+        "kid": "fixture-key-1",
+        "alg": "ES256",
+        "use": "sig"
+      }
+    ]
+  },
+  "expected": {
+    "tool_ref": "mcp:tracker:create_issue",
+    "arg_digest": "6bd0ee7972d372ec1f8a3cc44302e5449751305d73c2b69b5a79c62f88a4ca77"
+  },
+  "now": "2026-10-04T12:00:00.000Z",
+  "outcome": "valid"
+}

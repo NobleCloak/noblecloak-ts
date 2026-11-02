@@ -1,0 +1,41 @@
+- id: authzen-unmodified-client
+  title: An unmodified AuthZEN client library discovers the PDP and evaluates against the root-mounted endpoint
+  tags: [both, authzen, floor]
+  steps:
+    - authzen:
+        as: creator
+        request:
+          subject: { type: user, id: someone }
+          action: { name: invoke }
+          resource: { type: tool, id: '${allow_tool}' }
+          context: { arguments: { q: '${uniq}' } }
+        expect: { decision: true, noblecloak_decision: allow }
+    - authzen:
+        as: creator
+        request:
+          subject: { type: user, id: someone }
+          action: { name: invoke }
+          resource: { type: tool, id: '${deny_tool}' }
+          context: { arguments: { id: '${uniq}' } }
+        expect: { decision: false, noblecloak_decision: deny }
+    - name: a step-up decision is false, with the full decision in context
+      authzen:
+        as: creator
+        request:
+          subject: { type: user, id: someone }
+          action: { name: invoke }
+          resource: { type: tool, id: '${proxied_tool}' }
+          context: { arguments: { title: 'az ${uniq}' } }
+        expect: { decision: false, noblecloak_decision: step_up }
+- id: authzen-default-decision-has-no-policy
+  title: The AuthZEN context carries the decision object, and when the default applied it has no policy member
+  tags: [both, authzen, floor]
+  steps:
+    - authzen:
+        as: creator
+        request:
+          subject: { type: user, id: someone }
+          action: { name: invoke }
+          resource: { type: tool, id: '${default_tool}' }
+          context: { arguments: { q: '${uniq}' } }
+        expect: { decision: true, noblecloak_decision: allow, noblecloak_policy_absent: true }

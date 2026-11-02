@@ -1,0 +1,5 @@
+# Default owner for everything in the repository.
+*                @dmcnelis
+
+# The module API contract. The spec owner is @dmcnelis until a separate owner is named.
+/packages/spec/  @dmcnelis

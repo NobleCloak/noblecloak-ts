@@ -1,0 +1,17 @@
+name: Module API contract question
+description: A question or proposal about the module API contract in packages/spec.
+labels: [spec]
+body:
+  - type: markdown
+    attributes:
+      value: Contract questions are routed to the owners of `packages/spec` (see CODEOWNERS).
+  - type: textarea
+    id: question
+    attributes:
+      label: Question or proposal
+    validations:
+      required: true
+  - type: input
+    id: section
+    attributes:
+      label: Part of the contract it concerns

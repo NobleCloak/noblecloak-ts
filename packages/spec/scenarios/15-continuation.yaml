@@ -1,0 +1,138 @@
+# The fixture tools: ${allow_tool} yields allow, ${deny_tool} yields deny, and ${proxied_tool} yields
+# step_up (an `ask` policy). A continuation is stored if and only if the decision is step_up.
+- id: continuation-ignored-on-allow-and-deny
+  title: A continuation on a decision that is allow or deny is accepted and ignored (200), on every deployment, singly and in a batch
+  tags: [both, floor]
+  steps:
+    - name: allow with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${allow_tool}', arguments: { q: 'cont-allow ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.approval, exists: false }
+    - name: deny with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${deny_tool}', arguments: { id: 'cont-deny ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+    - name: a batch of allow and deny, each with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            - action: { tool_ref: '${allow_tool}', arguments: { q: 'cont-batch ${uniq}' } }
+              continuation: { kind: langgraph, delivery: pull }
+            - action: { tool_ref: '${deny_tool}', arguments: { id: 'cont-batch ${uniq}' } }
+              continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions.0.decision, equals: allow }
+          - { path: data.decisions.1.decision, equals: deny }
+- id: continuation-unsupported-without-approvals
+  title: A deployment that does not advertise approvals answers a step-up that carries a continuation with 422 continuation_unsupported, singly and in a batch
+  tags: [both, negative]
+  unless: approvals
+  steps:
+    - name: step_up with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cont-step ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 422, problem: continuation_unsupported }
+    - name: one step_up element refuses the whole batch
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            - action: { tool_ref: '${allow_tool}', arguments: { q: 'cont-batch2 ${uniq}' } }
+              continuation: { kind: langgraph, delivery: pull }
+            - action: { tool_ref: '${proxied_tool}', arguments: { title: 'cont-batch2 ${uniq}' } }
+              continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 422, problem: continuation_unsupported }
+    - name: step_up with no continuation is still a decision
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cont-none ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+- id: negative-undeclared-delivery-is-refused
+  title: A continuation whose delivery the deployment's continuation_deliveries does not list is 400 invalid_continuation, on a decision and on POST /v1/approvals
+  tags: [both, negative]
+  requires: approvals
+  advertises: [continuation_deliveries]
+  unserved_delivery: push
+  steps:
+    - name: a decision with a push continuation is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'undeclared ${uniq}' } }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: '${callback_base_url}/noblecloak' }
+      expect: { status: 400, problem: invalid_continuation }
+    - name: so is POST /v1/approvals
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'undeclared ${uniq}' } }
+          continuation:
+            { kind: webhook, delivery: push, callback_url: '${callback_base_url}/noblecloak' }
+      expect: { status: 400, problem: invalid_continuation }
+    - name: a delivery that is listed is served
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'declared ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+- id: continuations-test-validates-a-pull-continuation
+  title: POST /v1/continuations/test validates a continuation of a delivery the deployment serves and reports it valid
+  tags: [both, lifecycle]
+  requires: approvals
+  serves_delivery: pull
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/continuations/test
+        body: { continuation: { kind: langgraph, delivery: pull } }
+      expect:
+        status: 200
+        body:
+          - { path: data.valid, equals: true }

@@ -1,0 +1,157 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "Approval request",
+      "wrap": true,
+      "weight": "Bolder",
+      "size": "Medium"
+    },
+    {
+      "type": "TextBlock",
+      "text": "Payables Agent \\(for Dana Ruiz\\) is asking to call \\`payments.refund\\`",
+      "wrap": true
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        {
+          "title": "Tool",
+          "value": "payments.refund"
+        },
+        {
+          "title": "Level",
+          "value": "write"
+        },
+        {
+          "title": "Kind",
+          "value": "tool\\_invocation"
+        },
+        {
+          "title": "Requester",
+          "value": "Dana Ruiz \\(u-dana\\)"
+        },
+        {
+          "title": "Waiting on",
+          "value": "2: Priya \\(u-priya\\), u-sam"
+        },
+        {
+          "title": "Agent",
+          "value": "Payables Agent \\(agent-7\\) \\(parent agent-1\\)"
+        },
+        {
+          "title": "Run",
+          "value": "run-5 \\(governed\\)"
+        },
+        {
+          "title": "Scope",
+          "value": "scope-1"
+        },
+        {
+          "title": "Policy",
+          "value": "pol-1 \\(version 3\\)"
+        },
+        {
+          "title": "Continuation",
+          "value": "resume\\_run"
+        },
+        {
+          "title": "Created",
+          "value": "2026-10-30T09:00:00Z"
+        },
+        {
+          "title": "Expires",
+          "value": "2026-10-31T09:00:00Z"
+        },
+        {
+          "title": "Digest",
+          "value": "sha256:3f2a9c0d11"
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "{",
+          "wrap": true,
+          "fontType": "Monospace",
+          "spacing": "None"
+        },
+        {
+          "type": "TextBlock",
+          "text": "  \"amount\": 42,",
+          "wrap": true,
+          "fontType": "Monospace",
+          "spacing": "None"
+        },
+        {
+          "type": "TextBlock",
+          "text": "  \"ticket\": \"T-9\"",
+          "wrap": true,
+          "fontType": "Monospace",
+          "spacing": "None"
+        },
+        {
+          "type": "TextBlock",
+          "text": "}",
+          "wrap": true,
+          "fontType": "Monospace",
+          "spacing": "None"
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "You're approving your own agent's request",
+      "wrap": true,
+      "isSubtle": true
+    },
+    {
+      "type": "Input.Text",
+      "id": "reason",
+      "label": "Note (optional)",
+      "isRequired": false,
+      "isMultiline": true,
+      "maxLength": 1000
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "Approve",
+      "verb": "approve",
+      "data": {
+        "v": 1,
+        "approval_id": "11111111-1111-4111-8111-11111111111a",
+        "sent_message_id": "22222222-2222-4222-8222-22222222222b",
+        "expected_action_digest": "sha256:3f2a9c0d11"
+      },
+      "associatedInputs": "auto",
+      "style": "positive"
+    },
+    {
+      "type": "Action.Execute",
+      "title": "Deny",
+      "verb": "deny",
+      "data": {
+        "v": 1,
+        "approval_id": "11111111-1111-4111-8111-11111111111a",
+        "sent_message_id": "22222222-2222-4222-8222-22222222222b",
+        "expected_action_digest": "sha256:3f2a9c0d11"
+      },
+      "associatedInputs": "auto",
+      "style": "destructive"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "Open in Approvals",
+      "url": "https://approvals.example.com/approvals/11111111-1111-4111-8111-11111111111a"
+    }
+  ]
+}

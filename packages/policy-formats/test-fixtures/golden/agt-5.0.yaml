@@ -1,0 +1,99 @@
+# NobleCloak tool_invocation policies, written by @noblecloak/policy-formats.
+# Format: AGT 5.0, ACS manifest 0.3.1-beta with a Cedar policy set at pre_tool_call.
+# A call no policy matches is denied by the target engine.
+# The manifest binds this policy set at pre_tool_call; AGT binds one policy per intervention point, so it replaces any policy bound there.
+# Tool names are the tool_refs verbatim: a statement matches only where the host passes the tool_ref as the tool name.
+# AGT 5.0 evaluates a Cedar policy only through a Cedar dispatcher the host registers: its SDKs' zero-config default dispatcher evaluates Rego only and refuses this manifest.
+# Lossy: policy "pol_agent_refunds" /config/approver_groups: kept in @noblecloak_approver_groups only; AGT does not enforce it
+# Lossy: policy "pol_agent_refunds" /config/mode: ask is exported as a forbid (fail closed): AGT 5.0's bundled Cedar dispatcher reads no @advice, so a permit would allow the call; @noblecloak_mode keeps ask for an import
+# Lossy: policy "pol_org_deploy" /config/expires_after: kept in @noblecloak_expires_after only; AGT does not enforce it
+# Lossy: policy "pol_org_deploy" /config/mode: escalate is exported as a forbid (fail closed): AGT 5.0's bundled Cedar dispatcher reads no @advice, so a permit would allow the call; @noblecloak_mode keeps escalate for an import
+# Lossy: policy "pol_org_deploy" /subjects: the organization subject is an unconstrained principal: it covers every agent the manifest governs, which is the organisation exactly only when the manifest is deployed for it alone
+# Lossy: policy "pol_org_read" /subjects: the organization subject is an unconstrained principal: it covers every agent the manifest governs, which is the organisation exactly only when the manifest is deployed for it alone
+
+agent_control_specification_version: "0.3.1-beta"
+metadata:
+  name: "noblecloak-tool-policies"
+policies:
+  noblecloak_tool_invocation:
+    type: cedar
+    policy_set: |
+      @noblecloak_policy("pol_agent_mail_deny")
+      @noblecloak_kind("tool_invocation")
+      @noblecloak_mode("deny")
+      @noblecloak_name("The support agent sends no mail")
+      @id("noblecloak.deny:pol_agent_mail_deny")
+      forbid (
+        principal == Agent::"agt_support",
+        action == Action::"pre_tool_call",
+        resource == Tool::"mcp:gmail:main:send_email"
+      );
+
+      @noblecloak_policy("pol_agent_mail_deny")
+      @noblecloak_kind("tool_invocation")
+      @noblecloak_mode("deny")
+      @noblecloak_name("The support agent sends no mail")
+      @id("noblecloak.deny:pol_agent_mail_deny")
+      forbid (
+        principal == Agent::"agt_triage",
+        action == Action::"pre_tool_call",
+        resource == Tool::"mcp:gmail:main:send_email"
+      );
+
+      @noblecloak_policy("pol_agent_refunds")
+      @noblecloak_kind("tool_invocation")
+      @noblecloak_mode("ask")
+      @noblecloak_name("Refunds need approval")
+      @noblecloak_approver_groups("[\"finance\"]")
+      @noblecloak_encoding("fail_closed")
+      @id("noblecloak.ask:pol_agent_refunds")
+      forbid (
+        principal == Agent::"agt_support",
+        action == Action::"pre_tool_call",
+        resource == Tool::"mcp:stripe:main:create_refund"
+      );
+
+      @noblecloak_policy("pol_org_deploy")
+      @noblecloak_kind("tool_invocation")
+      @noblecloak_mode("escalate")
+      @noblecloak_name("Deploys escalate")
+      @noblecloak_expires_after("PT30M")
+      @noblecloak_encoding("fail_closed")
+      @id("noblecloak.escalate:pol_org_deploy")
+      forbid (
+        principal,
+        action == Action::"pre_tool_call",
+        resource
+      )
+      when {
+        [
+          Tool::"external:deploy",
+          Tool::"mcp:gmail:main:send_email"
+        ].contains(resource)
+      };
+
+      @noblecloak_policy("pol_org_read")
+      @noblecloak_kind("tool_invocation")
+      @noblecloak_mode("always_allow")
+      @noblecloak_name("Everyone may read")
+      @id("noblecloak.always_allow:pol_org_read")
+      permit (
+        principal,
+        action == Action::"pre_tool_call",
+        resource
+      );
+intervention_points:
+  pre_tool_call:
+    policy_target: "$.tool_call.args"
+    tool_name_from: "$.tool_call.name"
+    policy:
+      id: noblecloak_tool_invocation
+tools:
+  "external:deploy":
+    noblecloak_tool_ref: "external:deploy"
+  "mcp:gmail:main:list_messages":
+    noblecloak_tool_ref: "mcp:gmail:main:list_messages"
+  "mcp:gmail:main:send_email":
+    noblecloak_tool_ref: "mcp:gmail:main:send_email"
+  "mcp:stripe:main:create_refund":
+    noblecloak_tool_ref: "mcp:stripe:main:create_refund"

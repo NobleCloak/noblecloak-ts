@@ -1,0 +1,1307 @@
+- id: problem-request-id-on-every-problem
+  title: Every problem this API produces carries a non-empty request_id, whatever its status - 400, 401, 404 and 422 here
+  tags: [both, negative, floor]
+  steps:
+    - name: no token
+      as: none
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 401
+        problem: unauthorized
+        body:
+          - { path: request_id, matches: '.+' }
+    - name: a body that does not match the schema
+      as: creator
+      request: { method: POST, path: /v1/records, body: { decision: allow } }
+      expect:
+        status: 400
+        problem: invalid_request
+        body:
+          - { path: request_id, matches: '.+' }
+    - name: a record that does not exist
+      as: creator
+      request: { method: GET, path: '/v1/records/rec_${uniq}' }
+      expect:
+        status: 404
+        problem: not_found
+        body:
+          - { path: request_id, matches: '.+' }
+    - name: an Idempotency-Key reused with a different request
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'rid-${uniq}' }
+        body: { tool_ref: 'rid:${uniq}', decision: allow }
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        headers: { Idempotency-Key: 'rid-${uniq}' }
+        body: { tool_ref: 'rid:${uniq}', decision: deny }
+      expect:
+        status: 422
+        problem: idempotency_key_reuse
+        body:
+          - { path: request_id, matches: '.+' }
+- id: server-error-503-is-service-unavailable
+  title: A 503 is the problem type service_unavailable, carries a request_id and Retry-After, and the next request is served
+  tags: [both, negative, floor]
+  steps:
+    - name: the deployment cannot answer the next request to GET /v1/tools
+      control: { fail: { operation: listTools, status: 503, retry_after: 7 } }
+    - name: it answers 503, typed, with a request id and the wait
+      as: creator
+      request: { method: GET, path: /v1/tools }
+      expect:
+        status: 503
+        problem: service_unavailable
+        headers:
+          - { name: retry-after, matches: '^7$' }
+        body:
+          - { path: status, equals: 503 }
+          - { path: request_id, matches: '.+' }
+    - name: the failure was once
+      as: creator
+      request: { method: GET, path: /v1/tools }
+      expect: { status: 200 }
+- id: server-error-500-is-internal-error
+  title: A 500 is the problem type internal_error and carries a request_id
+  tags: [both, negative, floor]
+  steps:
+    - name: the deployment fails the next request to GET /v1/tools
+      control: { fail: { operation: listTools, status: 500 } }
+    - as: creator
+      request: { method: GET, path: /v1/tools }
+      expect:
+        status: 500
+        problem: internal_error
+        body:
+          - { path: status, equals: 500 }
+          - { path: request_id, matches: '.+' }
+    - name: the failure was once
+      as: creator
+      request: { method: GET, path: /v1/tools }
+      expect: { status: 200 }
+- id: negative-tools-reserved-reference
+  title: A tool reference in a namespace the deployment reserves is 422 reserved_tool_ref, and nothing is registered
+  tags: [both, negative, floor]
+  fixtures: [reserved_tool_ref]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: '${reserved_tool_ref}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 422, problem: reserved_tool_ref }
+    - name: a decision for it is still unknown_tool
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${reserved_tool_ref}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: unknown_tool }
+- id: negative-tools-system-reference
+  title: A tool reference equal to a system tool's is 422 system_tool_ref
+  tags: [both, negative, floor]
+  fixtures: [system_tool_ref]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: '${system_tool_ref}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 422, problem: system_tool_ref }
+- id: negative-tools-side-effect-level-never-falls
+  title: A tool's side-effect level never falls - 409 side_effect_level_downgrade on a lower level, by registering again and by patching
+  tags: [both, negative, floor]
+  steps:
+    - name: register at delete
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:lvl:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: delete
+          owner_kind: org
+      expect: { status: 201 }
+      save: { tool_id: data.id }
+    - name: registering the reference again at write is refused
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:lvl:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 409, problem: side_effect_level_downgrade }
+    - name: registering it again at the same level is not an upsert, it is 400 invalid_request
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:lvl:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: delete
+          owner_kind: org
+      expect: { status: 400, problem: invalid_request }
+    - name: and so is registering it again at a higher level - a level rises through PATCH
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:lvl:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: admin
+          owner_kind: org
+      expect: { status: 400, problem: invalid_request }
+    - name: so is patching it to read
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: read }
+      expect: { status: 409, problem: side_effect_level_downgrade }
+    - name: the level did not move
+      as: creator
+      request: { method: GET, path: '/v1/tools/${tool_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: delete }
+    - name: it may stay
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: delete, description: same level }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: delete }
+    - name: and it may rise
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: admin }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: admin }
+    - name: and then cannot fall from there either
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: external }
+      expect: { status: 409, problem: side_effect_level_downgrade }
+- id: negative-tools-write-and-external-share-a-rank
+  title: write and external are one rank - a move between them, either way, is allowed, delete to external is a fall (409 side_effect_level_downgrade) and external to delete is a rise
+  tags: [both, negative, floor]
+  steps:
+    - name: register at write
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:tie:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+      save: { tool_id: data.id }
+    - name: registering it again at external is not an upsert, it is 400 invalid_request and not a downgrade
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:tie:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+      expect: { status: 400, problem: invalid_request }
+    - name: write to external is allowed
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: external }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: external }
+    - name: external to write is allowed
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: write }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: write }
+    - name: back to external, the starting point of the rise
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: external }
+      expect: { status: 200 }
+    - name: external to delete is a rise
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: delete }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: delete }
+    - name: delete to external is a fall
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: external }
+      expect: { status: 409, problem: side_effect_level_downgrade }
+    - name: delete to write is a fall too
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { side_effect_level: write }
+      expect: { status: 409, problem: side_effect_level_downgrade }
+    - name: the level did not move
+      as: creator
+      request: { method: GET, path: '/v1/tools/${tool_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.side_effect_level, equals: delete }
+- id: advertised-decision-batch-limit-is-enforced
+  title: Whatever decisions limit a deployment advertises on GET /v1/capabilities is the one it enforces - the limit is served, limit plus one is 400 batch_too_large with max_items equal to it
+  tags: [both, negative, floor]
+  limits: [decisions_batch_max_items]
+  steps:
+    - name: exactly the advertised limit is served
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            $repeat: '${decisions_batch_max_items}'
+            item: { action: { tool_ref: '${allow_tool}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions, length: '${decisions_batch_max_items}' }
+    - name: one more is over it, and max_items names the advertised limit
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            $repeat: '${decisions_batch_max_items+1}'
+            item: { action: { tool_ref: '${allow_tool}', arguments: {} } }
+      expect:
+        status: 400
+        problem: batch_too_large
+        body:
+          - { path: max_items, equals: '${decisions_batch_max_items}' }
+          - { path: request_id, matches: '.+' }
+- id: advertised-records-batch-limit-is-enforced
+  title: Whatever records limit a deployment advertises on GET /v1/capabilities is the one it enforces - the limit is appended, limit plus one is 400 batch_too_large with max_items equal to it, and nothing is appended
+  tags: [both, negative, floor]
+  limits: [records_batch_max_items]
+  steps:
+    - name: one more than the advertised limit is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            $repeat: '${records_batch_max_items+1}'
+            item: { tool_ref: 'abl:${uniq}', decision: allow }
+      expect:
+        status: 400
+        problem: batch_too_large
+        body:
+          - { path: max_items, equals: '${records_batch_max_items}' }
+    - name: nothing was appended
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=abl:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }
+    - name: exactly the advertised limit is appended
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            $repeat: '${records_batch_max_items}'
+            item: { tool_ref: 'abl:${uniq}', decision: allow }
+      expect:
+        status: 201
+        body:
+          - { path: data, length: '${records_batch_max_items}' }
+- id: negative-decision-batch-limit
+  title: The decisions batch limit a deployment advertises is enforced - limit plus one is 400 batch_too_large with max_items, exactly the limit is served, 101 is invalid_request
+  tags: [both, negative, floor]
+  steps:
+    - name: the deployment accepts three decisions in a batch
+      control: { limits: { decisions_batch_max_items: 3 } }
+    - name: capabilities advertise it, and say nothing of the records limit
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.limits.decisions_batch_max_items, equals: 3 }
+          - { path: data.limits.records_batch_max_items, exists: false }
+    - name: four is over it
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests: { $repeat: 4, item: { action: { tool_ref: '${allow_tool}', arguments: {} } } }
+      expect:
+        status: 400
+        problem: batch_too_large
+        body:
+          - { path: max_items, equals: 3 }
+          - { path: request_id, matches: '.+' }
+    - name: three is served
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests: { $repeat: 3, item: { action: { tool_ref: '${allow_tool}', arguments: {} } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions, length: 3 }
+    - name: 101 is a schema violation, whatever the limit
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests: { $repeat: 101, item: { action: { tool_ref: '${allow_tool}', arguments: {} } } }
+      expect: { status: 400, problem: invalid_request }
+- id: negative-records-batch-limit
+  title: The records batch limit a deployment advertises is enforced - limit plus one is 400 batch_too_large with max_items, exactly the limit is appended, 101 is invalid_request
+  tags: [both, negative, floor]
+  steps:
+    - name: the deployment accepts two records in a batch
+      control: { limits: { records_batch_max_items: 2 } }
+    - name: capabilities advertise it, and say nothing of the decisions limit
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.limits.records_batch_max_items, equals: 2 }
+          - { path: data.limits.decisions_batch_max_items, exists: false }
+    - name: three is over it, and nothing is appended
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records: { $repeat: 3, item: { tool_ref: 'bl:${uniq}', decision: allow } }
+      expect:
+        status: 400
+        problem: batch_too_large
+        body:
+          - { path: max_items, equals: 2 }
+    - as: creator
+      request: { method: GET, path: '/v1/records?tool=bl:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }
+    - name: two is appended
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records: { $repeat: 2, item: { tool_ref: 'bl:${uniq}', decision: allow } }
+      expect:
+        status: 201
+        body:
+          - { path: data, length: 2 }
+    - name: 101 is a schema violation, whatever the limit
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records: { $repeat: 101, item: { tool_ref: 'bl:${uniq}', decision: allow } }
+      expect: { status: 400, problem: invalid_request }
+- id: negative-batch-above-100-is-invalid-request
+  title: A batch of 101 decisions or 101 records is 400 invalid_request - 100 is the most any deployment accepts
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests: { $repeat: 101, item: { action: { tool_ref: '${allow_tool}', arguments: {} } } }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records: { $repeat: 101, item: { tool_ref: 'b101:${uniq}', decision: allow } }
+      expect: { status: 400, problem: invalid_request }
+- id: batch-of-100-decisions-is-accepted-when-no-lower-limit-is-advertised
+  title: A batch of exactly 100 decisions is served when the deployment advertises no lower decisions limit - an absent limit means 100
+  tags: [both, floor]
+  unreduced_limits: [decisions_batch_max_items]
+  steps:
+    - name: 100 decisions in one batch
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests: { $repeat: 100, item: { action: { tool_ref: '${allow_tool}', arguments: {} } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions, length: 100 }
+- id: batch-of-100-records-is-accepted-when-no-lower-limit-is-advertised
+  title: A batch of exactly 100 records is appended when the deployment advertises no lower records limit - an absent limit means 100
+  tags: [both, floor]
+  unreduced_limits: [records_batch_max_items]
+  steps:
+    - name: 100 records in one batch
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records: { $repeat: 100, item: { tool_ref: 'b100:${uniq}', decision: allow } }
+      expect:
+        status: 201
+        body:
+          - { path: data, length: 100 }
+    - name: all 100 were appended
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=b100:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 100 }
+- id: negative-tools-ref-in-use
+  title: A tool reference the deployment already uses for another tool is 422 tool_ref_in_use, and a decision for it is unchanged
+  tags: [both, negative, floor]
+  fixtures: [tool_ref_in_use]
+  steps:
+    - name: the decision for the reference before the refused registration
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${tool_ref_in_use}', arguments: {} } }
+      expect: { status: 200 }
+      save: { before: data.decision }
+    - name: registering a tool under it is refused as in use, not as already registered
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: '${tool_ref_in_use}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 422, problem: tool_ref_in_use }
+    - name: the decision for it is what it was
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${tool_ref_in_use}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: '${before}' }
+- id: tools-ref-in-use-is-organisation-scoped
+  title: A reference in use in one organisation is not in use in another, so the other organisation registers a tool under it
+  tags: [both, tenancy, floor]
+  tool_registration: any
+  fixtures: [tool_ref_in_use]
+  needs: [other_org]
+  steps:
+    - name: in the caller's organisation the reference is in use
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: '${tool_ref_in_use}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 422, problem: tool_ref_in_use }
+    - name: another organisation registers a tool under the same reference
+      as: other_org
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: '${tool_ref_in_use}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect:
+        status: 201
+        body:
+          - { path: data.tool_ref, equals: '${tool_ref_in_use}' }
+- id: negative-retry-hint-is-in-the-body
+  title: A 503 that carries Retry-After carries the same number of seconds in the body as retry_after_seconds, and one that carries no hint carries no such member
+  tags: [both, negative, floor]
+  steps:
+    - name: the deployment cannot answer the next request to GET /v1/tools, and says to wait 9 seconds
+      control: { fail: { operation: listTools, status: 503, retry_after: 9 } }
+    - name: the header and the body say the same
+      as: creator
+      request: { method: GET, path: /v1/tools }
+      expect:
+        status: 503
+        problem: service_unavailable
+        headers:
+          - { name: retry-after, matches: '^9$' }
+        body:
+          - { path: retry_after_seconds, equals: 9 }
+    - name: the deployment cannot answer, and cannot say when
+      control: { fail: { operation: listTools, status: 503 } }
+    - name: no header and no member
+      as: creator
+      request: { method: GET, path: /v1/tools }
+      expect:
+        status: 503
+        problem: service_unavailable
+        headers:
+          - { name: retry-after, exists: false }
+        body:
+          - { path: retry_after_seconds, exists: false }
+- id: resolve-batch-mixed-outcomes
+  title: A batch resolve answers each element on its own - the approval, or the problem the single route would answer - so one conflict or unknown approval does not fail the rest, and a service principal is refused whole
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rb:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: three approvals are open
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rb:${uniq}', arguments: { q: 'a-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rb:${uniq}', arguments: { q: 'b-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { b_id: data.approval.id, b_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rb:${uniq}', arguments: { q: 'c-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { c_id: data.approval.id, c_digest: data.action_digest }
+    - name: a service principal never resolves, so the whole call is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+      expect: { status: 403, problem: not_eligible }
+    - name: an approver resolves four elements, one with a digest it did not see and one that is no approval
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - approval_id: '${b_id}'
+              resolution: approved
+              expected_action_digest: '0000000000000000000000000000000000000000000000000000000000000000'
+            - {
+                approval_id: '${c_id}',
+                resolution: rejected,
+                expected_action_digest: '${c_digest}',
+                reason: 'not now',
+              }
+            - approval_id: 'no-such-approval-${uniq}'
+              resolution: approved
+              expected_action_digest: '0000000000000000000000000000000000000000000000000000000000000000'
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 4 }
+          - { path: data.0.id, equals: '${a_id}' }
+          - { path: data.0.state, equals: approved }
+          - { path: data.1.status, equals: 409 }
+          - { path: data.1.type, matches: 'approval_conflict$' }
+          - { path: data.2.id, equals: '${c_id}' }
+          - { path: data.2.state, equals: rejected }
+          - { path: data.3.status, equals: 404 }
+          - { path: data.3.type, matches: 'not_found$' }
+    - name: the element that conflicted is still pending, the others are resolved
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${b_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+    - name: resolving it again, now with the digest it saw, is served
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${b_id}',
+                resolution: approved,
+                expected_action_digest: '${b_digest}',
+              }
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.state, equals: approved }
+          - { path: data.1.status, equals: 409 }
+          - { path: data.1.type, matches: 'already_resolved$' }
+- id: resolve-batch-order-preserved
+  title: A batch resolve answers in the order of the request, one result per element
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ro:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: three approvals are open
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ro:${uniq}', arguments: { q: 'a-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ro:${uniq}', arguments: { q: 'b-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { b_id: data.approval.id, b_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ro:${uniq}', arguments: { q: 'c-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { c_id: data.approval.id, c_digest: data.action_digest }
+    - name: resolved in the reverse of the order they were opened
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${c_id}',
+                resolution: rejected,
+                expected_action_digest: '${c_digest}',
+              }
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - {
+                approval_id: '${b_id}',
+                resolution: rejected,
+                expected_action_digest: '${b_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 3 }
+          - { path: data.0.id, equals: '${c_id}' }
+          - { path: data.0.state, equals: rejected }
+          - { path: data.1.id, equals: '${a_id}' }
+          - { path: data.1.state, equals: approved }
+          - { path: data.2.id, equals: '${b_id}' }
+          - { path: data.2.state, equals: rejected }
+- id: negative-resolve-batch-over-limit
+  title: The resolve batch limit a deployment advertises is enforced - limit plus one is 400 batch_too_large with max_items and resolves nothing, exactly the limit is served, 101 is invalid_request
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: the deployment accepts two resolutions in a batch
+      control: { limits: { resolutions_batch_max_items: 2 } }
+    - name: capabilities advertise it
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.limits.resolutions_batch_max_items, equals: 2 }
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rl:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: three approvals are open
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rl:${uniq}', arguments: { q: 'a-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rl:${uniq}', arguments: { q: 'b-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { b_id: data.approval.id, b_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rl:${uniq}', arguments: { q: 'c-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { c_id: data.approval.id, c_digest: data.action_digest }
+    - name: three is over the limit
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - {
+                approval_id: '${b_id}',
+                resolution: approved,
+                expected_action_digest: '${b_digest}',
+              }
+            - {
+                approval_id: '${c_id}',
+                resolution: approved,
+                expected_action_digest: '${c_digest}',
+              }
+      expect:
+        status: 400
+        problem: batch_too_large
+        body:
+          - { path: max_items, equals: 2 }
+          - { path: request_id, matches: '.+' }
+    - name: nothing in it was resolved
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+    - name: two is served
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - {
+                approval_id: '${b_id}',
+                resolution: approved,
+                expected_action_digest: '${b_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+    - name: 101 is a schema violation, whatever the limit
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            $repeat: 101
+            item:
+              approval_id: '${c_id}'
+              resolution: approved
+              expected_action_digest: '${c_digest}'
+      expect: { status: 400, problem: invalid_request }
+- id: negative-oversized-body-is-413
+  title: A body larger than the deployment accepts is 413 payload_too_large on a route that takes a body, with max_bytes when the deployment can say, and a smaller body is served
+  tags: [both, negative, floor]
+  steps:
+    - name: the deployment accepts bodies of at most 400 bytes
+      control: { max_body_bytes: 400 }
+    - name: a decision with a large argument is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: '${allow_tool}'
+            arguments: { items: { $repeat: 200, item: 'xxxxxxxxxx' } }
+      expect:
+        status: 413
+        problem: payload_too_large
+        body:
+          - { path: max_bytes, equals: 400 }
+          - { path: request_id, matches: '.+' }
+    - name: a tool whose schema is large is refused
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:big:${uniq}'
+          transport: external
+          input_schema: { type: object, enum: { $repeat: 200, item: 'xxxxxxxxxx' } }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 413, problem: payload_too_large }
+    - name: a small body is served
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${allow_tool}', arguments: {} } }
+      expect: { status: 200 }
+- id: negative-tool-registration-refused-to-a-non-administrator
+  title: A deployment that lets only administrators register tools answers any other principal 403 forbidden on registration and on change, whatever the body
+  tags: [both, negative, floor]
+  tool_registration: administrators
+  needs: [member]
+  steps:
+    - name: capabilities say so
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.tool_registration, equals: administrators }
+    - name: an administrator registers a tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:adm:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+      save: { tool_id: data.id }
+    - name: a member is refused registration
+      as: member
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:mem:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 403, problem: forbidden }
+    - name: and is refused a change to the administrator's tool
+      as: member
+      request:
+        method: PATCH
+        path: /v1/tools/${tool_id}
+        body: { description: 'changed by a member' }
+      expect: { status: 403, problem: forbidden }
+    - name: the tool was not changed
+      as: admin
+      request: { method: GET, path: '/v1/tools/${tool_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.description, not_equals: 'changed by a member' }
+- id: negative-unserved-resolution-is-refused
+  title: A resolution the deployment does not advertise is 400 invalid_request on resolve and as an element of a batch (which does not fail the call), and the approval stays pending
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  unserved_resolution: escalated
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ur:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: an approval is open
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ur:${uniq}', arguments: { q: 'ur-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { ur_id: data.approval.id, ur_digest: data.action_digest }
+    - name: escalating it is refused
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${ur_id}/resolve
+        body: { resolution: escalated, expected_action_digest: '${ur_digest}' }
+      expect: { status: 400, problem: invalid_request }
+    - name: and so is an element of a batch, which does not fail the call
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${ur_id}',
+                resolution: escalated,
+                expected_action_digest: '${ur_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.status, equals: 400 }
+          - { path: data.0.type, matches: 'invalid_request$' }
+    - name: the approval stays pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${ur_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+- id: resolve-batch-eligibility-is-per-item
+  title: A batch resolve applies the single route's eligibility rule to every element - a member who may not approve, and the approval's own creator, each get the refusal the single resolve gives for that element, while an eligible approver's element in the same position is served
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver, member]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:be:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:be:${uniq}', arguments: { q: 'a-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - name: another user opens one
+      as: approver
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:be:${uniq}', arguments: { q: 'd-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { d_id: data.approval.id, d_digest: data.action_digest }
+    - name: a member who may not approve gets the single route's refusal for the element
+      as: member
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.status, equals: 403 }
+          - { path: data.0.type, matches: 'not_eligible$' }
+    - name: the creator gets the same refusal for its own approval, and its element on another's approval is served
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - {
+                approval_id: '${d_id}',
+                resolution: approved,
+                expected_action_digest: '${d_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+          - { path: data.0.status, equals: 403 }
+          - { path: data.0.type, matches: 'not_eligible$' }
+          - { path: data.1.id, equals: '${d_id}' }
+          - { path: data.1.state, equals: approved }
+    - name: the refused approval is still pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+    - name: an eligible approver resolves it in the same position
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${a_id}' }
+          - { path: data.0.state, equals: approved }
+- id: resolve-batch-edge-cases
+  title: A batch that names an approval twice applies the first and answers the repeat with the conflict the single route gives, a body with a malformed element is refused whole before any element is applied, and an empty batch is refused
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:bx:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: two approvals are open
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:bx:${uniq}', arguments: { q: 'a-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:bx:${uniq}', arguments: { q: 'b-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { b_id: data.approval.id, b_digest: data.action_digest }
+    - name: a malformed later element refuses the whole body, and the valid element before it is not applied
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - { approval_id: '${b_id}', expected_action_digest: '${b_digest}' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the valid element is still pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+    - name: an empty batch is refused
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body: { items: [] }
+      expect: { status: 400, problem: invalid_request }
+    - name: the same approval twice - the first applies, the repeat is the conflict the single route gives
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+            - {
+                approval_id: '${a_id}',
+                resolution: approved,
+                expected_action_digest: '${a_digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+          - { path: data.0.id, equals: '${a_id}' }
+          - { path: data.0.state, equals: approved }
+          - { path: data.1.status, equals: 409 }
+          - { path: data.1.type, matches: 'already_resolved$' }

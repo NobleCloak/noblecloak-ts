@@ -1,0 +1,30 @@
+# Dependabot does not move the bun version (package.json packageManager), the Node version
+# (.node-version) or the digest-pinned actionlint image in ci.yml. This weekly run fails when any
+# of them lags its registry (scripts/check-toolchain.ts), so a stale pin shows up as a red run. A
+# failed registry lookup also turns the run red, with a message saying no pin was checked.
+name: toolchain-currency
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: toolchain-currency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun run check:toolchain
+        env:
+          # Read-only job token, sent only to api.github.com: unauthenticated calls from shared
+          # runner IPs hit the 60-per-hour limit.
+          GITHUB_TOKEN: ${{ github.token }}

@@ -1,0 +1,518 @@
+- id: routes-capabilities-keys
+  title: Capabilities and keys answer per schema
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.deployment, matches: '^(hosted|edge)$' }
+          - { path: data.kids.0, exists: true }
+          - { path: data.jwks_uri, exists: true }
+    - as: none
+      request: { method: GET, path: /.well-known/jwks.json }
+      expect:
+        status: 200
+        body:
+          - { path: keys.0.kty, equals: EC }
+          - { path: keys.0.crv, equals: P-256 }
+- id: routes-capabilities-resolutions
+  title: A deployment that advertises approvals lists the resolutions it can produce
+  tags: [both]
+  requires: approvals
+  steps:
+    - as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.resolutions, contains: approved }
+# Rev 12: registering origins is an administrator's, reading them is any principal's of the organisation.
+- id: routes-origins
+  title: Origins - an administrator writes, anyone of the organisation reads, an origin must be a URL, and the creator may not write
+  tags: [both]
+  requires: origins
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://app.${uniq}.example.com'] }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: /v1/origins }
+      expect:
+        status: 200
+        body:
+          - { path: data.origins, contains: 'https://app.${uniq}.example.com' }
+    - name: an origin must be a URL
+      as: admin
+      request: { method: PUT, path: /v1/origins, body: { origins: [not a url] } }
+      expect: { status: 400, problem: invalid_request }
+    - name: the creator, a service principal, is not an administrator
+      as: creator
+      request:
+        method: PUT
+        path: /v1/origins
+        body: { origins: ['https://other.${uniq}.example.com'] }
+      expect: { status: 403, problem: forbidden }
+    - name: the refused write changed nothing
+      as: admin
+      request: { method: GET, path: /v1/origins }
+      expect:
+        status: 200
+        body:
+          - { path: data.origins, equals: ['https://app.${uniq}.example.com'] }
+# Rev 11: registration is an administrator's on a deployment that restricts it (the hosted one does), so the
+# steps register as the administrator, and each registration is of a URL of its own (one per server URL per
+# organisation). Discover and refresh enumerate a real server: see 27-connections.yaml.
+- id: routes-connections
+  title: Connections - create, read, update, list, delete
+  tags: [both]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          {
+            name: 'conn ${uniq}',
+            url: 'https://tools-${uniq}.example.com/mcp',
+            transport: mcp,
+            owner_kind: org,
+          }
+      expect:
+        status: 201
+        body:
+          - { path: data.owner.kind, equals: org }
+      save: { connection_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200, body: [{ path: data.name, equals: 'conn ${uniq}' }] }
+    - as: admin
+      request:
+        method: PATCH
+        path: /v1/connections/${connection_id}
+        body: { name: 'renamed ${uniq}' }
+      expect: { status: 200, body: [{ path: data.name, equals: 'renamed ${uniq}' }] }
+    - as: admin
+      request: { method: GET, path: '/v1/connections?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${connection_id}' } }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 404, problem: not_found }
+- id: routes-tools
+  title: Tools - register, read, change the level, list; only transport external may be registered
+  tags: [both, floor]
+  steps:
+    - name: register a tool, read it, change its level, list it
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:route:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: read,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+      save: { tool_id: data.id }
+    - as: creator
+      request: { method: GET, path: '/v1/tools/${tool_id}' }
+      expect: { status: 200, body: [{ path: data.tool_ref, equals: 'ext:route:${uniq}' }] }
+    - as: admin
+      request: { method: PATCH, path: '/v1/tools/${tool_id}', body: { side_effect_level: admin } }
+      expect: { status: 200, body: [{ path: data.side_effect_level, equals: admin }] }
+    - as: creator
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${tool_id}' } }
+    - name: only transport external may be registered
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'x:${uniq}',
+            transport: mcp,
+            input_schema: { type: object },
+            side_effect_level: read,
+            owner_kind: org,
+          }
+      expect: { status: 400, problem: invalid_request }
+- id: routes-principals
+  title: Principals can be listed by type
+  tags: [both]
+  requires: principals
+  steps:
+    - as: creator
+      request: { method: GET, path: '/v1/principals?type=service' }
+      expect: { status: 200 }
+- id: routes-agents
+  title: Agents - create, with a parent, read
+  tags: [both]
+  requires: agents
+  steps:
+    - as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { parent: data.id }
+    - as: creator
+      request:
+        { method: POST, path: /v1/agents, body: { name: 'child ${uniq}', parent_id: '${parent}' } }
+      expect: { status: 201, body: [{ path: data.parent_id, equals: '${parent}' }] }
+      save: { child: data.id }
+    - as: creator
+      request: { method: GET, path: '/v1/agents/${child}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.name, equals: 'child ${uniq}' }
+          # Rev 13: an agent that was never bound reads principal_id null.
+          - { path: data.principal_id, equals: null }
+- id: routes-webhooks
+  title: Webhooks - an administrator creates (no secret is returned, the webhook is active), lists and deletes; the creator may not
+  tags: [both]
+  requires: webhooks
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/${uniq}', events: [approval.resolved, record.appended] }
+      expect:
+        status: 201
+        body:
+          - { path: data.secret, exists: false }
+          - { path: data.state, equals: active }
+      save: { webhook_id: data.id }
+    - as: admin
+      request: { method: GET, path: /v1/webhooks }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${webhook_id}' } }
+          - { path: data.0.secret, exists: false }
+    - name: the creator, a service principal, is not an administrator
+      as: creator
+      request: { method: GET, path: /v1/webhooks }
+      expect: { status: 403, problem: forbidden }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/${uniq}/c', events: [approval.resolved] }
+      expect: { status: 403, problem: forbidden }
+    - as: creator
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 403, problem: forbidden }
+    - as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }
+
+- id: routes-records
+  title: Records - append, batch, AGT event, read, list; attestation is derived
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'rr:${uniq}',
+            decision: allow,
+            prompt_id: 'pr-${uniq}',
+            outcome: { status: succeeded },
+          }
+      expect:
+        status: 201
+        body:
+          - { path: data.attestation, equals: asserted }
+          - { path: data.prompt_id, equals: 'pr-${uniq}' }
+      save: { record_id: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - { tool_ref: 'rr:${uniq}', decision: allow }
+            - { tool_ref: 'rr:${uniq}', decision: deny }
+      expect:
+        status: 201
+        body:
+          - { path: data, length: 2 }
+          - { path: data.0.attestation, equals: asserted }
+          - { path: data.1.attestation, equals: asserted }
+    - name: an AGT event is mapped to a record
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        content_type: application/vnd.microsoft.agt.event+json
+        body:
+          {
+            event_type: tool_call,
+            agent_id: 'a-${uniq}',
+            tool_name: 'rr:${uniq}',
+            timestamp: '2026-10-04T12:00:00Z',
+            decision: requires_approval,
+          }
+      expect:
+        status: 201
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.tool_ref, equals: 'rr:${uniq}' }
+          - { path: data.attestation, equals: asserted }
+    - as: creator
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect: { status: 200, body: [{ path: data.id, equals: '${record_id}' }] }
+    - as: creator
+      request: { method: GET, path: '/v1/records?tool=rr:${uniq}&decision=deny&limit=200' }
+      expect: { status: 200, body: [{ path: data, length: 1 }] }
+- id: routes-records-chain
+  title: A record's chain names its action and has no approval when none was linked
+  tags: [both]
+  requires: records.chain
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rch:${uniq}', decision: allow, outcome: { status: succeeded } }
+      expect: { status: 201 }
+      save: { record_id: data.id }
+    - as: creator
+      request: { method: GET, path: '/v1/records/${record_id}/chain' }
+      expect:
+        status: 200
+        body:
+          - { path: data.action.id, equals: '${record_id}' }
+          - { path: data.approval.id, equals: null }
+- id: routes-policies-read
+  title: Policies are readable and simulatable on both deployments
+  tags: [both]
+  requires: policies
+  steps:
+    # A tool policy: a duplicate-requests policy another scenario published is never the one picked.
+    - as: creator
+      request: { method: GET, path: '/v1/policies?kind=tool_invocation' }
+      expect: { status: 200 }
+      save: { policy_id: data.0.id }
+    - as: creator
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect: { status: 200, body: [{ path: data.id, equals: '${policy_id}' }] }
+    - as: creator
+      request: { method: GET, path: '/v1/policies/${policy_id}/versions' }
+      expect: { status: 200 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body: { action: { tool_ref: '${deny_tool}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.enforced, equals: false }
+          - { path: data.would_be, equals: deny }
+# The three scenarios below each need one family only, so a deployment that advertises that family
+# alone (no approvals, no policies) has its routes exercised.
+- id: routes-runs
+  title: Runs - create an external run, read it; a governed run is not creatable
+  tags: [both, runs]
+  requires: runs
+  steps:
+    - as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: external } }
+      expect:
+        status: 201
+        body:
+          - { path: data.kind, equals: external }
+          - { path: data.scope_id, exists: true }
+      save: { run_id: data.id }
+    - as: creator
+      request: { method: GET, path: '/v1/runs/${run_id}' }
+      expect: { status: 200, body: [{ path: data.id, equals: '${run_id}' }] }
+    - name: governed runs are created by the platform
+      as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: governed } }
+      expect: { status: 405, problem: governed_run_not_creatable }
+- id: routes-checkpoints-verify
+  title: Checkpoints - an entitled caller creates one and verifies the chain
+  tags: [hosted]
+  requires: records.checkpoints
+  only: hosted
+  needs: [entitled]
+  steps:
+    - as: entitled
+      request: { method: POST, path: /v1/records/checkpoints }
+      expect: { status: 201 }
+    - as: entitled
+      request: { method: GET, path: /v1/records/verify }
+      expect: { status: 200, body: [{ path: data.verified, exists: true }] }
+- id: routes-evidence-export
+  title: Evidence - an entitled caller requests an export
+  tags: [hosted]
+  requires: evidence
+  only: hosted
+  needs: [entitled]
+  steps:
+    - as: entitled
+      request: { method: POST, path: /v1/evidence/exports }
+      expect: { status: 202 }
+- id: tools-principal-owned-hidden-from-colleagues
+  title: A tool owned by a principal is listed to its registering principal and not to a colleague, a decision for it by a colleague is answered as for an unregistered tool, and an organisation-owned tool is every member's
+  tags: [both, tenancy, floor]
+  needs: [member]
+  steps:
+    - name: a principal registers a tool of its own
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:po:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect:
+        status: 201
+        body:
+          - { path: data.owner.kind, equals: principal }
+      save: { po_id: data.id }
+    - name: and one of the organisation's
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:oo:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+      save: { oo_id: data.id }
+    - name: the registering principal lists both
+      as: admin
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${po_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${oo_id}' } }
+    - name: a colleague lists the organisation's tool and not the principal's
+      as: member
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${oo_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${po_id}' } }
+    - name: a decision for the principal's tool by the colleague is answered as for an unregistered tool
+      as: member
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: 'ext:po:${uniq}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: unknown_tool }
+    - name: the same decision by the registering principal is not
+      as: admin
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: 'ext:po:${uniq}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.reason, not_equals: unknown_tool }
+- id: negative-principal-owned-tool-read-by-colleague-is-404
+  title: A colleague reading or changing a tool owned by another principal is 404 not_found, as for a tool that does not exist, and the registering principal reads it
+  tags: [both, negative, tenancy, floor]
+  tool_registration: any
+  needs: [member]
+  steps:
+    - name: a principal registers a tool of its own
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pv:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect: { status: 201 }
+      save: { pv_id: data.id }
+    - name: a colleague reads it and is told there is none
+      as: member
+      request: { method: GET, path: '/v1/tools/${pv_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: a colleague changes it and is told there is none
+      as: member
+      request:
+        method: PATCH
+        path: /v1/tools/${pv_id}
+        body: { description: 'changed by a colleague' }
+      expect: { status: 404, problem: not_found }
+    - name: the registering principal reads it, unchanged
+      as: admin
+      request: { method: GET, path: '/v1/tools/${pv_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${pv_id}' }
+          - { path: data.description, not_equals: 'changed by a colleague' }
+- id: negative-run-id-without-runs-served
+  title: A deployment that does not advertise runs answers a run_id on a decision or on POST /v1/approvals 404 not_found, whatever the value
+  tags: [both, negative, tenancy]
+  requires: approvals
+  unless: runs
+  steps:
+    - name: a decision that names a run
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          actor: { run_id: 'run_${uniq}' }
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'norun ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 404, problem: not_found }
+    - name: and POST /v1/approvals
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          run_id: 'run_${uniq}'
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'norun ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 404, problem: not_found }

@@ -1,0 +1,468 @@
+{
+  "header": {
+    "format": 1,
+    "capturedAt": "2026-10-19T14:27:43.497Z",
+    "source": "hosted",
+    "origin": "<origin>",
+    "serviceVersion": "sha-b3c759f",
+    "script": "packages/react/tools/capture-hosted-fixtures.ts"
+  },
+  "ids": {
+    "approval": "apr_FIXTURE_1",
+    "record": "rec_FIXTURE_1"
+  },
+  "capabilities": {
+    "status": 200,
+    "body": {
+      "data": {
+        "deployment": "hosted",
+        "entitlements": [],
+        "jwks_uri": "<origin>/.well-known/jwks.json",
+        "kids": [
+          "kid_FIXTURE_1"
+        ],
+        "resolutions": [
+          "approved",
+          "rejected"
+        ],
+        "features": [
+          "runs"
+        ],
+        "limits": {
+          "decisions_batch_max_items": 50,
+          "records_batch_max_items": 100,
+          "approval_arguments_max_bytes": 32768,
+          "resolutions_batch_max_items": 50
+        },
+        "continuation_deliveries": [
+          "pull",
+          "held"
+        ],
+        "tool_registration": "administrators",
+        "authzen_configuration": "<origin>/.well-known/authzen-configuration",
+        "dpop": "off",
+        "self_approval_from_approver_surface": true,
+        "user_resolve_scope": "approvals:resolve"
+      },
+      "meta": {
+        "request_id": "request_FIXTURE_1",
+        "deployment": "hosted"
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "pending",
+      "list": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id": "apr_FIXTURE_1",
+              "state": "pending",
+              "tool_ref": "ext:billing:issue_refund",
+              "obligation_kind": "tool_invocation",
+              "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+              "scope_id": "scope_FIXTURE_1",
+              "side_effect_level": "external",
+              "requester": {
+                "id": "principal_FIXTURE_1",
+                "kind": "service"
+              },
+              "agent": {
+                "id": "agent_FIXTURE_1"
+              },
+              "run": {
+                "id": "scope_FIXTURE_1",
+                "kind": "external"
+              },
+              "continuation_kind": "adk",
+              "continuation": {
+                "kind": "adk",
+                "delivery": "pull"
+              },
+              "created_at": "2026-10-19T14:27:38.824Z",
+              "expires_at": null,
+              "resolved_at": null,
+              "outcome_record_id": null,
+              "resolution_history": [],
+              "arguments_state": "shown"
+            }
+          ],
+          "meta": {
+            "request_id": "request_FIXTURE_2",
+            "deployment": "hosted"
+          }
+        }
+      },
+      "detail": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "apr_FIXTURE_1",
+            "state": "pending",
+            "tool_ref": "ext:billing:issue_refund",
+            "obligation_kind": "tool_invocation",
+            "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+            "scope_id": "scope_FIXTURE_1",
+            "side_effect_level": "external",
+            "requester": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "agent": {
+              "id": "agent_FIXTURE_1"
+            },
+            "run": {
+              "id": "scope_FIXTURE_1",
+              "kind": "external"
+            },
+            "continuation_kind": "adk",
+            "continuation": {
+              "kind": "adk",
+              "delivery": "pull"
+            },
+            "created_at": "2026-10-19T14:27:38.824Z",
+            "expires_at": null,
+            "resolved_at": null,
+            "outcome_record_id": null,
+            "resolution_history": [],
+            "arguments_state": "shown",
+            "arguments": {
+              "capture": "<nonce>"
+            },
+            "waiting_on": {
+              "count": 2
+            }
+          },
+          "meta": {
+            "request_id": "request_FIXTURE_3",
+            "deployment": "hosted"
+          }
+        }
+      },
+      "stream": [
+        {
+          "event": "approval.updated",
+          "data": {
+            "id": "apr_FIXTURE_1",
+            "state": "pending",
+            "tool_ref": "ext:billing:issue_refund",
+            "obligation_kind": "tool_invocation",
+            "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+            "scope_id": "scope_FIXTURE_1",
+            "side_effect_level": "external",
+            "requester": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "agent": {
+              "id": "agent_FIXTURE_1"
+            },
+            "run": {
+              "id": "scope_FIXTURE_1",
+              "kind": "external"
+            },
+            "continuation_kind": "adk",
+            "continuation": {
+              "kind": "adk",
+              "delivery": "pull"
+            },
+            "created_at": "2026-10-19T14:27:38.824Z",
+            "expires_at": null,
+            "resolved_at": null,
+            "outcome_record_id": null,
+            "resolution_history": [],
+            "arguments_state": "shown"
+          }
+        }
+      ]
+    },
+    {
+      "name": "consumed",
+      "list": {
+        "status": 200,
+        "body": {
+          "data": [
+            {
+              "id": "apr_FIXTURE_1",
+              "state": "consumed",
+              "tool_ref": "ext:billing:issue_refund",
+              "obligation_kind": "tool_invocation",
+              "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+              "scope_id": "scope_FIXTURE_1",
+              "side_effect_level": "external",
+              "requester": {
+                "id": "principal_FIXTURE_1",
+                "kind": "service"
+              },
+              "agent": {
+                "id": "agent_FIXTURE_1"
+              },
+              "run": {
+                "id": "scope_FIXTURE_1",
+                "kind": "external"
+              },
+              "continuation_kind": "adk",
+              "continuation": {
+                "kind": "adk",
+                "delivery": "pull"
+              },
+              "created_at": "2026-10-19T14:27:38.824Z",
+              "expires_at": null,
+              "resolution": "approved",
+              "resolved_at": "2026-10-19T14:27:39.256Z",
+              "approver": {
+                "id": "principal_FIXTURE_2",
+                "kind": "user"
+              },
+              "outcome_record_id": "rec_FIXTURE_1",
+              "resolution_history": [
+                {
+                  "resolution": "approved",
+                  "by": {
+                    "id": "principal_FIXTURE_2",
+                    "kind": "user"
+                  },
+                  "at": "2026-10-19T14:27:39.256Z"
+                }
+              ],
+              "arguments_state": "final"
+            }
+          ],
+          "meta": {
+            "request_id": "request_FIXTURE_4",
+            "deployment": "hosted"
+          }
+        }
+      },
+      "detail": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "apr_FIXTURE_1",
+            "state": "consumed",
+            "tool_ref": "ext:billing:issue_refund",
+            "obligation_kind": "tool_invocation",
+            "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+            "scope_id": "scope_FIXTURE_1",
+            "side_effect_level": "external",
+            "requester": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "agent": {
+              "id": "agent_FIXTURE_1"
+            },
+            "run": {
+              "id": "scope_FIXTURE_1",
+              "kind": "external"
+            },
+            "continuation_kind": "adk",
+            "continuation": {
+              "kind": "adk",
+              "delivery": "pull"
+            },
+            "created_at": "2026-10-19T14:27:38.824Z",
+            "expires_at": null,
+            "resolution": "approved",
+            "resolved_at": "2026-10-19T14:27:39.256Z",
+            "approver": {
+              "id": "principal_FIXTURE_2",
+              "kind": "user"
+            },
+            "outcome_record_id": "rec_FIXTURE_1",
+            "resolution_history": [
+              {
+                "resolution": "approved",
+                "by": {
+                  "id": "principal_FIXTURE_2",
+                  "kind": "user"
+                },
+                "at": "2026-10-19T14:27:39.256Z"
+              }
+            ],
+            "arguments_state": "final"
+          },
+          "meta": {
+            "request_id": "request_FIXTURE_5",
+            "deployment": "hosted"
+          }
+        }
+      },
+      "record": {
+        "status": 200,
+        "body": {
+          "data": {
+            "id": "rec_FIXTURE_1",
+            "ts": "2026-10-19T14:27:40.502Z",
+            "actor": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "tool_ref": "ext:billing:issue_refund",
+            "decision": "allow",
+            "outcome": {
+              "status": "succeeded"
+            },
+            "context": {
+              "invocation_channel": "interactive"
+            },
+            "approval_id": "apr_FIXTURE_1",
+            "attestation": "asserted"
+          },
+          "meta": {
+            "request_id": "request_FIXTURE_6",
+            "deployment": "hosted"
+          }
+        }
+      },
+      "stream": [
+        {
+          "event": "approval.updated",
+          "data": {
+            "id": "apr_FIXTURE_1",
+            "state": "approved",
+            "tool_ref": "ext:billing:issue_refund",
+            "obligation_kind": "tool_invocation",
+            "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+            "scope_id": "scope_FIXTURE_1",
+            "side_effect_level": "external",
+            "requester": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "agent": {
+              "id": "agent_FIXTURE_1"
+            },
+            "run": {
+              "id": "scope_FIXTURE_1",
+              "kind": "external"
+            },
+            "continuation_kind": "adk",
+            "continuation": {
+              "kind": "adk",
+              "delivery": "pull"
+            },
+            "created_at": "2026-10-19T14:27:38.824Z",
+            "expires_at": null,
+            "resolution": "approved",
+            "resolved_at": "2026-10-19T14:27:39.256Z",
+            "approver": {
+              "id": "principal_FIXTURE_2",
+              "kind": "user"
+            },
+            "outcome_record_id": null,
+            "resolution_history": [
+              {
+                "resolution": "approved",
+                "by": {
+                  "id": "principal_FIXTURE_2",
+                  "kind": "user"
+                },
+                "at": "2026-10-19T14:27:39.256Z"
+              }
+            ],
+            "arguments_state": "shown"
+          }
+        },
+        {
+          "event": "approval.updated",
+          "data": {
+            "id": "apr_FIXTURE_1",
+            "state": "consumed",
+            "tool_ref": "ext:billing:issue_refund",
+            "obligation_kind": "tool_invocation",
+            "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+            "scope_id": "scope_FIXTURE_1",
+            "side_effect_level": "external",
+            "requester": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "agent": {
+              "id": "agent_FIXTURE_1"
+            },
+            "run": {
+              "id": "scope_FIXTURE_1",
+              "kind": "external"
+            },
+            "continuation_kind": "adk",
+            "continuation": {
+              "kind": "adk",
+              "delivery": "pull"
+            },
+            "created_at": "2026-10-19T14:27:38.824Z",
+            "expires_at": null,
+            "resolution": "approved",
+            "resolved_at": "2026-10-19T14:27:39.256Z",
+            "approver": {
+              "id": "principal_FIXTURE_2",
+              "kind": "user"
+            },
+            "outcome_record_id": null,
+            "resolution_history": [
+              {
+                "resolution": "approved",
+                "by": {
+                  "id": "principal_FIXTURE_2",
+                  "kind": "user"
+                },
+                "at": "2026-10-19T14:27:39.256Z"
+              }
+            ],
+            "arguments_state": "final"
+          }
+        },
+        {
+          "event": "approval.updated",
+          "data": {
+            "id": "apr_FIXTURE_1",
+            "state": "consumed",
+            "tool_ref": "ext:billing:issue_refund",
+            "obligation_kind": "tool_invocation",
+            "action_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+            "scope_id": "scope_FIXTURE_1",
+            "side_effect_level": "external",
+            "requester": {
+              "id": "principal_FIXTURE_1",
+              "kind": "service"
+            },
+            "agent": {
+              "id": "agent_FIXTURE_1"
+            },
+            "run": {
+              "id": "scope_FIXTURE_1",
+              "kind": "external"
+            },
+            "continuation_kind": "adk",
+            "continuation": {
+              "kind": "adk",
+              "delivery": "pull"
+            },
+            "created_at": "2026-10-19T14:27:38.824Z",
+            "expires_at": null,
+            "resolution": "approved",
+            "resolved_at": "2026-10-19T14:27:39.256Z",
+            "approver": {
+              "id": "principal_FIXTURE_2",
+              "kind": "user"
+            },
+            "outcome_record_id": "rec_FIXTURE_1",
+            "resolution_history": [
+              {
+                "resolution": "approved",
+                "by": {
+                  "id": "principal_FIXTURE_2",
+                  "kind": "user"
+                },
+                "at": "2026-10-19T14:27:39.256Z"
+              }
+            ],
+            "arguments_state": "final"
+          }
+        }
+      ]
+    }
+  ]
+}

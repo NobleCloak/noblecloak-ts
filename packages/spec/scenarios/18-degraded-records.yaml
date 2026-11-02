@@ -1,0 +1,328 @@
+- id: records-degraded-round-trip
+  title: A degraded record appends and reads back with reason alone and with reason, status and request_id; an unknown but well-formed reason is accepted; a batch carries it too
+  tags: [both, floor]
+  steps:
+    - name: reason alone, a fallback that was not enforced
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'dg:${uniq}',
+            decision: allow,
+            enforced: false,
+            degraded: { reason: timeout },
+          }
+      expect:
+        status: 201
+        body:
+          - { path: data.degraded, equals: { reason: timeout } }
+          - { path: data.decision, equals: allow }
+          - { path: data.enforced, equals: false }
+          - { path: data.policy, exists: false }
+          - { path: data.attestation, equals: asserted }
+      save: { alone_id: data.id }
+    - name: it reads back as written, with no status and no request_id
+      as: creator
+      request: { method: GET, path: '/v1/records/${alone_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.degraded, equals: { reason: timeout } }
+          - { path: data.degraded.status, exists: false }
+          - { path: data.degraded.request_id, exists: false }
+          - { path: data.policy, exists: false }
+    - name: all three members, a fallback the caller enforced
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'dg:${uniq}',
+            decision: deny,
+            degraded: { reason: http_error, status: 503, request_id: 'req_failed_1' },
+          }
+      expect:
+        status: 201
+        body:
+          - {
+              path: data.degraded,
+              equals: { reason: http_error, status: 503, request_id: req_failed_1 },
+            }
+          - { path: data.decision, equals: deny }
+      save: { full_id: data.id }
+    - name: it reads back as written
+      as: creator
+      request: { method: GET, path: '/v1/records/${full_id}' }
+      expect:
+        status: 200
+        body:
+          - {
+              path: data.degraded,
+              equals: { reason: http_error, status: 503, request_id: req_failed_1 },
+            }
+    - name: a reason this contract does not list is accepted when it is a well-formed code
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'dg:${uniq}', decision: allow, degraded: { reason: breaker_open_7 } }
+      expect:
+        status: 201
+        body:
+          - { path: data.degraded.reason, equals: breaker_open_7 }
+    - name: the longest code the pattern admits is accepted
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'dg:${uniq}',
+            decision: allow,
+            degraded: { reason: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa },
+          }
+      expect: { status: 201 }
+    - name: a batch carries the member too
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - { tool_ref: 'dgb:${uniq}', decision: allow, degraded: { reason: unreachable } }
+            - {
+                tool_ref: 'dgb:${uniq}',
+                decision: deny,
+                degraded: { reason: no_token, status: 401 },
+              }
+      expect:
+        status: 201
+        body:
+          - { path: data.0.degraded, equals: { reason: unreachable } }
+          - { path: data.1.degraded, equals: { reason: no_token, status: 401 } }
+          - { path: data.1.policy, exists: false }
+- id: records-normal-record-has-no-degraded-member
+  title: A record that is not degraded has no degraded member, single and listed - absent, not null
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'dn:${uniq}', decision: allow, outcome: { status: succeeded } }
+      expect:
+        status: 201
+        body:
+          - { path: data.degraded, exists: false }
+      save: { record_id: data.id }
+    - as: creator
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.degraded, exists: false }
+    - as: creator
+      request: { method: GET, path: '/v1/records?tool=dn:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.degraded, exists: false }
+- id: records-degraded-filter
+  title: GET /v1/records?degraded=true returns only the records that carry the member, degraded=false only the others, and no parameter both
+  tags: [both, floor]
+  steps:
+    - name: one degraded record and one normal record of one tool
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'df:${uniq}', decision: allow, degraded: { reason: timeout } }
+      expect: { status: 201 }
+      save: { degraded_id: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'df:${uniq}', decision: allow, outcome: { status: succeeded } }
+      expect: { status: 201 }
+      save: { normal_id: data.id }
+    - name: degraded=true
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=df:${uniq}&degraded=true&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.id, equals: '${degraded_id}' }
+          - { path: data.0.degraded.reason, equals: timeout }
+    - name: degraded=false
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=df:${uniq}&degraded=false&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.id, equals: '${normal_id}' }
+          - { path: data.0.degraded, exists: false }
+    - name: no parameter
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=df:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+- id: negative-records-degraded-filter-takes-true-or-false
+  title: The degraded filter takes true or false; any other value is 400 invalid_request
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request: { method: GET, path: '/v1/records?degraded=maybe' }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request: { method: GET, path: '/v1/records?degraded=' }
+      expect: { status: 400, problem: invalid_request }
+- id: negative-record-degraded-invalid
+  title: A degraded member with a policy, a reason that is not a code, an undefined member (a legacy kind among them) or an out-of-range status is 400 invalid_request, and nothing is appended
+  tags: [both, negative, floor]
+  steps:
+    - name: degraded together with policy
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'db:${uniq}',
+            decision: allow,
+            policy: { id: pol_x, version: 1 },
+            degraded: { reason: timeout },
+          }
+      expect: { status: 400, problem: invalid_request }
+    - name: a reason with a dot, so a hostname cannot be sent
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: api.example.com } }
+      expect: { status: 400, problem: invalid_request }
+    - name: a reason with a colon, a slash, a space, an upper-case letter or a leading digit
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - {
+                tool_ref: 'db:${uniq}',
+                decision: allow,
+                degraded: { reason: 'unreachable: refused' },
+              }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: 'https://host/path' } }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: 'timed out' } }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: Timeout } }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: '5xx' } }
+      expect: { status: 400, problem: invalid_request }
+    - name: a reason longer than 64 characters
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'db:${uniq}',
+            decision: allow,
+            degraded: { reason: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa },
+          }
+      expect: { status: 400, problem: invalid_request }
+    - name: no reason
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: { status: 503 } }
+      expect: { status: 400, problem: invalid_request }
+    - name: a legacy kind member is refused, not ignored
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: timeout, kind: degraded } }
+      expect: { status: 400, problem: invalid_request }
+    - name: any other undefined member is refused too
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'db:${uniq}',
+            decision: allow,
+            degraded: { reason: timeout, would_have_been: allow },
+          }
+      expect: { status: 400, problem: invalid_request }
+    - name: a status that is not an error status
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          { tool_ref: 'db:${uniq}', decision: allow, degraded: { reason: http_error, status: 200 } }
+      expect: { status: 400, problem: invalid_request }
+    - name: an empty request_id
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'db:${uniq}',
+            decision: allow,
+            degraded: { reason: http_error, request_id: '' },
+          }
+      expect: { status: 400, problem: invalid_request }
+    - name: degraded must be an object
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: allow, degraded: true }
+      expect: { status: 400, problem: invalid_request }
+    - name: the fifth decision value, none, is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'db:${uniq}', decision: none, degraded: { reason: timeout } }
+      expect: { status: 400, problem: invalid_request }
+    - name: none of them was appended
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=db:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }

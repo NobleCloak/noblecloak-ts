@@ -1,0 +1,156 @@
+- id: decision-allow
+  title: An always-allow tool is allowed, with the digest and the policy
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${allow_tool}', arguments: { q: '${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.enforced, equals: true }
+          - { path: data.policy.side_effect_level, equals: read }
+          - { path: data.approval, exists: false }
+          - { path: meta.deployment, matches: '^(hosted|edge)$' }
+- id: decision-explicit-policy-identified
+  title: A decision an explicit policy produced names that policy, with its id and version
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${allow_tool}', arguments: { q: 'explicit ${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.policy.id, equals: pol_default }
+          - { path: data.policy.version, equals: 3 }
+- id: decision-default-policy-absent
+  title: When the default applied, the decision has no policy member at all, not null, singly and in a batch
+  tags: [both, floor]
+  steps:
+    - name: a single decision
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${default_tool}', arguments: { q: 'default ${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.enforced, equals: true }
+          - { path: data.policy, exists: false }
+    - name: the same tool in a batch, beside one an explicit policy decided
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            - { action: { tool_ref: '${default_tool}', arguments: { q: 'default-batch ${uniq}' } } }
+            - { action: { tool_ref: '${allow_tool}', arguments: { q: 'explicit-batch ${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions.0.policy, exists: false }
+          - { path: data.decisions.1.policy.id, equals: pol_default }
+- id: decision-deny
+  title: A denied tool is denied
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${deny_tool}', arguments: { id: '${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+- id: decision-unknown-tool
+  title: A tool with no catalog row is denied unknown_tool, never enrolled
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: 'nowhere:${uniq}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: unknown_tool }
+          - { path: data.policy, exists: false }
+- id: decision-step-up-shape
+  title: A step-up decision carries the approval handle
+  tags: [both]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'shape ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.state, equals: pending }
+          - { path: data.approval.created, equals: true }
+          - { path: data.approval.resume_token_will_issue, equals: false }
+          - { path: data.approval.id, exists: true }
+- id: decision-batch
+  title: A batch answers in request order
+  tags: [both, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            - { action: { tool_ref: '${allow_tool}', arguments: { q: '${uniq}' } } }
+            - { action: { tool_ref: '${deny_tool}', arguments: { id: '${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions.0.decision, equals: allow }
+          - { path: data.decisions.1.decision, equals: deny }
+          - { path: data.decisions, length: 2 }
+- id: decision-rejects-bad-body
+  title: A body that is not a decision request is 400 invalid_request
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { arguments: {} } }
+      expect: { status: 400, problem: invalid_request }
+- id: decision-expect-hint-never-consumes
+  title: expect_approval_id is a hint only
+  tags: [both]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'hint ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+          expect_approval_id: not-the-obligation
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.state, equals: pending }

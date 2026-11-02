@@ -1,0 +1,15 @@
+/*
+ * A builder's second palette: one file that sets only the eight shipped --nc-* inputs, on an ancestor of the
+ * module root. No component changes. The additions (--nc-surface, --nc-subtle, --nc-ring, ...) follow from
+ * these through their defaults.
+ */
+.builder-brand {
+  --nc-bg: #fbf6ee;
+  --nc-fg: #2b1d0e;
+  --nc-muted: #5c4630;
+  --nc-border: #b49b7a;
+  --nc-accent: #7a3e00;
+  --nc-danger: #9e1b12;
+  --nc-radius: 12px;
+  --nc-font-sans: Georgia, 'Times New Roman', serif;
+}

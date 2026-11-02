@@ -1,0 +1,808 @@
+- id: approval-requester-is-the-creator
+  title: Every representation of an approval names the principal that created it as `requester`, whoever reads it, and the creator is not the reader
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rq:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rq:${uniq}', arguments: { q: 'one-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { one_id: data.approval.id, one_digest: data.action_digest }
+    - name: its creator reads the requester, a user
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.kind, equals: user }
+          - { path: data.requester.id, matches: '.+' }
+      save: { one_requester: data.requester.id }
+    - name: an approver reads the same requester, not itself
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.id, equals: '${one_requester}' }
+    - name: the wait carries it too
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${one_id}/wait?timeout=0' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.id, equals: '${one_requester}' }
+    - name: the approver resolves it, and the answer still names the requester
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${one_id}/approve
+        body: { expected_action_digest: '${one_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.id, equals: '${one_requester}' }
+    - name: the approver opens an approval of its own
+      as: approver
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rq:${uniq}', arguments: { q: 'two-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { two_id: data.approval.id }
+    - name: the first user reads it, and the requester is the approver, not the reader
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${two_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.kind, equals: user }
+          - { path: data.requester.id, not_equals: '${one_requester}' }
+    - name: a service principal opens one and a user reads a requester of kind service
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rq:${uniq}', arguments: { q: 'three-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { three_id: data.approval.id }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${three_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.kind, equals: service }
+    - name: the service principal reads itself as the requester
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${three_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.kind, equals: service }
+- id: approval-principals-carry-display-names
+  title: A principal named on an approval (requester, approver, resolution history) is never named by its own id, and a name is shown to a reader who sees the approval
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:dn:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:dn:${uniq}', arguments: { q: 'dn-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { dn_id: data.approval.id, dn_digest: data.action_digest }
+    - name: the requester has a name that is not its id, when it has one
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${dn_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requester.display_name, differs_from: data.requester.id }
+    - name: the approver approves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${dn_id}/approve
+        body: { expected_action_digest: '${dn_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approver.display_name, differs_from: data.approver.id }
+          - { path: data.requester.display_name, differs_from: data.requester.id }
+          - {
+              path: data.resolution_history.0.by.display_name,
+              differs_from: data.resolution_history.0.by.id,
+            }
+    - name: the creator reads the same names back
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${dn_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approver.display_name, differs_from: data.approver.id }
+          - {
+              path: data.resolution_history.0.by.display_name,
+              differs_from: data.resolution_history.0.by.id,
+            }
+- id: approval-waiting-on-is-the-creators
+  title: A pending approval tells its creator, and no other reader, how many principals it waits on (their names too when the creator is a user), and says nothing once it is final
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver, member]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:wo:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: an approver is known to the deployment before the approval opens
+      as: approver
+      request: { method: GET, path: '/v1/approvals?limit=1' }
+      expect: { status: 200 }
+    - name: a member who may not approve is known too, and opens an approval to learn its own id
+      as: member
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wo:${uniq}', arguments: { q: 'member-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { member_approval: data.approval.id }
+    - name: the member's id
+      as: member
+      request: { method: GET, path: '/v1/approvals/${member_approval}' }
+      expect: { status: 200 }
+      save: { member_id: data.requester.id }
+    - name: the approver opens one to learn its own id
+      as: approver
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wo:${uniq}', arguments: { q: 'approver-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { approver_approval: data.approval.id }
+    - name: the approver's id
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approver_approval}' }
+      expect: { status: 200 }
+      save: { approver_id: data.requester.id }
+    - name: a user opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wo:${uniq}', arguments: { q: 'one-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { one_id: data.approval.id, one_digest: data.action_digest }
+    - name: the creator's id
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect: { status: 200 }
+      save: { creator_id: data.requester.id }
+    - name: its creator is told who it waits on - a count of at least the approver, and the approver among the names, never itself or the member, a name, when one is sent, that is not empty and not the id, at most five
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.waiting_on.count, not_equals: 0 }
+          - { path: data.waiting_on.principals, exists: true }
+          - {
+              path: data.waiting_on.principals,
+              contains_where: { key: id, equals: '${approver_id}' },
+            }
+          - { path: data.waiting_on.principals, lacks_where: { key: id, equals: '${member_id}' } }
+          - { path: data.waiting_on.principals, lacks_where: { key: id, equals: '${creator_id}' } }
+          - { path: data.waiting_on.principals, lacks_where: { key: kind, equals: service } }
+          - { path: data.waiting_on.principals.0.kind, equals: user }
+          # A name is optional ("absent when the deployment cannot name"): when present it is not empty and not the id.
+          - { path: data.waiting_on.principals.0.display_name, not_equals: '' }
+          - {
+              path: data.waiting_on.principals.0.display_name,
+              differs_from: data.waiting_on.principals.0.id,
+            }
+          - { path: data.waiting_on.principals.5, exists: false }
+    - name: an approver is not told
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.waiting_on, exists: false }
+    - name: nor is a member who may not resolve it
+      as: member
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.waiting_on, exists: false }
+    - name: nor does the wait
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${one_id}/wait?timeout=0' }
+      expect:
+        status: 200
+        body:
+          - { path: data.waiting_on, exists: false }
+    - name: a service principal opens one
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wo:${uniq}', arguments: { q: 'two-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { two_id: data.approval.id }
+    - name: it is told the count, at least the approver, and no names
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${two_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.waiting_on.count, not_equals: 0 }
+          - { path: data.waiting_on.principals, exists: false }
+    - name: the approver approves the first
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${one_id}/approve
+        body: { expected_action_digest: '${one_digest}' }
+      expect: { status: 200 }
+    - name: once it is not pending, nothing is said, even to its creator
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${one_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.waiting_on, exists: false }
+- id: approval-on-deny-is-the-creators-snapshot
+  title: A pending approval tells its creator, and no other reader, what a deny does when the policy that matched states it; it says nothing when no named policy matched, and a tool that is allowed or denied opens no approval to carry it
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver, member, other_org]
+  serves_on_deny: true
+  fixtures: [on_deny_tool_ref]
+  steps:
+    - name: a user opens an approval for a tool whose matching policy is ask and states on_deny
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${on_deny_tool_ref}', arguments: { q: 'od-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { od_id: data.approval.id }
+    - name: its creator is told what a deny does, and the approval names the policy
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${od_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy.id, exists: true }
+          - { path: data.on_deny, in: [resume, halt] }
+    - name: an approver who reads the same approval is not told
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${od_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy.id, exists: true }
+          - { path: data.on_deny, exists: false }
+    - name: nor is a member who may not resolve it
+      as: member
+      request: { method: GET, path: '/v1/approvals/${od_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.on_deny, exists: false }
+    - name: its creator's list row carries on_deny too
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${od_id}' }
+          - { path: data.0.on_deny, in: [resume, halt] }
+    - name: an approver's list row for it does not
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${od_id}' }
+          - { path: data.0.on_deny, exists: false }
+    - name: the creator's stream delivers a new approval with on_deny
+      stream_events:
+        as: creator_user
+        path: /v1/approvals/stream
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${on_deny_tool_ref}', arguments: { q: 'ods-a-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { ods_a_id: data.approval.id, ods_a_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${ods_a_id}/approve
+              body: { expected_action_digest: '${ods_a_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${ods_a_id}'
+              body:
+                - { path: on_deny, in: [resume, halt] }
+    - name: the approver's stream delivers the next one without it
+      stream_events:
+        as: approver
+        path: /v1/approvals/stream
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${on_deny_tool_ref}', arguments: { q: 'ods-b-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { ods_b_id: data.approval.id, ods_b_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${ods_b_id}/approve
+              body: { expected_action_digest: '${ods_b_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${ods_b_id}'
+              every_event: true
+              body:
+                - { path: on_deny, exists: false }
+    - name: a principal of another organisation cannot read it, so is told nothing
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${od_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: a tool no named policy matches
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:od:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a user opens an approval for it
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:od:${uniq}', arguments: { q: 'none-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { none_id: data.approval.id }
+    - name: its creator is told nothing of a deny, as no policy named it
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${none_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy, exists: false }
+          - { path: data.on_deny, exists: false }
+    - name: a tool that is allowed opens no approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${allow_tool}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.approval, exists: false }
+    # Not checked here: on_deny for a policy mode where it is illegal (only ask and escalate state it).
+    # PUT /v1/policies/{id} refuses it, so no request can store such a policy; the mock unit test covers it.
+    # Also not checked over the wire: that on_deny is a snapshot (a later policy edit leaves an existing approval
+    # alone). A hosted deployment serves PUT /v1/policies/{id} and the publish, but a run must not change a policy
+    # the deployment relies on, and an edge deployment serves no PUT; the mock unit test and the deployment's own
+    # tests carry it.
+    - name: nor does a tool that is denied
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${deny_tool}', arguments: {} } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.approval, exists: false }
+- id: negative-eligibility-outage-is-named
+  title: A deployment that cannot determine whether the caller may resolve answers 503 service_unavailable with the reason eligibility_lookup, on the read, the list for approver=me and the resolve, and the next request is served
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:el:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: an approval is open
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:el:${uniq}', arguments: { q: 'el-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { el_id: data.approval.id, el_digest: data.action_digest }
+    - name: the lookup fails on the next single read
+      control:
+        {
+          fail: { operation: getApproval, status: 503, retry_after: 4, reason: eligibility_lookup },
+        }
+    - name: the read is 503 with the reason, never the digest-only view
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${el_id}' }
+      expect:
+        status: 503
+        problem: service_unavailable
+        headers:
+          - { name: retry-after, matches: '^4$' }
+        body:
+          - { path: reason, equals: eligibility_lookup }
+          - { path: retry_after_seconds, equals: 4 }
+          - { path: data, exists: false }
+    - name: the lookup fails on the next list for approver=me
+      control: { fail: { operation: listApprovals, status: 503, reason: eligibility_lookup } }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&state=pending' }
+      expect:
+        status: 503
+        problem: service_unavailable
+        body:
+          - { path: reason, equals: eligibility_lookup }
+    - name: the lookup fails on the next resolve
+      control: { fail: { operation: resolveApproval, status: 503, reason: eligibility_lookup } }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${el_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${el_digest}' }
+      expect:
+        status: 503
+        problem: service_unavailable
+        body:
+          - { path: reason, equals: eligibility_lookup }
+    - name: nothing was resolved, and the failure was once
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${el_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+- id: approvals-stream-for-approver
+  title: The stream takes approver=me and state - an approver is delivered the approvals it may resolve, the event that resolves one included, and not the ones it created or the states it did not name
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:sa:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: an approver is delivered what it may resolve and nothing it created
+      stream_events:
+        as: approver
+        path: '/v1/approvals/stream?approver=me'
+        during:
+          - name: the approver opens an approval of its own
+            as: approver
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: 'ext:sa:${uniq}', arguments: { q: 'own-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { own_id: data.approval.id }
+          - name: and withdraws it, an update the approver may not resolve
+            as: approver
+            request: { method: POST, path: '/v1/approvals/${own_id}/withdraw' }
+            expect: { status: 200 }
+          - name: a service principal opens one the approver may resolve
+            as: creator
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: 'ext:sa:${uniq}', arguments: { q: 'theirs-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { theirs_id: data.approval.id, theirs_digest: data.action_digest }
+          - name: the approver approves it, and that event arrives although the approval is no longer pending
+            as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${theirs_id}/approve
+              body: { expected_action_digest: '${theirs_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${theirs_id}'
+              body:
+                - { path: state, equals: approved }
+          lacks: ['${own_id}']
+    - name: a stream for the states named is delivered those and no others
+      stream_events:
+        as: approver
+        path: '/v1/approvals/stream?state=approved,rejected'
+        during:
+          - name: one approval is approved
+            as: creator
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: 'ext:sa:${uniq}', arguments: { q: 'yes-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { yes_id: data.approval.id, yes_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${yes_id}/approve
+              body: { expected_action_digest: '${yes_digest}' }
+            expect: { status: 200 }
+          - name: another is withdrawn, which is not a state named
+            as: creator
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: 'ext:sa:${uniq}', arguments: { q: 'no-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { no_id: data.approval.id }
+          - as: creator
+            request: { method: POST, path: '/v1/approvals/${no_id}/withdraw' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${yes_id}'
+              body:
+                - { path: state, equals: approved }
+          lacks: ['${no_id}']
+- id: negative-approver-filter-takes-only-me
+  title: On the list and on the stream, approver takes the single value me, state takes approval states and order takes created_at or resolved_at; any other value is 400 invalid_request
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user]
+  steps:
+    - name: the stream refuses another approver
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/stream?approver=someone' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the stream refuses a state that is not one
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/stream?state=pending,banana' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the list refuses another approver
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?approver=someone' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the list refuses a state that is not one
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?state=pending,banana' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the list refuses an order it does not know
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?order=oldest' }
+      expect: { status: 400, problem: invalid_request }
+- id: approvals-list-state-set-ordered-by-resolution
+  title: The list takes a set of states and order=resolved_at - resolved approvals only, newest resolution first - and a single state is still valid
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [approver]
+  steps:
+    - name: register a tool the organisation shares
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ord:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: three approvals are opened
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ord:${uniq}', arguments: { q: 'a-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ord:${uniq}', arguments: { q: 'b-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { b_id: data.approval.id, b_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ord:${uniq}', arguments: { q: 'c-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { c_id: data.approval.id }
+    - name: the second is rejected first
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${b_id}/deny
+        body: { expected_action_digest: '${b_digest}' }
+      expect: { status: 200 }
+    - name: the first is approved after it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${a_id}/approve
+        body: { expected_action_digest: '${a_digest}' }
+      expect: { status: 200 }
+    - name: a set of states ordered by resolution time names the last resolved first, and not the pending one
+      as: creator
+      request:
+        { method: GET, path: '/v1/approvals?state=approved,rejected&order=resolved_at&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${a_id}' }
+          - { path: data.1.id, equals: '${b_id}' }
+          - { path: data, lacks_where: { key: id, equals: '${c_id}' } }
+    - name: order=resolved_at returns only what has been resolved, whatever the states named
+      as: creator
+      request:
+        {
+          method: GET,
+          path: '/v1/approvals?state=pending,approved,rejected&order=resolved_at&limit=200',
+        }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${a_id}' }
+          - { path: data, lacks_where: { key: id, equals: '${c_id}' } }
+    - name: the default order is newest created first, and a set of states still filters
+      as: creator
+      request: { method: GET, path: '/v1/approvals?state=pending,approved&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${c_id}' }
+          - { path: data, contains_where: { key: id, equals: '${a_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${b_id}' } }
+    - name: a single state is still valid
+      as: creator
+      request: { method: GET, path: '/v1/approvals?state=rejected&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${b_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${a_id}' } }
+- id: approval-on-deny-is-absent-when-the-policy-states-none
+  title: A pending approval whose matching named policy is ask and states no on_deny carries none for its creator, and is never given resume or halt by default
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [creator_user]
+  fixtures: [on_deny_silent_tool_ref]
+  steps:
+    - name: a user opens an approval for a tool whose matching policy is ask and states no on_deny
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${on_deny_silent_tool_ref}', arguments: { q: 'sil-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { sil_id: data.approval.id }
+    - name: the approval names the policy, and its creator is told nothing of a deny
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${sil_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy.id, exists: true }
+          - { path: data.on_deny, exists: false }
+    - name: nor does its list row
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${sil_id}' }
+          - { path: data.0.on_deny, exists: false }

@@ -1,0 +1,20 @@
+name: Module request
+description: Propose a new governance UI module or a change to an existing one.
+labels: [module-request]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The governance task the module supports
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What the module shows and lets people do
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Agent runtime or framework you use it with

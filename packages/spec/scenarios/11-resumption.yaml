@@ -1,0 +1,129 @@
+- id: resumption-signature-verification
+  title: The client verifies a server-minted Resumption, and rejects a tampered digest, a tampered tool, an unknown kid and a different tool
+  tags: [both, negative, resumption]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:ver:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: write,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ver:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: openai_agents, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 200 }
+      save: { resumption: data }
+    - as: none
+      request: { method: GET, path: /.well-known/jwks.json }
+      expect: { status: 200 }
+      save: { jwks: '$' }
+    - name: the genuine Resumption verifies and its signed payload is the object it travels with
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:ver:${uniq}', arg_digest: '${digest}' }
+        result: valid
+    - name: a tampered action_digest fails
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:ver:${uniq}', arg_digest: '${digest}' }
+        tamper: action_digest
+        result: bad_signature
+    - name: a tampered tool_ref fails
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:ver:${uniq}', arg_digest: '${digest}' }
+        tamper: tool_ref
+        result: bad_signature
+    - name: an unknown kid fails
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: { keys: [] }
+        expect: { tool_ref: 'ext:ver:${uniq}', arg_digest: '${digest}' }
+        result: unknown_kid
+    - name: the Resumption binds the tool - a different tool_ref is rejected even with an equal digest
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:other:${uniq}', arg_digest: '${digest}' }
+        result: tool_mismatch
+- id: resumption-external-has-token-proxied-does-not
+  title: The same decide for an external tool yields a Resumption with a resume_token, and for a proxied tool one without
+  tags: [both, negative, resumption]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:tok:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: write,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:tok:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { ext_id: data.approval.id, ext_digest: data.action_digest }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { n: '${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { px_id: data.approval.id, px_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${ext_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${ext_digest}' }
+      expect: { status: 200 }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${px_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${px_digest}' }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${ext_id}/resumption' }
+      expect: { status: 200, body: [{ path: data.resume_token, exists: true }] }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${px_id}/resumption' }
+      expect: { status: 200, body: [{ path: data.resume_token, exists: false }] }

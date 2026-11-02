@@ -1,0 +1,2007 @@
+# Contract revision 14: a deployment-applied reference, `tool:noblecloak:propose-policy-set`. A person opens it through
+# POST /v1/approvals, an administrator approves it, and the deployment registers the tools, binds the service
+# principal and creates and publishes the policies in one step, or applies nothing.
+#
+# Every scenario that applies a proposal binds the agent to a service principal and publishes policies, and undoes
+# both in `cleanup` (unbind, and retire each policy), which runs whether the steps passed or failed, so that a run can
+# repeat on a real deployment. A tool a proposal registers stays registered (there is no route that deletes a tool),
+# under a reference no other run uses. Each proposal sends well under 4096 bytes of arguments: a deployment that
+# advertises a smaller `approval_arguments_max_bytes` skips the scenario (`arguments_bytes`), and the scenario
+# `proposal-arguments-bound` is the one that meets the bound. A scenario that applies a proposal needs `admin` (the
+# approver) and `creator_user` (the person who opens it): a service principal cannot open one.
+- id: proposal-reserved-namespace
+  title: The tool:noblecloak namespace is reserved - registering a tool under it is 422 reserved_tool_ref, the reference of the proposal is never listed by GET /v1/tools and a decision on it is a deny for an unknown tool
+  tags: [both, floor, negative]
+  steps:
+    - name: a tool cannot be registered under the namespace
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'tool:noblecloak:mine-${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 422, problem: reserved_tool_ref }
+    - name: nor under the reference of the proposal itself
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'tool:noblecloak:propose-policy-set'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 422, problem: reserved_tool_ref }
+    - name: the reference is no tool of the catalog
+      as: admin
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        follow_pages: true
+        body:
+          - path: data
+            lacks_where_matches: { key: tool_ref, matches: '^tool:noblecloak:' }
+    - name: a decision on it is not decided as an ordinary tool
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            { tool_ref: 'tool:noblecloak:propose-policy-set', arguments: { q: 'decide-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: unknown_tool }
+- id: proposal-policy-immutable
+  title: No policy targets a deployment-applied reference - authoring one, replacing a draft with one and simulating a body that names one are each 422 policy_immutable
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  needs: [admin]
+  steps:
+    - name: a policy that targets the reference is refused
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['tool:noblecloak:propose-policy-set'] }
+          config: { mode: always_allow }
+      expect: { status: 422, problem: policy_immutable }
+    - name: so is one that names it among others
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:pi:${uniq}', 'tool:noblecloak:propose-policy-set'] }
+          config: { mode: always_allow }
+      expect: { status: 422, problem: policy_immutable }
+    - name: a draft that does not target it, replaced with a body that does
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:pi:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { draft: data.id }
+    - as: admin
+      request:
+        method: PUT
+        path: '/v1/policies/${draft}'
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['tool:noblecloak:propose-policy-set'] }
+          config: { mode: always_allow }
+      expect: { status: 422, problem: policy_immutable }
+    - name: a simulation of a proposed body that names it
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: everyone }]
+              targets: { tools: ['tool:noblecloak:propose-policy-set'] }
+              config: { mode: always_allow }
+          action: { tool_ref: 'ext:pi:${uniq}', arguments: { q: 'immutable-${uniq}' } }
+      expect: { status: 422, problem: policy_immutable }
+  cleanup:
+    - name: the draft that was made goes
+      as: admin
+      request: { method: DELETE, path: '/v1/policies/${draft}/draft' }
+      expect: { status: 204 }
+- id: proposal-unroutable-where-not-applied
+  title: A reference in the namespace that the deployment does not apply is 422 approval_unroutable
+  tags: [both]
+  requires: approvals
+  needs: [creator_user]
+  steps:
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            { tool_ref: 'tool:noblecloak:nothing-${uniq}', arguments: { q: 'unrouted-${uniq}' } }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 422, problem: approval_unroutable }
+- id: proposal-applied-on-approval
+  title: An administrator's approval applies a proposal as one step - the tools are registered, the service principal is bound, the policies are published and the bound service principal now holds the tightening - and the approval is approved and at once consumed
+  tags: [hosted]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, and the service principal the proposal binds to it
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'proposed agent ${uniq}' } }
+      expect: { status: 201, body: [{ path: data.principal_id, equals: null }] }
+      save: { agent: data.id }
+    - name: the creator appends a record, which names it as the actor
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'pp:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: a person opens the proposal
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              tools:
+                - tool_ref: 'ext:pp:${uniq}:lookup'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: read
+                  owner_kind: org
+                - tool_ref: 'ext:pp:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: Looking a record up changes nothing, so the organisation asks before it anyway.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pp:${uniq}:lookup'] }
+                    config: { mode: ask }
+                - role: baseline
+                  rationale: Sending is routine for the people of the organisation.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pp:${uniq}:send'] }
+                    config: { mode: always_allow }
+                - role: tightening
+                  rationale: This agent asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pp:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 201
+        body:
+          - { path: data.created, equals: true }
+          - { path: data.state, equals: pending }
+          - { path: data.resume_token_will_issue, equals: false }
+      save: { approval_id: data.id }
+    - name: opening applies nothing - the agent is unbound and no policy is stored
+      as: creator
+      request: { method: GET, path: '/v1/agents/${agent}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: null }] }
+    - as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pp:${uniq}:send&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 0 }] }
+    - name: the administrator reads the approval, its arguments and its preview
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.arguments_state, equals: shown }
+          - { path: data.arguments.agent.id, equals: '${agent}' }
+          - { path: data.preview.simulations, length: 2 }
+          - { path: data.preview.simulations.0.tool_ref, equals: 'ext:pp:${uniq}:lookup' }
+          - { path: data.preview.simulations.0.result.decision, equals: step_up }
+          - { path: data.preview.simulations.1.tool_ref, equals: 'ext:pp:${uniq}:send' }
+          - { path: data.preview.simulations.1.result.decision, equals: step_up }
+          - path: data.preview.loosening
+            contains_members: { tool_ref: 'ext:pp:${uniq}:send', to: always_allow }
+          - path: data.preview.loosening
+            lacks_where: { key: tool_ref, equals: 'ext:pp:${uniq}:lookup' }
+      save: { digest: data.action_digest }
+    - name: the administrator approves
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.resolution, equals: approved }
+          - path: data.resolution_history
+            contains_members: { resolution: approved }
+    - name: the service principal is bound
+      as: creator
+      request: { method: GET, path: '/v1/agents/${agent}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: '${sp}' }] }
+    - name: the tools are registered - registering one again is refused
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pp:${uniq}:send'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+      expect: { status: 400, problem: invalid_request }
+    - name: the baseline is published
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pp:${uniq}:send&subject_type=role&state=published&limit=200'
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.state, equals: published }
+          - { path: data.0.subjects.0.id, equals: everyone }
+      save: { first: data.0.id }
+    - name: and so is the tightening
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pp:${uniq}:send&subject_type=agent&state=published&limit=200'
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.state, equals: published }
+          - { path: data.0.subjects.0.id, equals: '${agent}' }
+      save: { second: data.0.id }
+    - as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pp:${uniq}:lookup&state=published&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 1 }] }
+      save: { third: data.0.id }
+    - name: the bound service principal holds the tightening, beside the baseline
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: member }]
+              targets: { tools: ['ext:pp:${uniq}:send'] }
+              config: { mode: always_allow }
+          action: { tool_ref: 'ext:pp:${uniq}:send', arguments: { q: 'applied-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - path: data.considered.policies
+            contains_members:
+              {
+                kind: tool_invocation,
+                result: ask,
+                subject: { type: agent, id: '${agent}' },
+                contributed: true,
+              }
+          - path: data.considered.policies
+            contains_members:
+              { kind: tool_invocation, result: always_allow, subject: { type: role, id: everyone } }
+    - name: the approval is final - it shows neither its arguments nor its preview any more
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.arguments_state, equals: final }
+          - { path: data.arguments, exists: false }
+          - { path: data.preview, exists: false }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+    - name: and the policies the approval published are retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${first}/retire' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${second}/retire' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${third}/retire' }
+      expect: { status: 200 }
+- id: proposal-refused-at-approval-applies-nothing
+  title: A policy that cannot be published when the proposal is approved applies nothing, whatever the steps before it did - the approval is rejected, the last entry of its history says proposal_refused:policy_conflict, and the tools, the binding and the earlier policy are not there
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, and the service principal the proposal binds to it
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'conflicted agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'pc:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: a person opens the proposal - a baseline on one new tool, and a tightening of the agent on another
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              tools:
+                - tool_ref: 'ext:pc:${uniq}:lookup'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: read
+                  owner_kind: org
+                - tool_ref: 'ext:pc:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks before a lookup.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pc:${uniq}:lookup'] }
+                    config: { mode: ask }
+                - role: tightening
+                  rationale: This agent asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pc:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: between the opening and the approval, a policy of the same agent for the same tool is published
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: agent, id: '${agent}' }]
+          targets: { tools: ['ext:pc:${uniq}:send'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { blocker: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${blocker}/publish' }
+      expect: { status: 200 }
+    - name: the administrator approves, and the deployment refuses to apply it
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - { path: data.resolution, equals: rejected }
+          - path: data.resolution_history
+            contains_members: { resolution: rejected, reason: 'proposal_refused:policy_conflict' }
+    - name: nothing was applied - the agent is unbound
+      as: creator
+      request: { method: GET, path: '/v1/agents/${agent}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: null }] }
+    - name: the baseline that came before the conflict is not published
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pc:${uniq}:lookup&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 0 }] }
+    - name: and the tools are not registered
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: member }]
+              targets: { tools: ['ext:pc:${uniq}:lookup'] }
+              config: { mode: ask }
+          action: { tool_ref: 'ext:pc:${uniq}:lookup', arguments: { q: 'refused-${uniq}' } }
+      expect: { status: 200, body: [{ path: data.reason, equals: unknown_tool }] }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+    - name: and the policy published between is retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${blocker}/retire' }
+      expect: { status: 200 }
+- id: proposal-rechecked-at-approval
+  title: Approving re-runs the checks of opening against the state of that moment - a tightening that a baseline published since makes looser is refused with proposal_refused:tightening_looser, although no policy of the proposal meets a published one of the same tool and subject, and nothing is applied
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent and a tool that no policy governs
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'rechecked agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rc:${uniq}:send'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a person opens a proposal whose tightening asks, which nothing in force is tighter than
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              policies:
+                - role: tightening
+                  rationale: This agent asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:rc:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: between the opening and the approval, a baseline that denies the tool is published for everyone
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:rc:${uniq}:send'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { denial: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${denial}/publish' }
+      expect: { status: 200 }
+    - name: the administrator approves, and the deployment refuses to apply a tightening that is now looser
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - path: data.resolution_history
+            contains_members: { resolution: rejected, reason: 'proposal_refused:tightening_looser' }
+    - name: nothing was applied - the only policy of the tool is the baseline published between
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:rc:${uniq}:send&limit=200'
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.id, equals: '${denial}' }
+  cleanup:
+    - name: the baseline published between is retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${denial}/retire' }
+      expect: { status: 200 }
+- id: proposal-denied-applies-nothing
+  title: Denying a proposal applies nothing - the approval is rejected, the agent stays unbound and no policy is stored
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, and the service principal the proposal binds to it
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'denied agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'pd:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: a person opens the proposal
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              tools:
+                - tool_ref: 'ext:pd:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pd:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: the administrator denies
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/deny'
+        body: { expected_action_digest: '${digest}', reason: 'not this one' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - path: data.resolution_history
+            contains_members: { resolution: rejected, reason: 'not this one' }
+    - name: nothing was applied - the agent is unbound
+      as: creator
+      request: { method: GET, path: '/v1/agents/${agent}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: null }] }
+    - name: no policy is stored for the tool
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:pd:${uniq}:send&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 0 }] }
+    - name: and the tool is not registered
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: member }]
+              targets: { tools: ['ext:pd:${uniq}:send'] }
+              config: { mode: ask }
+          action: { tool_ref: 'ext:pd:${uniq}:send', arguments: { q: 'denied-${uniq}' } }
+      expect: { status: 200, body: [{ path: data.reason, equals: unknown_tool }] }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+- id: proposal-preview-is-for-approvers
+  title: The preview of a pending proposal is read by a person who may approve it and by no one else - the person who opened it with their own token, and a user who may not approve, read the proposal and see none
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user, member]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'previewed agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: a person opens a proposal
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pv:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation lets it send.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pv:${uniq}:send'] }
+                    config: { mode: always_allow }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: an administrator sees the preview
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.preview.simulations, length: 1 }
+          - path: data.preview.loosening
+            contains_members: { tool_ref: 'ext:pv:${uniq}:send', to: always_allow }
+      save: { digest: data.action_digest }
+    - name: the person who opened it reads it with their own token, and sees no preview
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.preview, exists: false }
+    - name: a user who may not approve reads it, and sees no preview
+      as: member
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.preview, exists: false }
+    - name: the listing carries none either
+      as: admin
+      request: { method: GET, path: '/v1/approvals?state=pending&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_key: preview }
+  cleanup:
+    - name: the proposal is denied, so that it is not left pending
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/deny'
+        body: { expected_action_digest: '${digest}', reason: 'preview only' }
+      expect: { status: 200 }
+- id: proposal-approver-must-be-an-administrator
+  title: A user who is not an administrator of the organisation does not approve a proposal, though they approve an ordinary approval - 403 not_eligible, and the approval stays pending
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user, approver]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'unapproved agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: a person opens a proposal
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pn:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pn:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: a user who is not an administrator may not approve it
+      as: approver
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: it is still pending, and nothing was applied
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+  cleanup:
+    - name: the proposal is denied, so that it is not left pending
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/deny'
+        body: { expected_action_digest: '${digest}', reason: 'administrators only' }
+      expect: { status: 200 }
+- id: proposal-self-approval-from-the-approver-surface
+  title: A person who proposes approves their own proposal only from the approver surface, as the deployment advertises - their own token is not eligible, the surface token approves, and the proposal is applied
+  tags: [hosted]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  self_approval_from_approver_surface: true
+  arguments_bytes: 4096
+  needs: [admin, creator_user, approver_surface_token]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'self-approved agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: the person opens a proposal
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:ps:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:ps:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: the person's own token is not eligible
+      as: creator_user
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: the same person, from the approver surface, approves it
+      as: approver_surface_token
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.resolution, equals: approved }
+    - as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:ps:${uniq}:send&state=published&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 1 }] }
+      save: { applied: data.0.id }
+  cleanup:
+    - name: the policy the approval published is retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${applied}/retire' }
+      expect: { status: 200 }
+- id: proposal-refused-not-a-user
+  title: A service principal does not propose - 422 proposal_refused with code not_a_user, and nothing is opened
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'service-proposed agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: the service principal proposes
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pa:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pa:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body: [{ path: code, equals: not_a_user }]
+- id: proposal-refused-bad-shape
+  title: A proposal that breaks the schema or a rule beyond it is 422 proposal_refused with code shape, and member names the part - a tool outside ext:, a baseline for an agent, a tightening for another agent, a policy that targets two tools or the reference of the proposal, a member the schema does not have, and a digest in place of arguments
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [creator_user]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'badly shaped agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: a tool whose reference does not start with ext
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'mcp:crm:update-${uniq}'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: write
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: write,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['mcp:crm:update-${uniq}'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, matches: '^action\.arguments\.tools\[0\]' }
+    - name: a baseline whose subject is the agent
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pb:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pb:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, matches: '^action\.arguments\.policies\[0\]' }
+    - name: a tightening whose subject is another agent
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pb:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: tightening
+                  rationale: Another agent asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: 'another-${uniq}' }]
+                    targets: { tools: ['ext:pb:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, matches: '^action\.arguments\.policies\[0\]' }
+    - name: a policy that targets two tools
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pb:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+                - tool_ref: 'ext:pb:${uniq}:read'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: read
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pb:${uniq}:send', 'ext:pb:${uniq}:read'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, matches: '^action\.arguments\.policies\[0\]' }
+    - name: a policy that targets the reference of the proposal itself
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              policies:
+                - role: baseline
+                  rationale: The organisation lets it propose.
+                  assessment:
+                    {
+                      side_effect_level: admin,
+                      blast_radius: org_wide,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['tool:noblecloak:propose-policy-set'] }
+                    config: { mode: always_allow }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, matches: '^action\.arguments\.policies\[0\]' }
+    - name: a member the schema does not have
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              extra: true
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: write,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pb:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, matches: '^action\.arguments' }
+    - name: only a digest of the arguments
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arg_digest: '0000000000000000000000000000000000000000000000000000000000000000'
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments' }
+- id: proposal-refused-config-beyond-mode
+  title: A proposed policy carries mode only - a config member beyond mode (approver_groups, expires_after, on_deny) or an origin is 422 proposal_refused with code shape, and member names it
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [creator_user]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'mode only agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: a tightening that keeps ask but names the groups that approve
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pm:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask }
+                - role: tightening
+                  rationale: This agent asks for more.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask, approver_groups: [00000000-0000-4000-8000-00000000c0f0] }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[1].policy.config.approver_groups' }
+    - name: a baseline that keeps ask but names the groups that approve
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pm:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask, approver_groups: [00000000-0000-4000-8000-00000000c0f0] }
+                - role: tightening
+                  rationale: This agent asks for more.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[0].policy.config.approver_groups' }
+    - name: one that keeps ask but stretches the expiry
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pm:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask }
+                - role: tightening
+                  rationale: This agent asks for more.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask, expires_after: P30D }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[1].policy.config.expires_after' }
+    - name: one that keeps ask but changes what a deny does
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pm:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask }
+                - role: tightening
+                  rationale: This agent asks for more.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask, on_deny: resume }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[1].policy.config.on_deny' }
+    - name: one that carries an origin
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pm:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask }
+                - role: tightening
+                  rationale: This agent asks for more.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pm:${uniq}:send'] }
+                    config: { mode: ask }
+                    origin:
+                      {
+                        format: cedar,
+                        digest: 0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0,
+                      }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[1].policy.origin' }
+- id: proposal-refused-agent-and-principal
+  title: A proposal for an agent that is none of the organisation's is refused with code unknown_agent, and one that binds a service principal already bound to another agent with code principal_bound, each naming its member
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: two agents, and the service principal that is bound to the first
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'bound holder ${uniq}' } }
+      expect: { status: 201 }
+      save: { holder: data.id }
+    - as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'bound claimant ${uniq}' } }
+      expect: { status: 201 }
+      save: { claimant: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'pg:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${holder}/principal'
+        body: { principal_id: '${sp}' }
+      expect: { status: 200 }
+    - name: an agent that is none of the organisation's
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: 'agent_missing_${uniq}' }
+              tools:
+                - tool_ref: 'ext:pg:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pg:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: unknown_agent }
+          - { path: member, equals: 'action.arguments.agent.id' }
+    - name: a service principal that another agent holds
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${claimant}', principal_id: '${sp}' }
+              tools:
+                - tool_ref: 'ext:pg:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pg:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: principal_bound }
+          - { path: member, equals: 'action.arguments.agent.principal_id' }
+  cleanup:
+    - name: whatever the steps did, the first agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${holder}/principal' }
+      expect: { status: 204 }
+- id: proposal-refused-tools-and-targets
+  title: A proposal that registers a tool the organisation already has is refused with code tool_ref_in_use, and one whose policy targets a tool that is neither registered nor in the proposal with code target_unknown, each naming its member
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, and a tool the organisation already has
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'collided agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pt:${uniq}:held'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the proposal registers it again
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:pt:${uniq}:held'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: write
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: write,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pt:${uniq}:held'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: tool_ref_in_use }
+          - { path: member, equals: 'action.arguments.tools[0].tool_ref' }
+    - name: a policy that targets a tool nobody registered
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              policies:
+                - role: baseline
+                  rationale: The organisation asks.
+                  assessment:
+                    {
+                      side_effect_level: write,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pt:${uniq}:nobody'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: target_unknown }
+          - { path: member, equals: 'action.arguments.policies[0].policy.targets.tools[0]' }
+- id: proposal-refused-baseline-exists
+  title: A baseline for a tool that a published policy of the role everyone already governs is refused with code baseline_exists, so that a proposal never loosens or replaces the organisation's baseline unseen
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, a tool, and a published baseline for it
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'baselined agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pe:${uniq}:send'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:pe:${uniq}:send'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { existing: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${existing}/publish' }
+      expect: { status: 200 }
+    - name: the proposal carries another baseline for it
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              policies:
+                - role: baseline
+                  rationale: The organisation lets it send.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:pe:${uniq}:send'] }
+                    config: { mode: always_allow }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: baseline_exists }
+          - { path: member, equals: 'action.arguments.policies[0]' }
+  cleanup:
+    - name: the baseline that was published is retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${existing}/retire' }
+      expect: { status: 200 }
+- id: proposal-refused-tightening-looser
+  title: A tightening that gives the agent a looser mode than the policies in force compose to for the tool is refused with code tightening_looser
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, a tool, and a published baseline that asks
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'loosened agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pl:${uniq}:send'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:pl:${uniq}:send'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { existing: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${existing}/publish' }
+      expect: { status: 200 }
+    - name: the proposal's tightening always allows
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              policies:
+                - role: tightening
+                  rationale: This agent may send without asking.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:pl:${uniq}:send'] }
+                    config: { mode: always_allow }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: tightening_looser }
+          - { path: member, equals: 'action.arguments.policies[0]' }
+  cleanup:
+    - name: the baseline that was published is retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${existing}/retire' }
+      expect: { status: 200 }
+- id: proposal-import-skips-reference
+  title: An import never brings in a policy that names a deployment-applied reference - the report lists it under unsupported with a reason that names policy_immutable, and applies nothing
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  features: [policies.import_export]
+  needs: [admin]
+  steps:
+    - name: a Cedar policy whose resource is the reference
+      as: admin
+      request:
+        method: POST
+        path: '/v1/policies/import?format=cedar'
+        content_type: text/plain
+        body: 'permit (principal, action, resource == NobleCloak::Tool::"tool:noblecloak:propose-policy-set");'
+      expect:
+        status: 200
+        body:
+          - { path: data.applied, length: 0 }
+          - { path: data.unsupported.0.reason, matches: policy_immutable }
+- id: proposal-arguments-bound
+  title: A proposal whose arguments are larger than the bound the deployment advertises is 400 invalid_request, as for a tool that shows its arguments to approvers, and nothing is opened
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied, approval_arguments_max_bytes]
+  needs: [creator_user]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'oversized agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: a proposal whose tool carries an input schema larger than the bound
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              tools:
+                - tool_ref: 'ext:po:${uniq}:send'
+                  transport: external
+                  input_schema:
+                    {
+                      type: object,
+                      examples: { $repeat: '${approval_arguments_max_bytes}', item: 'x' },
+                    }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: The organisation asks before it sends.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:po:${uniq}:send'] }
+                    config: { mode: ask }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 400, problem: invalid_request }

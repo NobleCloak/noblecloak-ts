@@ -1,0 +1,970 @@
+- id: continuation-echoed-to-its-creator-in-every-state
+  title: The principal that created an approval reads its full continuation back as the same JSON value, in every state - pending, approved, rejected, consumed, withdrawn and expired
+  tags: [both, lifecycle, needs-mock-control]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: register an external tool, for the consumed state
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ce:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a pending approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ce-pending ${uniq}' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              { thread_id: 'ce-${uniq}-pending', checkpoint_ns: '', tool_call_id: 'call-pending' }
+      expect: { status: 200 }
+      save: { pending_id: data.approval.id }
+    - name: pending
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${pending_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.continuation_kind, equals: langgraph }
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-pending',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-pending',
+                    },
+                },
+            }
+    - name: the creator's own list carries the continuation too
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${pending_id}' }
+          - {
+              path: data.0.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-pending',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-pending',
+                    },
+                },
+            }
+    - name: a second approval, which is withdrawn
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ce-withdrawn ${uniq}' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              {
+                thread_id: 'ce-${uniq}-withdrawn',
+                checkpoint_ns: '',
+                tool_call_id: 'call-withdrawn',
+              }
+      expect: { status: 200 }
+      save: { withdrawn_id: data.approval.id }
+    - as: creator_user
+      request: { method: POST, path: '/v1/approvals/${withdrawn_id}/withdraw' }
+      expect: { status: 200 }
+    - name: withdrawn
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${withdrawn_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: withdrawn }
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-withdrawn',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-withdrawn',
+                    },
+                },
+            }
+    - name: a third approval, which is rejected
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ce-rejected ${uniq}' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              { thread_id: 'ce-${uniq}-rejected', checkpoint_ns: '', tool_call_id: 'call-rejected' }
+      expect: { status: 200 }
+      save: { rejected_id: data.approval.id, rejected_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${rejected_id}/deny
+        body: { expected_action_digest: '${rejected_digest}' }
+      expect: { status: 200 }
+    - name: rejected
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${rejected_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-rejected',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-rejected',
+                    },
+                },
+            }
+    - name: a fourth approval, which is approved
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ce-approved ${uniq}' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              { thread_id: 'ce-${uniq}-approved', checkpoint_ns: '', tool_call_id: 'call-approved' }
+      expect: { status: 200 }
+      save: { approved_id: data.approval.id, approved_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approved_id}/approve
+        body: { expected_action_digest: '${approved_digest}' }
+      expect: { status: 200 }
+    - name: approved
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${approved_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-approved',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-approved',
+                    },
+                },
+            }
+    - name: a fifth approval, for the external tool, which is consumed
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ce:${uniq}', arguments: { to: 'a@example.com' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              { thread_id: 'ce-${uniq}-consumed', checkpoint_ns: '', tool_call_id: 'call-consumed' }
+      expect: { status: 200 }
+      save: { consumed_id: data.approval.id, consumed_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${consumed_id}/approve
+        body: { expected_action_digest: '${consumed_digest}' }
+      expect: { status: 200 }
+    - as: creator_user
+      request: { method: GET, path: '/v1/approvals/${consumed_id}/resumption' }
+      expect: { status: 200, body: [{ path: data.resume_token, exists: true }] }
+      save: { token: data.resume_token }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${consumed_id}/consume
+        body:
+          resume_token: '${token}'
+          action: { tool_ref: 'ext:ce:${uniq}', arguments: { to: 'a@example.com' } }
+      expect: { status: 200 }
+    - name: consumed
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${consumed_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-consumed',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-consumed',
+                    },
+                },
+            }
+    - advance_seconds: 7200
+    - name: expired
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${pending_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: expired }
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'ce-${uniq}-pending',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-pending',
+                    },
+                },
+            }
+- id: continuation-withheld-from-other-readers
+  title: An approver does not get the continuation of an approval it did not create, in any state; it gets continuation_kind only
+  tags: [both, negative, needs-mock-control]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: a pending approval and a withdrawn one
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cw-pending ${uniq}' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              { thread_id: 'cw-${uniq}-pending', checkpoint_ns: '', tool_call_id: 'call-pending' }
+      expect: { status: 200 }
+      save: { pending_id: data.approval.id, pending_digest: data.action_digest }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cw-withdrawn ${uniq}' } }
+          continuation:
+            kind: langgraph
+            delivery: pull
+            correlation:
+              {
+                thread_id: 'cw-${uniq}-withdrawn',
+                checkpoint_ns: '',
+                tool_call_id: 'call-withdrawn',
+              }
+      expect: { status: 200 }
+      save: { withdrawn_id: data.approval.id }
+    - as: creator_user
+      request: { method: POST, path: '/v1/approvals/${withdrawn_id}/withdraw' }
+      expect: { status: 200 }
+    - name: the approver reads the pending approval
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${pending_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.continuation_kind, equals: langgraph }
+          - { path: data.continuation, exists: false }
+    - name: the approver reads the withdrawn one
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${withdrawn_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: withdrawn }
+          - { path: data.continuation_kind, equals: langgraph }
+          - { path: data.continuation, exists: false }
+    - name: the approver's long poll carries none either
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${pending_id}/wait?timeout=0' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation, exists: false }
+    - name: nor does the approver's list
+      as: approver
+      request: { method: GET, path: '/v1/approvals?limit=2' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${pending_id}' } }
+          - { path: data.0.continuation_kind, equals: langgraph }
+          - { path: data.0.continuation, exists: false }
+          - { path: data.1.continuation, exists: false }
+    - name: the approver resolves it, and the answer carries none
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${pending_id}/approve
+        body: { expected_action_digest: '${pending_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.continuation, exists: false }
+    - advance_seconds: 7200
+    - name: the approver reads it expired
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${pending_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: expired }
+          - { path: data.continuation_kind, equals: langgraph }
+          - { path: data.continuation, exists: false }
+    - name: the creator still reads it
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${pending_id}' }
+      expect:
+        status: 200
+        body:
+          - {
+              path: data.continuation,
+              equals_canonical:
+                {
+                  kind: langgraph,
+                  delivery: pull,
+                  correlation:
+                    {
+                      thread_id: 'cw-${uniq}-pending',
+                      checkpoint_ns: '',
+                      tool_call_id: 'call-pending',
+                    },
+                },
+            }
+- id: continuation-withheld-from-another-user-of-the-organisation
+  title: Another user principal of the organisation, one that is neither the creator nor the approver, does not get the continuation either
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, entitled]
+  steps:
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cu-pending ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 'cu-${uniq}' } }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id }
+    - as: entitled
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation_kind, equals: langgraph }
+          - { path: data.continuation, exists: false }
+- id: continuation-on-the-stream-is-the-creators-alone
+  title: An approval.updated event carries the continuation to the principal that created the approval and to no other reader
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: the creator's stream delivers it, with the continuation
+      stream_events:
+        as: creator_user
+        path: /v1/approvals/stream
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'cs-a ${uniq}' } }
+                continuation:
+                  kind: langgraph
+                  delivery: pull
+                  correlation: { thread_id: 'cs-${uniq}-a' }
+            expect: { status: 200 }
+            save: { a_id: data.approval.id, a_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${a_id}/approve
+              body: { expected_action_digest: '${a_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${a_id}'
+              body:
+                - { path: continuation_kind, equals: langgraph }
+                - {
+                    path: continuation,
+                    equals_canonical:
+                      {
+                        kind: langgraph,
+                        delivery: pull,
+                        correlation: { thread_id: 'cs-${uniq}-a' },
+                      },
+                  }
+    - name: the approver's stream delivers the next one, without it
+      stream_events:
+        as: approver
+        path: /v1/approvals/stream
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'cs-b ${uniq}' } }
+                continuation:
+                  kind: langgraph
+                  delivery: pull
+                  correlation: { thread_id: 'cs-${uniq}-b' }
+            expect: { status: 200 }
+            save: { b_id: data.approval.id, b_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${b_id}/approve
+              body: { expected_action_digest: '${b_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers:
+            - id: '${b_id}'
+              body:
+                - { path: continuation_kind, equals: langgraph }
+                - { path: continuation, exists: false }
+- id: approvals-created-by-me
+  title: created_by=me narrows the list and the stream to the approvals the caller created; without it a user principal still sees both
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: two user principals of one organisation each create an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cb-x ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { x_id: data.approval.id }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'cb-y ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { y_id: data.approval.id }
+    - name: the first sees its own, with the filter
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${x_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${y_id}' } }
+    - name: the second sees its own, with the filter
+      as: approver
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${y_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${x_id}' } }
+    - name: the filter composes with the others
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?created_by=me&state=pending&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${x_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${y_id}' } }
+    - name: without the filter the first sees both
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${x_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${y_id}' } }
+    - name: without the filter the second sees both
+      as: approver
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${x_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${y_id}' } }
+    - name: the stream with the filter never delivers the other principal's event
+      stream_events:
+        as: creator_user
+        path: /v1/approvals/stream?created_by=me
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'cb-sx ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { sx_id: data.approval.id, sx_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'cb-sy ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { sy_id: data.approval.id, sy_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${sx_id}/approve
+              body: { expected_action_digest: '${sx_digest}' }
+            expect: { status: 200 }
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/approvals/${sy_id}/approve
+              body: { expected_action_digest: '${sy_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers: ['${sx_id}']
+          lacks: ['${sy_id}']
+    - name: without the filter the same stream delivers both
+      stream_events:
+        as: creator_user
+        path: /v1/approvals/stream
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'cb-tx ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { tx_id: data.approval.id, tx_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'cb-ty ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { ty_id: data.approval.id, ty_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${tx_id}/approve
+              body: { expected_action_digest: '${tx_digest}' }
+            expect: { status: 200 }
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/approvals/${ty_id}/approve
+              body: { expected_action_digest: '${ty_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers: ['${tx_id}', '${ty_id}']
+- id: negative-created-by-takes-only-me
+  title: created_by takes the single value me; any other value is 400 invalid_request on the list and on the stream
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: the list
+      as: approver
+      request: { method: GET, path: '/v1/approvals?created_by=anyone' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the list, an empty value
+      as: approver
+      request: { method: GET, path: '/v1/approvals?created_by=' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the stream
+      as: approver
+      request: { method: GET, path: '/v1/approvals/stream?created_by=anyone' }
+      expect: { status: 400, problem: invalid_request }
+- id: negative-service-principal-sees-only-what-it-created
+  title: A service principal sees only the approvals it created - list and stream, with or without created_by - and a read of another principal's approval is 404; a user principal is unaffected
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: a user principal and the service principal of one organisation each create an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'sv-user ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { user_id: data.approval.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'sv-service ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 'sv-${uniq}' } }
+      expect: { status: 200 }
+      save: { service_id: data.approval.id }
+    - name: the service principal's unfiltered list carries its own only
+      as: creator
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${service_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${user_id}' } }
+    - name: with created_by=me it is the same
+      as: creator
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${service_id}' } }
+          - { path: data, lacks_where: { key: id, equals: '${user_id}' } }
+    - name: the filters on state and approver cannot widen it
+      as: creator
+      request: { method: GET, path: '/v1/approvals?state=pending&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${user_id}' } }
+    - name: a read of the user's approval by id is 404, as for another organisation's
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${user_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: so is the long poll
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${user_id}/wait?timeout=0' }
+      expect: { status: 404, problem: not_found }
+    - name: and the Resumption, which is not a 403
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${user_id}/resumption' }
+      expect: { status: 404, problem: not_found }
+    - name: the service principal still reads its own, with its continuation
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${service_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation.correlation.thread, equals: 'sv-${uniq}' }
+    - name: a user principal is unaffected and sees both
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${service_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${user_id}' } }
+    - name: and reads the service principal's approval by id
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${service_id}' }
+      expect: { status: 200 }
+    - name: the service principal's stream, unfiltered, delivers its own approval and not the user's
+      stream_events:
+        as: creator
+        path: /v1/approvals/stream
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'sv-su ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { su_id: data.approval.id, su_digest: data.action_digest }
+          - as: creator
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'sv-ss ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { ss_id: data.approval.id, ss_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${su_id}/approve
+              body: { expected_action_digest: '${su_digest}' }
+            expect: { status: 200 }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${ss_id}/approve
+              body: { expected_action_digest: '${ss_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers: ['${ss_id}']
+          lacks: ['${su_id}']
+    - name: the same with created_by=me
+      stream_events:
+        as: creator
+        path: /v1/approvals/stream?created_by=me
+        during:
+          - as: creator_user
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'sv-mu ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { mu_id: data.approval.id, mu_digest: data.action_digest }
+          - as: creator
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: '${proxied_tool}', arguments: { title: 'sv-ms ${uniq}' } }
+                continuation: { kind: langgraph, delivery: pull }
+            expect: { status: 200 }
+            save: { ms_id: data.approval.id, ms_digest: data.action_digest }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${mu_id}/approve
+              body: { expected_action_digest: '${mu_digest}' }
+            expect: { status: 200 }
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${ms_id}/approve
+              body: { expected_action_digest: '${ms_digest}' }
+            expect: { status: 200 }
+        expect:
+          delivers: ['${ms_id}']
+          lacks: ['${mu_id}']
+- id: negative-service-principal-cannot-see-another-service-principals
+  title: One service principal sees nothing another service principal of the same organisation created - read, long poll, Resumption and list are 404 or empty, not a disclosure
+  tags: [both, negative]
+  requires: approvals
+  needs: [other_service, approver]
+  steps:
+    - name: the service principal opens an approval
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ss-one ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { ss_id: data.approval.id }
+    - name: a second service principal of the same organisation reads it
+      as: other_service
+      request: { method: GET, path: '/v1/approvals/${ss_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: nor does the long poll reach it
+      as: other_service
+      request: { method: GET, path: '/v1/approvals/${ss_id}/wait?timeout=0' }
+      expect: { status: 404, problem: not_found }
+    - name: nor the Resumption
+      as: other_service
+      request: { method: GET, path: '/v1/approvals/${ss_id}/resumption' }
+      expect: { status: 404, problem: not_found }
+    - name: nor does its list carry it
+      as: other_service
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${ss_id}' } }
+    - name: the creating service principal still reads it
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${ss_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation.kind, equals: langgraph }
+- id: negative-other-organisation-cannot-read-an-approval-with-a-continuation
+  title: Another organisation gets 404 on an approval that carries a continuation - read, long poll and Resumption - and its list does not carry it
+  tags: [both, negative, tenancy]
+  requires: approvals
+  needs: [other_org]
+  steps:
+    - name: an approval opened with a continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'oo-cont ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull, correlation: { thread: 'oo-${uniq}' } }
+      expect: { status: 200 }
+      save: { oo_id: data.approval.id }
+    - name: another organisation reads it
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${oo_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: nor does the long poll reach it
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${oo_id}/wait?timeout=0' }
+      expect: { status: 404, problem: not_found }
+    - name: nor the Resumption
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${oo_id}/resumption' }
+      expect: { status: 404, problem: not_found }
+    - name: nor does its list carry it
+      as: other_org
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${oo_id}' } }
+- id: negative-service-principal-writes-to-another-service-principals-approval-are-404
+  title: A service principal gets 404 not_found - not 403, not 201 - on the writes that name another service principal's approval and are its creator's (withdraw, consume, a record with approval_id), and nothing of the approval changes
+  tags: [both, negative]
+  requires: approvals
+  needs: [other_service]
+  steps:
+    - name: the service principal opens an approval
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'sw-one ${uniq}' } }
+      expect: { status: 200 }
+      save: { sw_id: data.approval.id }
+    - name: a second service principal cannot withdraw it
+      as: other_service
+      request: { method: POST, path: '/v1/approvals/${sw_id}/withdraw' }
+      expect: { status: 404, problem: not_found }
+    - name: nor consume it
+      as: other_service
+      request:
+        method: POST
+        path: /v1/approvals/${sw_id}/consume
+        body:
+          resume_token: 'not-a-token'
+          action: { tool_ref: '${proxied_tool}', arguments: {} }
+      expect: { status: 404, problem: not_found }
+    - name: nor append a record that names it
+      as: other_service
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'sw:${uniq}', decision: allow, approval_id: '${sw_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: nor append one in a batch
+      as: other_service
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records: [{ tool_ref: 'sw:${uniq}', decision: allow, approval_id: '${sw_id}' }]
+      expect: { status: 404, problem: not_found }
+    - name: no record names the approval, so its outcome link did not move
+      as: creator
+      request: { method: GET, path: '/v1/records?approval_id=${sw_id}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }
+    - name: the creating service principal still withdraws it
+      as: creator
+      request: { method: POST, path: '/v1/approvals/${sw_id}/withdraw' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: withdrawn }
+- id: negative-records-batch-with-an-invisible-approval-is-all-or-nothing
+  title: A records batch in which one element names an approval the caller may not see (a service principal, another's approval) is 404 and appends nothing
+  tags: [both, negative]
+  requires: approvals
+  needs: [other_service]
+  steps:
+    - name: the service principal opens an approval
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'ib-one ${uniq}' } }
+      expect: { status: 200 }
+      save: { ib_id: data.approval.id }
+    - name: a second service principal sends a batch whose second element names it
+      as: other_service
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - { tool_ref: 'ib:${uniq}', decision: allow }
+            - { tool_ref: 'ib:${uniq}', decision: allow, approval_id: '${ib_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: its first element was not appended
+      as: other_service
+      request: { method: GET, path: '/v1/records?tool=ib:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }
+    - name: no record names the approval
+      as: creator
+      request: { method: GET, path: '/v1/records?approval_id=${ib_id}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }

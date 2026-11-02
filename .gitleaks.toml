@@ -1,0 +1,8 @@
+title = "noblecloak-ts"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "JWT test vectors of the Resumption contract: signed with throwaway keys, they authorize nothing."
+paths = ['''packages/spec/fixtures/resumption/''']

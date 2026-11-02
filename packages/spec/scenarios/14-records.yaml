@@ -1,0 +1,331 @@
+- id: records-context-enforced-policy-optional
+  title: A record may carry context.invocation_channel and enforced, and no policy; all three read back as written
+  tags: [both, floor]
+  steps:
+    - name: appended with no policy, a context and enforced false
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'rc:${uniq}',
+            decision: allow,
+            context: { invocation_channel: headless },
+            enforced: false,
+          }
+      expect:
+        status: 201
+        body:
+          - { path: data.context.invocation_channel, equals: headless }
+          - { path: data.enforced, equals: false }
+          - { path: data.attestation, equals: asserted }
+      save: { record_id: data.id }
+    - name: read back
+      as: creator
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.context.invocation_channel, equals: headless }
+          - { path: data.enforced, equals: false }
+          - { path: data.attestation, equals: asserted }
+    - name: a policy, when present, is echoed
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'rc:${uniq}',
+            decision: deny,
+            policy: { id: pol_x, version: 2 },
+            context: { invocation_channel: workflow },
+          }
+      expect:
+        status: 201
+        body:
+          - { path: data.policy.id, equals: pol_x }
+          - { path: data.context.invocation_channel, equals: workflow }
+    - name: a listed record reads back asserted
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=rc:${uniq}&decision=deny&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.attestation, equals: asserted }
+- id: records-default-decision-reads-back-without-policy
+  title: A record appended for a decision the default made has no policy, and reads back, single and listed, without the member
+  tags: [both, floor]
+  steps:
+    - name: the default decision has no policy
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: '${default_tool}', arguments: { q: 'rd ${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy, exists: false }
+    - name: the record mirrors it, with no policy
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: '${default_tool}', decision: allow }
+      expect:
+        status: 201
+        body:
+          - { path: data.policy, exists: false }
+      save: { record_id: data.id }
+    - name: read back
+      as: creator
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy, exists: false }
+    - name: listed
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=${default_tool}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.policy, exists: false }
+- id: negative-record-bad-context-and-policy
+  title: A record whose context channel is outside the enum or carries call_id, whose enforced is not a boolean, or whose policy lacks a version is 400 invalid_request
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          { tool_ref: 'rb:${uniq}', decision: allow, context: { invocation_channel: telepathy } }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rb:${uniq}', decision: allow, enforced: 'no' }
+      expect: { status: 400, problem: invalid_request }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rb:${uniq}', decision: allow, policy: { id: pol_x } }
+      expect: { status: 400, problem: invalid_request }
+    - name: a record context carries the channel only; call_id is a decision field
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          {
+            tool_ref: 'rb:${uniq}',
+            decision: allow,
+            context: { invocation_channel: headless, call_id: c_1 },
+          }
+      expect: { status: 400, problem: invalid_request }
+- id: negative-record-derived-fields-not-accepted
+  title: A caller cannot supply tool_use_id, source or side_effect_level on a record; each is 400 invalid_request
+  tags: [both, negative, floor]
+  steps:
+    - name: tool_use_id
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rd:${uniq}', decision: allow, tool_use_id: toolu_1 }
+      expect: { status: 400, problem: invalid_request }
+    - name: source
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rd:${uniq}', decision: allow, source: plugin }
+      expect: { status: 400, problem: invalid_request }
+    - name: side_effect_level
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rd:${uniq}', decision: allow, side_effect_level: read }
+      expect: { status: 400, problem: invalid_request }
+    - name: the three derived fields on a batch item
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - {
+                tool_ref: 'rd:${uniq}',
+                decision: allow,
+                tool_use_id: toolu_1,
+                source: plugin,
+                side_effect_level: read,
+              }
+      expect: { status: 400, problem: invalid_request }
+- id: negative-records-batch-is-all-or-nothing
+  title: A records batch in which one element is refused appends nothing - not the elements before it
+  tags: [both, negative, floor]
+  steps:
+    - name: the second record names an approval that does not exist
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - { tool_ref: 'aon:${uniq}', decision: allow }
+            - { tool_ref: 'aon:${uniq}', decision: allow, approval_id: 'no-such-approval-${uniq}' }
+      expect: { status: 404, problem: not_found }
+    - name: the first record was not appended
+      as: creator
+      request: { method: GET, path: '/v1/records?tool=aon:${uniq}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 0 }
+    - name: the same two records without the refused element are appended
+      as: creator
+      request:
+        method: POST
+        path: /v1/records/batch
+        body:
+          records:
+            - { tool_ref: 'aon:${uniq}', decision: allow }
+            - { tool_ref: 'aon:${uniq}', decision: deny }
+      expect:
+        status: 201
+        body:
+          - { path: data, length: 2 }
+- id: record-reports-whether-it-linked-to-the-approval
+  title: A record that names an approval says whether it was linked - not_consumed before consume, linked after, already_linked for a second; a record that names none carries no approval_link
+  tags: [both, lifecycle]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register the external tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:link:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: decide opens the obligation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:link:${uniq}', arguments: { to: 'a@example.com' } }
+          continuation: { kind: vercel_ai, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: a record appended without approval_id carries no approval_link
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ext:link:${uniq}', decision: step_up }
+      expect:
+        status: 201
+        body:
+          - { path: data.approval_link, exists: false }
+    - name: a record naming the unconsumed approval is appended and not linked
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          tool_ref: 'ext:link:${uniq}'
+          decision: step_up
+          approval_id: '${approval_id}'
+          outcome: { status: succeeded }
+      expect:
+        status: 201
+        body:
+          - { path: data.approval_id, equals: '${approval_id}' }
+          - { path: data.approval_link.linked, equals: false }
+          - { path: data.approval_link.reason, equals: not_consumed }
+    - name: the approver approves it and the creator consumes it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 200 }
+      save: { token: data.resume_token }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          resume_token: '${token}'
+          action: { tool_ref: 'ext:link:${uniq}', arguments: { to: 'a@example.com' } }
+      expect: { status: 200, body: [{ path: data.state, equals: consumed }] }
+    - name: the unlinked record did not become the outcome
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.outcome_record_id, equals: null }
+    - name: after consume, the record is linked
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          tool_ref: 'ext:link:${uniq}'
+          decision: step_up
+          approval_id: '${approval_id}'
+          outcome: { status: succeeded, summary: sent }
+      expect:
+        status: 201
+        body:
+          - { path: data.approval_link.linked, equals: true }
+          - { path: data.approval_link.reason, exists: false }
+      save: { first_record: data.id }
+    - name: a second record for the same approval is appended and already_linked
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          tool_ref: 'ext:link:${uniq}'
+          decision: step_up
+          approval_id: '${approval_id}'
+          outcome: { status: failed }
+      expect:
+        status: 201
+        body:
+          - { path: data.approval_id, equals: '${approval_id}' }
+          - { path: data.approval_link.linked, equals: false }
+          - { path: data.approval_link.reason, equals: already_linked }
+    - name: the first link stands
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.outcome_record_id, equals: '${first_record}' }
+    - name: approval_link is not part of a read of the record
+      as: creator
+      request: { method: GET, path: '/v1/records/${first_record}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval_link, exists: false }

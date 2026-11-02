@@ -1,0 +1,17 @@
+id: identity-corpus-digests
+title: For every vector of the vendored corpus, POST /v1/decisions reports the pinned action_digest
+tags: [both, identity, floor]
+foreach: corpus
+steps:
+  - name: decide with the arguments as sent
+    as: creator
+    request:
+      method: POST
+      path: /v1/decisions
+      body:
+        action: { tool_ref: '${allow_tool}', arguments: '${item.arguments}' }
+    expect:
+      status: 200
+      body:
+        - { path: data.decision, equals: allow }
+        - { path: data.action_digest, equals: '${item.arg_digest}' }

@@ -1,0 +1,37 @@
+{
+  "name": "@noblecloak/example-next-app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example Next.js app: the Approvals module embedded in an App Router app, against the mock or a real deployment. Also the fixture the NobleCloak skills and end-to-end tests run against.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build && bun ../../scripts/check-react-dist.ts example-bundle .",
+    "start": "next start -p 3000",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf .next coverage .turbo",
+    "start:demo": "node e2e/demo.ts",
+    "test:e2e": "playwright test && NC_E2E_MODE=oidc playwright test"
+  },
+  "dependencies": {
+    "@noblecloak/client": "workspace:*",
+    "@noblecloak/react": "workspace:*",
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@noblecloak/spec": "workspace:*",
+    "@playwright/test": "1.64.1",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "30.1.3"
+  }
+}

@@ -1,0 +1,10 @@
+/*
+ * The second no-network control: a remote font import in the minified bare-string form, with no `url(` and no
+ * space, which is the form the design system's built CSS opens with (shared-design-system 0.4.0,
+ * dist/index.css). House-written; only the shape of the import is reproduced.
+ */
+@import"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap";
+
+.nc-root {
+  color: inherit;
+}

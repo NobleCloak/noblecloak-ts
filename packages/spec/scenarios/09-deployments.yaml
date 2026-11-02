@@ -1,0 +1,174 @@
+- id: hosted-authoring-routes
+  title: On the hosted deployment an administrator authors, replaces and publishes a policy, and the legality matrix is enforced
+  tags: [hosted]
+  requires: policies
+  only: hosted
+  needs: [admin]
+  steps:
+    - name: register the tool the policy governs
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:har:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:har:${uniq}'] }
+          config: { mode: ask, on_deny: halt }
+      expect: { status: 201, body: [{ path: data.published_at, equals: null }] }
+      save: { policy_id: data.id }
+    - as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: admin }]
+          targets: { tools: ['ext:har:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200, body: [{ path: data.published_at, exists: true }] }
+    - name: the legality matrix refuses on_deny with always_allow
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:har:${uniq}'] }
+          config: { mode: always_allow, on_deny: halt }
+      expect: { status: 400, problem: invalid_request }
+- id: hosted-policy-import-export
+  title: Where a hosted deployment advertises policies.import_export, policies import and export, and another organisation cannot export an organisation's policy
+  tags: [hosted, negative, tenancy]
+  requires: policies
+  only: hosted
+  features: [policies.import_export]
+  needs: [admin, other_org]
+  steps:
+    - name: register the tool the policy governs
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:hie:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:hie:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request:
+        {
+          method: POST,
+          path: '/v1/policies/import?format=agt',
+          content_type: text/plain,
+          body: 'rules: []',
+        }
+      expect: { status: 200, body: [{ path: data.unsupported, exists: true }] }
+    - as: admin
+      request: { method: GET, path: '/v1/policies/${policy_id}/export?format=cedar' }
+      expect: { status: 200 }
+    - name: another organisation cannot export it
+      as: other_org
+      request: { method: GET, path: '/v1/policies/${policy_id}/export?format=cedar' }
+      expect: { status: 404, problem: not_found }
+- id: hosted-paid-routes
+  title: The paid routes need their entitlement and are served on hosted
+  tags: [hosted]
+  requires: [records.checkpoints, evidence, policies]
+  only: hosted
+  needs: [entitled]
+  steps:
+    - name: without the entitlement
+      as: creator
+      request: { method: GET, path: /v1/records/verify }
+      expect: { status: 403, problem: entitlement_required }
+    - as: entitled
+      request: { method: POST, path: /v1/records/checkpoints }
+      expect: { status: 201 }
+    - as: entitled
+      request: { method: GET, path: /v1/records/verify }
+      expect: { status: 200, body: [{ path: data.verified, exists: true }] }
+    - as: entitled
+      request: { method: POST, path: /v1/evidence/exports }
+      expect: { status: 202 }
+    - name: suggested policies, entitled
+      as: entitled
+      request: { method: GET, path: '/v1/policies?source=suggested' }
+      expect: { status: 200 }
+    - name: suggested policies, not entitled
+      as: creator
+      request: { method: GET, path: '/v1/policies?source=suggested' }
+      expect: { status: 403, problem: entitlement_required }
+- id: edge-suggested-policies-unavailable
+  title: On an edge deployment source=suggested is 404 not_available_on_deployment
+  tags: [edge, negative]
+  requires: policies
+  only: edge
+  steps:
+    - as: creator
+      request: { method: GET, path: '/v1/policies?source=suggested' }
+      expect: { status: 404, problem: not_available_on_deployment }
+- id: capabilities-hosted-features
+  title: Capabilities on hosted lists policies.publish
+  tags: [hosted]
+  requires: policies
+  only: hosted
+  steps:
+    - as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.deployment, equals: hosted }
+          - { path: data.features, contains: policies.publish }
+          - { path: meta.deployment, equals: hosted }
+- id: capabilities-edge-features
+  title: Capabilities on edge omit the hosted-only features and families, and meta.deployment says edge
+  tags: [edge, negative, floor]
+  only: edge
+  steps:
+    - as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.deployment, equals: edge }
+          - { path: meta.deployment, equals: edge }
+          - { path: data.features, lacks: policies.publish }
+          - { path: data.features, lacks: policies.author }
+          - { path: data.features, lacks: policies.import_export }
+          - { path: data.features, lacks: policies.retire }
+          - { path: data.features, lacks: connections.oauth }
+          - { path: data.features, lacks: connections.user_links }
+          - { path: data.features, lacks: records.checkpoints }
+          - { path: data.features, lacks: records.verify }
+          - { path: data.features, lacks: evidence }
+          - { path: data.features, lacks: evidence.export }

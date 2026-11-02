@@ -1,0 +1,79 @@
+/*
+ * @noblecloak/theme tokens. Every declaration is scoped under `.nc-root`; nothing targets `html`, `body` or
+ * `:root`. The host themes a module with the eight inputs @noblecloak/react ships (--nc-bg, --nc-fg,
+ * --nc-muted, --nc-border, --nc-accent, --nc-danger, --nc-radius, --nc-font-sans). The additions below them
+ * are read by @noblecloak/theme's primitives, which @noblecloak/react's modules render, so setting one
+ * re-themes those modules' controls and panels too. With none set, the colours follow
+ * `prefers-color-scheme`; `data-nc-theme="light"` or "dark" on the root or an ancestor overrides that. The
+ * `--nc-i-*` variables are internal, not a contract.
+ *
+ * The first three rules are the token block @noblecloak/react shipped in its own stylesheet in 0.5.0 and
+ * earlier. This file is now the source of that block: @noblecloak/react's build inlines the whole file, byte for
+ * byte, into its `dist/styles.css` and checks that it did. The additions follow.
+ */
+.nc-root {
+  --nc-i-bg: var(--nc-bg, #ffffff);
+  --nc-i-fg: var(--nc-fg, #1a1a1a);
+  --nc-i-muted: var(--nc-muted, #595959);
+  --nc-i-border: var(--nc-border, #bdbdbd);
+  --nc-i-accent: var(--nc-accent, #0b57d0);
+  --nc-i-danger: var(--nc-danger, #b3261e);
+  --nc-i-radius: var(--nc-radius, 4px);
+  font-family: var(--nc-font-sans, inherit);
+  color: var(--nc-i-fg);
+  background: var(--nc-i-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .nc-root:not([data-nc-theme='light']):not([data-nc-theme='light'] .nc-root) {
+    --nc-i-bg: var(--nc-bg, #121212);
+    --nc-i-fg: var(--nc-fg, #ececec);
+    --nc-i-muted: var(--nc-muted, #b0b0b0);
+    --nc-i-border: var(--nc-border, #5c5c5c);
+    --nc-i-accent: var(--nc-accent, #8ab4f8);
+    --nc-i-danger: var(--nc-danger, #f2b8b5);
+  }
+}
+
+.nc-root[data-nc-theme='dark'],
+[data-nc-theme='dark'] .nc-root {
+  --nc-i-bg: var(--nc-bg, #121212);
+  --nc-i-fg: var(--nc-fg, #ececec);
+  --nc-i-muted: var(--nc-muted, #b0b0b0);
+  --nc-i-border: var(--nc-border, #5c5c5c);
+  --nc-i-accent: var(--nc-accent, #8ab4f8);
+  --nc-i-danger: var(--nc-danger, #f2b8b5);
+}
+
+/*
+ * Additions: inputs that @noblecloak/theme's primitives read (and, for --nc-font-mono, @noblecloak/react's
+ * `code` rule), each defaulting to a value derived from the eight (or a fixed light/dark pair), so a host
+ * that sets only the eight still gets a coherent result.
+ */
+.nc-root {
+  --nc-i-accent-fg: var(--nc-accent-fg, #ffffff);
+  --nc-i-danger-fg: var(--nc-danger-fg, #ffffff);
+  --nc-i-surface: var(--nc-surface, var(--nc-i-bg));
+  --nc-i-subtle: var(--nc-subtle, color-mix(in srgb, var(--nc-i-fg) 8%, var(--nc-i-bg)));
+  --nc-i-success: var(--nc-success, #1b6e33);
+  --nc-i-warning: var(--nc-warning, #8a5300);
+  --nc-i-font-mono: var(--nc-font-mono, ui-monospace, monospace);
+  --nc-i-ring: var(--nc-ring, var(--nc-i-accent));
+}
+
+@media (prefers-color-scheme: dark) {
+  .nc-root:not([data-nc-theme='light']):not([data-nc-theme='light'] .nc-root) {
+    --nc-i-accent-fg: var(--nc-accent-fg, #121212);
+    --nc-i-danger-fg: var(--nc-danger-fg, #121212);
+    --nc-i-success: var(--nc-success, #7fd18f);
+    --nc-i-warning: var(--nc-warning, #f2c066);
+  }
+}
+
+.nc-root[data-nc-theme='dark'],
+[data-nc-theme='dark'] .nc-root {
+  --nc-i-accent-fg: var(--nc-accent-fg, #121212);
+  --nc-i-danger-fg: var(--nc-danger-fg, #121212);
+  --nc-i-success: var(--nc-success, #7fd18f);
+  --nc-i-warning: var(--nc-warning, #f2c066);
+}

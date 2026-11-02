@@ -1,0 +1,663 @@
+# Rev 11: each user's own credential link to a per_user registration, with consent; the OAuth authorize step;
+# and an approval that is blocked on its creator's link. The links are hosted only, behind the features
+# connections.user_links and connections.oauth. An administrator registers; a member links; the administrator's
+# read shows the administrator's own link, never the member's. A scenario that needs a return_to the deployment
+# admits names it with the `oauth_return_to` fixture (`nc-conform --oauth-return-to`).
+- id: routes-connection-links
+  title: Links - an administrator links its own credential, revokes consent, unlinks, and authorizes its own OAuth link
+  tags: [hosted]
+  only: hosted
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  features: [connections.user_links, connections.oauth]
+  needs: [admin]
+  fixtures: [oauth_return_to]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'rl ${uniq}'
+          url: 'https://rl-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: per_user
+      expect: { status: 201 }
+      save: { bearer_id: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections/${bearer_id}/link
+        body: { consent: true, token: 'admin-${uniq}' }
+      expect: { status: 200, body: [{ path: data.my_link.status, equals: linked }] }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${bearer_id}/link/consent' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${bearer_id}/link' }
+      expect: { status: 204 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'rl oauth ${uniq}'
+          url: 'https://rl-oauth-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+          credential_tier: per_user
+      expect: { status: 201 }
+      save: { oauth_id: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/link
+        body: { consent: true }
+      expect: { status: 200, body: [{ path: data.my_link.status, equals: pending_authorization }] }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 200, body: [{ path: data.authorization_url, matches: '^https?://' }] }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${oauth_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${bearer_id}' }
+      expect: { status: 204 }
+- id: negative-connection-links
+  title: A member links its own credential with consent, which is required and true; the token is never returned, an administrator reads only its own link, revoking keeps the credential, and an org_shared registration takes no link
+  tags: [hosted, negative]
+  only: hosted
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  features: [connections.user_links]
+  needs: [admin, member]
+  steps:
+    - name: an administrator registers a per_user bearer server
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'links ${uniq}'
+          url: 'https://links-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: per_user
+      expect:
+        status: 201
+        body:
+          - { path: data.credential_tier, equals: per_user }
+          - { path: data.status, equals: connected }
+      save: { connection_id: data.id }
+    - name: the member has no link yet
+      as: member
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: none }
+          - { path: data.my_link.consent, equals: none }
+    - name: a link without consent is refused
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { token: 'member-${uniq}' }
+      expect: { status: 400, problem: invalid_request }
+    - name: and so is consent false
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { consent: false, token: 'member-${uniq}' }
+      expect: { status: 400, problem: invalid_request }
+    - name: with consent the member links, and the token is never returned
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { consent: true, token: 'member-${uniq}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: linked }
+          - { path: data.my_link.consent, equals: given }
+          - { path: data.my_link.token, exists: false }
+          - { path: data.my_link.linked_at, exists: true }
+    - name: the administrator reads its own link, never the member's
+      as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: none }
+          - { path: data.my_link.consent, equals: none }
+    - name: the member revokes consent
+      as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link/consent' }
+      expect: { status: 204 }
+    - name: the credential is kept, consent is not
+      as: member
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: linked }
+          - { path: data.my_link.consent, equals: revoked }
+    - name: posting consent again gives it, and keeps the stored credential
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { consent: true }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: linked }
+          - { path: data.my_link.consent, equals: given }
+    - name: the member unlinks
+      as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link' }
+      expect: { status: 204 }
+    - as: member
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200, body: [{ path: data.my_link.status, equals: none }] }
+    - name: unlinking again is idempotent
+      as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link' }
+      expect: { status: 204 }
+    - name: there is no consent to revoke without a link
+      as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link/consent' }
+      expect: { status: 404, problem: not_found }
+    - name: an org_shared registration takes no link
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'shared ${uniq}'
+          url: 'https://shared-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: org_shared
+          org_credential: { token: 'org-${uniq}' }
+      expect: { status: 201, body: [{ path: data.my_link, exists: false }] }
+      save: { shared_id: data.id }
+    - as: member
+      request:
+        method: POST
+        path: /v1/connections/${shared_id}/link
+        body: { consent: true, token: 'member-${uniq}' }
+      expect: { status: 400, problem: invalid_request }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${shared_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: negative-connection-oauth-authorize
+  title: Authorize is for OAuth registrations, to an admitted return_to, on the caller's own link after it links with consent, and on an org_shared registration for an administrator only
+  tags: [hosted, negative]
+  only: hosted
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  features: [connections.oauth, connections.user_links]
+  needs: [admin, member]
+  fixtures: [oauth_return_to]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'bearer ${uniq}'
+          url: 'https://oa-bearer-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: per_user
+      expect: { status: 201 }
+      save: { bearer_id: data.id }
+    - name: a registration that is not OAuth is not authorized
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${bearer_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 400, problem: invalid_request }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'oauth ${uniq}'
+          url: 'https://oa-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+          credential_tier: per_user
+      expect:
+        status: 201
+        body:
+          - { path: data.status, equals: connected }
+          - { path: data.my_link.status, equals: none }
+      save: { oauth_id: data.id }
+    - name: link first
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 400, problem: invalid_request }
+    - name: an OAuth link takes consent and no token
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/link
+        body: { consent: true, token: 'not-for-oauth' }
+      expect: { status: 400, problem: invalid_request }
+    - as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/link
+        body: { consent: true }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: pending_authorization }
+          - { path: data.my_link.consent, equals: given }
+    - name: a return_to the deployment does not admit is refused
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/authorize
+        body: { return_to: 'https://not-admitted-${uniq}.invalid/return' }
+      expect: { status: 400, problem: invalid_request }
+    - name: the member authorizes its own link
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.authorization_url, matches: '^https?://' }
+          - { path: data.expires_at, exists: true }
+    - name: an org_shared OAuth registration waits for an administrator
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'org oauth ${uniq}'
+          url: 'https://oa-org-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+          credential_tier: org_shared
+      expect: { status: 201, body: [{ path: data.status, equals: pending_authorization }] }
+      save: { org_id: data.id }
+    - name: which a member does not authorize
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${org_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 403, problem: forbidden }
+    - name: and the administrator does
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections/${org_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 200, body: [{ path: data.authorization_url, matches: '^https?://' }] }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${org_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${oauth_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${bearer_id}' }
+      expect: { status: 204 }
+- id: connection-reauthorize
+  title: A linked OAuth link, and a connected org_shared OAuth registration, are authorized again; the credential in use stays in use until the round trip completes, and a refused one leaves it as it was
+  tags: [hosted]
+  only: hosted
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  features: [connections.oauth, connections.user_links]
+  needs: [admin, member]
+  fixtures: [oauth_return_to]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'reauth ${uniq}'
+          url: 'https://reauth-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+          credential_tier: per_user
+      expect: { status: 201 }
+      save: { oauth_id: data.id }
+    - as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/link
+        body: { consent: true }
+      expect: { status: 200, body: [{ path: data.my_link.status, equals: pending_authorization }] }
+    - as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 200 }
+      save: { first_url: data.authorization_url }
+    - name: the member consents
+      control: { consent: { authorization_url: '${first_url}' } }
+    - as: member
+      request: { method: GET, path: '/v1/connections/${oauth_id}' }
+      expect: { status: 200, body: [{ path: data.my_link.status, equals: linked }] }
+    - name: a linked link is authorized again
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${oauth_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 200, body: [{ path: data.authorization_url, matches: '^https?://' }] }
+      save: { again_url: data.authorization_url }
+    - name: and stays linked while the round trip is open
+      as: member
+      request: { method: GET, path: '/v1/connections/${oauth_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: linked }
+          - { path: data.my_link.consent, equals: given }
+    - name: the member refuses the second consent
+      control: { consent: { authorization_url: '${again_url}', deny: true } }
+    - name: which leaves the link as it was
+      as: member
+      request: { method: GET, path: '/v1/connections/${oauth_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.my_link.status, equals: linked }
+          - { path: data.my_link.consent, equals: given }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'reauth org ${uniq}'
+          url: 'https://reauth-org-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+          credential_tier: org_shared
+      expect: { status: 201, body: [{ path: data.status, equals: pending_authorization }] }
+      save: { org_id: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections/${org_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 200 }
+      save: { org_url: data.authorization_url }
+    - name: the administrator consents
+      control: { consent: { authorization_url: '${org_url}' } }
+    - as: admin
+      request: { method: GET, path: '/v1/connections/${org_id}' }
+      expect: { status: 200, body: [{ path: data.status, equals: connected }] }
+    - name: a member does not authorize the organisation credential again
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${org_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 403, problem: forbidden }
+    - name: the administrator does
+      as: admin
+      request:
+        method: POST
+        path: /v1/connections/${org_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 200, body: [{ path: data.authorization_url, matches: '^https?://' }] }
+      save: { org_again_url: data.authorization_url }
+    - name: and the registration stays connected while the round trip is open
+      as: admin
+      request: { method: GET, path: '/v1/connections/${org_id}' }
+      expect: { status: 200, body: [{ path: data.status, equals: connected }] }
+    - name: the administrator completes the re-authorization
+      control: { consent: { authorization_url: '${org_again_url}' } }
+    - as: admin
+      request: { method: GET, path: '/v1/connections/${org_id}' }
+      expect: { status: 200, body: [{ path: data.status, equals: connected }] }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${org_id}' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${oauth_id}' }
+      expect: { status: 204 }
+- id: negative-approval-blocked-on-link
+  title: An approval for a tool of a per_user registration its creator has no usable link to says blocked_on to the creator alone, and no longer once the creator links with consent; revoking consent blocks it again and withdraws no tool
+  tags: [hosted, negative]
+  only: hosted
+  requires: [connections, approvals]
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  features: [connections.user_links]
+  needs: [admin, member]
+  fixtures: [connection_server_url]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'blocked ${uniq}'
+          url: '${connection_server_url}'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: bearer }
+          credential_tier: per_user
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/connections/${connection_id}/refresh' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect: { status: 200, body: [{ path: data.0.tool_ref, exists: true }] }
+      save: { tool_ref: data.0.tool_ref }
+    - name: the member, with no link, opens an approval for one of its tools
+      as: member
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${tool_ref}', arguments: { q: 'blocked ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: [200, 201] }
+      save: { approval_id: data.id }
+    - name: the member reads that it waits on the member's link
+      as: member
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.blocked_on.reason, equals: credential_link_required }
+          - { path: data.blocked_on.connection_id, equals: '${connection_id}' }
+    - name: and on its row of the list
+      as: member
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=200' }
+      expect:
+        status: 200
+        body:
+          - path: data
+            contains_members:
+              id: '${approval_id}'
+              blocked_on: { reason: credential_link_required, connection_id: '${connection_id}' }
+    - name: no other reader sees it
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.blocked_on, exists: false }] }
+    - name: the member links with consent
+      as: member
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { consent: true, token: 'member-${uniq}' }
+      expect: { status: 200, body: [{ path: data.my_link.status, equals: linked }] }
+    - name: and the approval waits on nothing
+      as: member
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.blocked_on, exists: false }] }
+    - name: revoking consent
+      as: member
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link/consent' }
+      expect: { status: 204 }
+    - name: withdraws no tool
+      as: member
+      request: { method: GET, path: '/v1/tools?connection=${connection_id}&limit=200' }
+      expect:
+        status: 200
+        body:
+          - path: data
+            contains_members: { tool_ref: '${tool_ref}', status: active }
+    - name: and blocks the approval again
+      as: member
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.blocked_on.reason, equals: credential_link_required }
+    - as: member
+      request: { method: POST, path: '/v1/approvals/${approval_id}/withdraw' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: tenancy-connection-links-isolated
+  title: Another organisation cannot link to, revoke consent on, or authorize an organisation's registration
+  tags: [hosted, negative, tenancy]
+  only: hosted
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  features: [connections.user_links, connections.oauth]
+  needs: [admin, other_org]
+  fixtures: [oauth_return_to]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'tl ${uniq}'
+          url: 'https://tl-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+          credential_tier: per_user
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - as: other_org
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { consent: true }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link/consent' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/authorize
+        body: { return_to: '${oauth_return_to}' }
+      expect: { status: 404, problem: not_found }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }
+- id: edge-rev11-hosted-only-surfaces
+  title: An edge deployment answers the rev 11 hosted-only routes 404 not_available_on_deployment, carries no my_link on an OAuth registration, and no blocked_on on an approval
+  tags: [edge, negative]
+  only: edge
+  requires: [connections, approvals]
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          name: 'edge ${uniq}'
+          url: 'https://edge-${uniq}.example.com/mcp'
+          transport: mcp
+          owner_kind: org
+          auth: { kind: oauth }
+      expect: { status: 201, body: [{ path: data.my_link, exists: false }] }
+      save: { connection_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 200, body: [{ path: data.my_link, exists: false }] }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/authorize
+        body: { return_to: 'https://module.example.com/return' }
+      expect: { status: 404, problem: not_available_on_deployment }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections/${connection_id}/link
+        body: { consent: true }
+      expect: { status: 404, problem: not_available_on_deployment }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}/link/consent' }
+      expect: { status: 404, problem: not_available_on_deployment }
+    - as: admin
+      request: { method: POST, path: /v1/policies/pol_x/retire }
+      expect: { status: 404, problem: not_available_on_deployment }
+    - as: admin
+      request: { method: DELETE, path: /v1/policies/pol_x/draft }
+      expect: { status: 404, problem: not_available_on_deployment }
+    - name: an approval on the edge says nothing of a link
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { q: 'edge ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { approval_id: data.approval.id }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.blocked_on, exists: false }] }
+    - as: admin
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 204 }

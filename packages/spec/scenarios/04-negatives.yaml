@@ -1,0 +1,404 @@
+- id: negative-replayed-resume-token
+  title: A replayed resume_token is 409 obligation_consumed
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:neg:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: write,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:neg:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 200 }
+      save: { token: data.resume_token }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          { resume_token: '${token}', action: { tool_ref: 'ext:neg:${uniq}', arguments: { n: 1 } } }
+      expect: { status: 200 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          { resume_token: '${token}', action: { tool_ref: 'ext:neg:${uniq}', arguments: { n: 1 } } }
+      expect: { status: 409, problem: obligation_consumed }
+- id: negative-ineligible-resolve
+  title: A user principal that created an obligation cannot resolve it (403 not_eligible), on any door
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: a user principal opens the obligation, so only its identity, not its kind, can refuse it
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'inelig ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the creating principal resolves its own obligation
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: the same principal through the approve route
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: it is still pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: negative-service-cannot-resolve
+  title: A service principal that did not create the obligation still cannot resolve it (403 not_eligible)
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: a user principal opens the obligation, so the service principal below is not its creator
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'svc ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the service principal resolves it
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: it is still pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: negative-service-cannot-approve
+  title: A service principal that did not create the obligation cannot approve it either (403 not_eligible)
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: a user principal opens the obligation, so the service principal below is not its creator
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'svc-approve ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the service principal approves it
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: it is still pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: negative-service-cannot-deny
+  title: A service principal that did not create the obligation cannot deny it either (403 not_eligible)
+  tags: [both, negative]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: a user principal opens the obligation, so the service principal below is not its creator
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'svc-deny ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the service principal denies it
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: it is still pending
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: negative-stale-digest
+  title: Resolving with a stale expected_action_digest is 409 approval_conflict
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'stale ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body:
+          {
+            resolution: approved,
+            expected_action_digest: '0000000000000000000000000000000000000000000000000000000000000000',
+          }
+      expect: { status: 409, problem: approval_conflict }
+    - name: nothing was resolved
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: negative-caller-supplied-attestation
+  title: A caller-supplied attestation is 400 attestation_not_accepted
+  tags: [both, negative, floor]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: '${allow_tool}', decision: allow, attestation: observed }
+      expect: { status: 400, problem: attestation_not_accepted }
+- id: negative-caller-supplied-approval-id
+  title: A caller-supplied approval_id on POST /v1/approvals is 400 identity_not_accepted
+  tags: [both, negative]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          approval_id: ffffffff-ffff-4fff-8fff-ffffffffffff
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'asserted ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 400, problem: identity_not_accepted }
+- id: negative-wrong-audience
+  title: A token with the wrong aud is 401
+  tags: [both, negative, floor]
+  needs: [wrong_audience]
+  steps:
+    - as: wrong_audience
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 401 }
+    - name: the same token's principal with the right audience is accepted
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 200 }
+- id: negative-forged-token
+  title: A token whose signature is not the issuer's is 401 invalid_token
+  tags: [both, negative, floor]
+  needs: [forged]
+  steps:
+    - as: forged
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 401, problem: invalid_token }
+    - name: the real issuer's token is accepted
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 200 }
+- id: negative-expired-token
+  title: A correctly signed token that has expired is 401 invalid_token
+  tags: [both, negative, floor]
+  needs: [expired]
+  steps:
+    - as: expired
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 401, problem: invalid_token }
+    - name: an unexpired token is accepted
+      as: creator
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 200 }
+- id: negative-no-token
+  title: A request with no token is 401 unauthorized
+  tags: [both, negative, floor]
+  steps:
+    - as: none
+      request: { method: GET, path: /v1/capabilities }
+      expect: { status: 401, problem: unauthorized }
+- id: negative-consume-wrong-action
+  title: /consume with a different tool_ref or arg_digest is 409 approval_conflict, and the obligation stays consumable
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:wrong:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: write,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:wrong:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 200 }
+      save: { token: data.resume_token }
+    - name: a different tool_ref with the same arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          {
+            resume_token: '${token}',
+            action: { tool_ref: 'ext:other:${uniq}', arguments: { n: 1 } },
+          }
+      expect: { status: 409, problem: approval_conflict }
+    - name: the same tool_ref with different arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          {
+            resume_token: '${token}',
+            action: { tool_ref: 'ext:wrong:${uniq}', arguments: { n: 2 } },
+          }
+      expect: { status: 409, problem: approval_conflict }
+    - name: the same tool_ref with a different arg_digest
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          {
+            resume_token: '${token}',
+            action:
+              {
+                tool_ref: 'ext:wrong:${uniq}',
+                arg_digest: '1111111111111111111111111111111111111111111111111111111111111111',
+              },
+          }
+      expect: { status: 409, problem: approval_conflict }
+    - name: the matching action still consumes
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          {
+            resume_token: '${token}',
+            action: { tool_ref: 'ext:wrong:${uniq}', arguments: { n: 1 } },
+          }
+      expect: { status: 200 }
+- id: negative-resumption-audience
+  title: The Resumption is readable by the creating principal only (403 not_owner for the approver)
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'aud ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 200 }
+    - name: the approver asks for the Resumption
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 403, problem: not_owner }
+    - name: the creator gets it
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 200 }
+- id: negative-resolve-closed-enum
+  title: A caller resolves as approved, rejected or escalated only; any other resolution is 400 invalid_request
+  tags: [both, negative]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'enum ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: a value nobody defined
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: banana, expected_action_digest: '${digest}' }
+      expect: { status: 400, problem: invalid_request }
+    - name: neither resolved it
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }

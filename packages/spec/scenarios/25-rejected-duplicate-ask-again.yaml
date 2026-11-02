@@ -1,0 +1,115 @@
+# Rev 10: the last file of this directory, so that no scenario of it runs while the organisation's
+# duplicate-requests setting is ask_again. It sets ask_again, and as its last step publishes the default
+# (deny, a window of 24 hours) again. A run that fails part-way leaves ask_again as the organisation's
+# setting until the next run that passes: harmless on a database thrown away after the run, and worth
+# knowing on a deployment that keeps its data.
+- id: rejected-duplicate-ask-again-reopens-with-prior-rejections
+  title: Under an organisation duplicate-requests policy of ask_again, an identical call after a rejection opens a fresh approval carrying prior_rejections, until max_reasks is exceeded
+  tags: [hosted, negative]
+  only: hosted
+  requires: [policies, approvals]
+  features: [approvals.rejected_duplicate]
+  needs: [admin, creator_user, approver]
+  steps:
+    - name: the organisation's duplicate-requests policy says ask_again, once
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: duplicate_requests
+          name: 'conformance ask_again ${uniq}'
+          subjects: [{ type: organization }]
+          config: { after_rejection: ask_again, max_reasks: 1 }
+      expect: { status: 201, body: [{ path: data.state, equals: draft }] }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200, body: [{ path: data.state, equals: published }] }
+    - name: a user's call steps up
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-again ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { first_id: data.approval.id, digest: data.action_digest }
+    - name: and is rejected
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${first_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the identical call is asked again, as a fresh approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-again ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.created, equals: true }
+          - { path: data.approval.id, not_equals: '${first_id}' }
+      save: { second_id: data.approval.id }
+    - name: the fresh approval says it was rejected once before, to its creator
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${second_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.prior_rejections.count, equals: 1 }
+          - { path: data.prior_rejections.last_at, exists: true }
+    - name: and to the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${second_id}' }
+      expect: { status: 200, body: [{ path: data.prior_rejections.count, equals: 1 }] }
+    - name: the first approval carries none
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${first_id}' }
+      expect: { status: 200, body: [{ path: data.prior_rejections, exists: false }] }
+    - name: the re-ask is rejected too
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${second_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: a second rejection exceeds max_reasks, so the identical call is denied as a duplicate
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-again ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: rejected_duplicate }
+          - { path: data.rejected_approval_id, equals: '${second_id}' }
+    - name: the organisation's setting goes back to the default
+      as: admin
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: duplicate_requests
+          name: 'conformance ask_again ${uniq}'
+          subjects: [{ type: organization }]
+          config: { after_rejection: deny }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: published }
+          - { path: data.config.after_rejection, equals: deny }

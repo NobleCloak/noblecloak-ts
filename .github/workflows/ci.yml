@@ -1,0 +1,236 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate / ${{ matrix.task }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [format:check, lint, typecheck, test, build]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - run: bun run ${{ matrix.task }}
+
+  e2e:
+    name: e2e / example app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Install the browser at the pinned Playwright version
+        run: bun run --cwd examples/next-app playwright install --with-deps chromium-headless-shell
+      - name: Real-browser tests of the example app (mock mode, then sign-in mode)
+        run: bun run --cwd examples/next-app test:e2e
+      # The reporter is `list` (no HTML report is written), so the traces and screenshots in test-results are the evidence.
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-test-results
+          path: examples/next-app/test-results
+          if-no-files-found: ignore
+
+  e2e-theme:
+    name: e2e / theme
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - run: bun x turbo run build --filter=@noblecloak/theme
+      - name: Size budget of the built dist/index.css (20 KB gzip)
+        run: bun run --cwd packages/theme size
+      - name: Install the browser at the pinned Playwright version
+        run: bun run --cwd packages/theme playwright install --with-deps chromium-headless-shell
+      # Pages are served by page.route and every request off their origin is aborted, so the run needs no network.
+      - name: Leak, inward, no-network and contrast tests of the theme
+        run: bun run --cwd packages/theme e2e
+      # @noblecloak/react's build composes dist/styles.css from the theme's tokens.css (the theme is cached above).
+      - run: bun x turbo run build --filter=@noblecloak/react
+      # The golden stylesheet spec and the module specs (hostile host, a replaced Button, re-theme by --nc-* only).
+      - name: The built react stylesheet against 0.4.2's, and the built modules on a hostile host
+        run: bun run --cwd packages/react e2e
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-theme-test-results
+          path: |
+            packages/theme/test-results
+            packages/react/test-results
+          if-no-files-found: ignore
+
+  skill:
+    name: skill / approvals
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - name: Install the browser at the pinned Playwright version
+        run: bun run --cwd examples/next-app playwright install --with-deps chromium-headless-shell
+      # Everything else (build, pack, scaffold, apply the skill, build and end-to-end test the app in mock and
+      # sign-in modes, the file comparison and the wall time) is the one script a developer runs locally too.
+      - name: Exercise the skill on a fresh Next.js app
+        run: bun run exercise:skill
+      - name: Keep the wall time
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-exercise-wall-time
+          path: artifacts/skill-exercise-wall-time.json
+          # The script writes it on a failed run too, so a missing file is worth a warning.
+          if-no-files-found: warn
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-e2e-test-results
+          path: examples/next-app/test-results
+          if-no-files-found: ignore
+
+  skill-permissions:
+    name: skill / permissions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - name: Install the browser at the pinned Playwright version
+        run: bun run --cwd examples/next-app playwright install --with-deps chromium-headless-shell
+      # Everything else (build, pack, scaffold, apply the skill, build and end-to-end test the app in mock mode, the
+      # file comparison and the wall time) is the one script a developer runs locally too.
+      - name: Exercise the skill on a fresh Next.js app
+        run: bun run exercise:skill --skill permissions
+      - name: Keep the wall time
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-exercise-permissions-wall-time
+          path: artifacts/skill-exercise-permissions-wall-time.json
+          # The script writes it on a failed run too, so a missing file is worth a warning.
+          if-no-files-found: warn
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-permissions-e2e-test-results
+          path: examples/next-app/test-results
+          if-no-files-found: ignore
+
+  skill-connections:
+    name: skill / connections
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+      - name: Install the browser at the pinned Playwright version
+        run: bun run --cwd examples/next-app playwright install --with-deps chromium-headless-shell
+      # Everything else (build, pack, scaffold, apply the skill, build and end-to-end test the app in mock mode, the
+      # file comparison and the wall time) is the one script a developer runs locally too.
+      - name: Exercise the skill on a fresh Next.js app
+        run: bun run exercise:skill --skill connections
+      - name: Keep the wall time
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-exercise-connections-wall-time
+          path: artifacts/skill-exercise-connections-wall-time.json
+          # The script writes it on a failed run too, so a missing file is worth a warning.
+          if-no-files-found: warn
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: skill-connections-e2e-test-results
+          path: examples/next-app/test-results
+          if-no-files-found: ignore
+
+  guard:
+    name: ci guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun run guard
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color

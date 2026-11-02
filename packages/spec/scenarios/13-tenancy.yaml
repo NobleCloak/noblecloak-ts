@@ -1,0 +1,461 @@
+- id: tenancy-approvals-isolated
+  title: Another organisation cannot read, resolve, withdraw, consume or list an organisation's approval
+  tags: [both, negative, tenancy]
+  requires: approvals
+  needs: [other_org, approver]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'tenancy ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: read
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: resolve with the right digest
+      as: other_org
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/resolve
+        body: { resolution: approved, expected_action_digest: '${digest}' }
+      expect: { status: 404, problem: not_found }
+    - name: withdraw
+      as: other_org
+      request: { method: POST, path: '/v1/approvals/${approval_id}/withdraw' }
+      expect: { status: 404, problem: not_found }
+    - name: consume
+      as: other_org
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          resume_token: not-a-token
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'tenancy ${uniq}' } }
+      expect: { status: 404, problem: not_found }
+    - name: read the Resumption
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect: { status: 404, problem: not_found }
+    - name: approve through the alias
+      as: other_org
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 404, problem: not_found }
+    - name: deny through the alias
+      as: other_org
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 404, problem: not_found }
+    - name: wait
+      as: other_org
+      request: { method: GET, path: '/v1/approvals/${approval_id}/wait?timeout=0' }
+      expect: { status: 404, problem: not_found }
+    - name: append a record that links the approval
+      as: other_org
+      request:
+        method: POST
+        path: /v1/records
+        body:
+          tool_ref: 'tn:link:${uniq}'
+          decision: allow
+          approval_id: '${approval_id}'
+          outcome: { status: succeeded }
+      expect: { status: 404, problem: not_found }
+    - name: list
+      as: other_org
+      request: { method: GET, path: '/v1/approvals?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${approval_id}' } }
+    - name: the obligation is untouched
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: pending }] }
+- id: tenancy-records-isolated
+  title: Another organisation cannot read or list an organisation's records
+  tags: [both, negative, tenancy, floor]
+  needs: [other_org]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'tn:${uniq}', decision: allow, outcome: { status: succeeded } }
+      expect: { status: 201 }
+      save: { record_id: data.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: GET, path: '/v1/records?tool=tn:${uniq}&limit=200' }
+      expect: { status: 200, body: [{ path: data, length: 0 }] }
+    - name: the owner still reads it
+      as: creator
+      request: { method: GET, path: '/v1/records/${record_id}' }
+      expect: { status: 200 }
+- id: tenancy-record-chain-isolated
+  title: Another organisation cannot read an organisation's record chain
+  tags: [both, negative, tenancy]
+  requires: records.chain
+  needs: [other_org]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'tnc:${uniq}', decision: allow, outcome: { status: succeeded } }
+      expect: { status: 201 }
+      save: { record_id: data.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/records/${record_id}/chain' }
+      expect: { status: 404, problem: not_found }
+    - name: the owner still reads it
+      as: creator
+      request: { method: GET, path: '/v1/records/${record_id}/chain' }
+      expect: { status: 200 }
+- id: tenancy-runs-isolated
+  title: Another organisation cannot read an organisation's run, nor select its scope through a decision
+  tags: [both, negative, tenancy]
+  requires: [runs, approvals]
+  tool_registration: any
+  needs: [other_org]
+  steps:
+    - as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: external } }
+      expect: { status: 201 }
+      save: { run_id: data.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/runs/${run_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: the other organisation registers a tool of its own, so the decision reaches the scope
+      as: other_org
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:tn-run:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: read,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+    - name: another organisation's run cannot be selected by a decision
+      as: other_org
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          actor: { run_id: '${run_id}' }
+          action: { tool_ref: 'ext:tn-run:${uniq}', arguments: { title: 'tn run ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 403, problem: forbidden }
+    - name: the owner still reads it
+      as: creator
+      request: { method: GET, path: '/v1/runs/${run_id}' }
+      expect: { status: 200 }
+- id: tenancy-checkpoint-counts-own-records-only
+  title: A checkpoint counts the caller's organisation's records, not another organisation's
+  tags: [both, negative, tenancy]
+  requires: records.checkpoints
+  needs: [other_org, entitled]
+  only: hosted
+  steps:
+    - name: a checkpoint before the other organisation writes
+      as: entitled
+      request: { method: POST, path: /v1/records/checkpoints }
+      expect: { status: 201 }
+      save: { before: data.record_count }
+    - name: another organisation appends a record
+      as: other_org
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'tn:cp:${uniq}', decision: allow, outcome: { status: succeeded } }
+      expect: { status: 201 }
+    - name: the count is unchanged
+      as: entitled
+      request: { method: POST, path: /v1/records/checkpoints }
+      expect:
+        status: 201
+        body: [{ path: data.record_count, equals: '${before}' }]
+- id: tenancy-tools-isolated
+  title: Another organisation cannot read, change or list an organisation's tools
+  tags: [both, negative, tenancy, floor]
+  tool_registration: any
+  needs: [other_org]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          {
+            tool_ref: 'ext:tn:${uniq}',
+            transport: external,
+            input_schema: { type: object },
+            side_effect_level: read,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+      save: { tool_id: data.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/tools/${tool_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: PATCH, path: '/v1/tools/${tool_id}', body: { side_effect_level: admin } }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: GET, path: '/v1/tools?limit=200' }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${tool_id}' } }
+- id: tenancy-connections-isolated
+  title: Another organisation cannot read, change, discover, refresh, delete or list an organisation's connections
+  tags: [both, negative, tenancy]
+  requires: connections
+  serves_connection_owner_kind: org
+  serves_connection_transport: mcp
+  needs: [admin, other_org]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/connections
+        body:
+          {
+            name: 'tn ${uniq}',
+            url: 'https://tenancy-${uniq}.example.com/mcp',
+            transport: mcp,
+            owner_kind: org,
+          }
+      expect: { status: 201 }
+      save: { connection_id: data.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/connections/${connection_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: PATCH, path: '/v1/connections/${connection_id}', body: { name: taken } }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: POST, path: '/v1/connections/${connection_id}/discover' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: POST, path: '/v1/connections/${connection_id}/refresh' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: DELETE, path: '/v1/connections/${connection_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: GET, path: /v1/connections }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${connection_id}' } }
+# Rev 12: webhooks are an administrator's. The runner holds no administrator of another organisation, so
+# `other_org` (not an administrator) is refused the list 403, and a delete of a webhook it cannot see is
+# 404 before the administrator check; it learns nothing of the organisation's webhooks.
+# Not covered here: that a list is scoped to the caller's organisation. That needs an administrator of a
+# second organisation, which the runner does not hold (no `other_org_admin` actor), so `other_org`'s 403
+# answers before any organisation filter runs. The delete step below still catches a lookup that ignores
+# the organisation (`ignore_org_scope`): it would reach the administrator check and answer 403, not 404.
+- id: tenancy-webhooks-isolated
+  title: Another organisation cannot list or delete an organisation's webhooks
+  tags: [both, negative, tenancy]
+  requires: webhooks
+  needs: [other_org, admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/webhooks
+        body: { url: '${callback_base_url}/tn/${uniq}', events: [approval.resolved] }
+      expect: { status: 201 }
+      save: { webhook_id: data.id }
+    - as: other_org
+      request: { method: GET, path: /v1/webhooks }
+      expect: { status: 403, problem: forbidden }
+    - as: other_org
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 404, problem: not_found }
+    - name: the owner can still delete its own webhook
+      as: admin
+      request: { method: DELETE, path: '/v1/webhooks/${webhook_id}' }
+      expect: { status: 204 }
+- id: tenancy-agents-isolated
+  title: Another organisation cannot read an organisation's agent
+  tags: [both, negative, tenancy]
+  requires: agents
+  needs: [other_org]
+  steps:
+    - as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'tn ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent_id: data.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/agents/${agent_id}' }
+      expect: { status: 404, problem: not_found }
+- id: tenancy-run-cannot-name-foreign-agent
+  title: A run may name only an agent of the caller's organisation; another organisation's agent id, and an id that names no agent, are 404 not_found
+  tags: [both, negative, tenancy]
+  requires: [agents, runs]
+  needs: [other_org]
+  steps:
+    - as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'tn run ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent_id: data.id }
+    - name: another organisation names the agent
+      as: other_org
+      request: { method: POST, path: /v1/runs, body: { kind: external, agent_id: '${agent_id}' } }
+      expect: { status: 404, problem: not_found }
+    - name: an id that names no agent
+      as: creator
+      request:
+        {
+          method: POST,
+          path: /v1/runs,
+          body: { kind: external, agent_id: 'agent_nowhere_${uniq}' },
+        }
+      expect: { status: 404, problem: not_found }
+    - name: the owner may name it
+      as: creator
+      request: { method: POST, path: /v1/runs, body: { kind: external, agent_id: '${agent_id}' } }
+      expect:
+        status: 201
+        body:
+          - { path: data.agent_id, equals: '${agent_id}' }
+- id: tenancy-policies-isolated
+  title: Another organisation cannot read an organisation's policy or its versions
+  tags: [both, negative, tenancy]
+  requires: policies
+  needs: [other_org]
+  steps:
+    # A tool policy: a duplicate-requests policy another scenario published is never the one picked.
+    - as: creator
+      request: { method: GET, path: '/v1/policies?kind=tool_invocation' }
+      expect: { status: 200 }
+      save: { policy_id: data.0.id }
+    - as: other_org
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: GET, path: '/v1/policies/${policy_id}/versions' }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body: { action: { tool_ref: '${deny_tool}', arguments: {} } }
+      expect: { status: 404, problem: not_found }
+    - as: other_org
+      request: { method: GET, path: /v1/policies }
+      expect:
+        status: 200
+        body:
+          - { path: data, lacks_where: { key: id, equals: '${policy_id}' } }
+- id: tenancy-policy-writes-isolated
+  title: Another organisation cannot change or publish an organisation's policy
+  tags: [hosted, negative, tenancy]
+  requires: policies
+  only: hosted
+  needs: [other_org, admin]
+  steps:
+    - name: register the tool the policy governs
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:tpw:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: member }]
+          targets: { tools: ['ext:tpw:${uniq}'] }
+          config: { mode: ask, on_deny: halt }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - name: replace
+      as: other_org
+      request:
+        method: PUT
+        path: /v1/policies/${policy_id}
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: admin }]
+          targets: { tools: ['ext:tpw:${uniq}'] }
+          config: { mode: always_allow }
+      expect: { status: 404, problem: not_found }
+    - name: publish
+      as: other_org
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 404, problem: not_found }
+    - name: the policy is unchanged and unpublished
+      as: creator
+      request: { method: GET, path: '/v1/policies/${policy_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.published_at, equals: null }
+          - { path: data.subjects.0.id, equals: member }
+- id: tenancy-resolve-batch-isolated
+  title: A batch resolve from another organisation names an approval it cannot see and gets the per-element not-found, and the approval is untouched when its own organisation reads it
+  tags: [both, negative, tenancy]
+  requires: approvals
+  needs: [other_org, approver]
+  steps:
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'tenancy batch ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200 }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the other organisation resolves it in a batch with the right digest
+      as: other_org
+      request:
+        method: POST
+        path: /v1/approvals/resolve/batch
+        body:
+          items:
+            - {
+                approval_id: '${approval_id}',
+                resolution: approved,
+                expected_action_digest: '${digest}',
+              }
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 1 }
+          - { path: data.0.status, equals: 404 }
+          - { path: data.0.type, matches: 'not_found$' }
+    - name: the approval is still pending when its own organisation reads it
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }

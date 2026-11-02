@@ -1,0 +1,240 @@
+/*
+ * Styles for @noblecloak/react. Every rule is scoped under `.nc-root`. The host themes it with
+ * --nc-bg, --nc-fg, --nc-muted, --nc-border, --nc-accent, --nc-danger, --nc-radius and --nc-font-sans.
+ * With none set, the colours follow `prefers-color-scheme`; `data-nc-theme="light"` or "dark" on the
+ * element or an ancestor overrides that. There is no reset, no import and no web font.
+ */
+.nc-root {
+  --nc-i-bg: var(--nc-bg, #ffffff);
+  --nc-i-fg: var(--nc-fg, #1a1a1a);
+  --nc-i-muted: var(--nc-muted, #595959);
+  --nc-i-border: var(--nc-border, #bdbdbd);
+  --nc-i-accent: var(--nc-accent, #0b57d0);
+  --nc-i-danger: var(--nc-danger, #b3261e);
+  --nc-i-radius: var(--nc-radius, 4px);
+  font-family: var(--nc-font-sans, inherit);
+  color: var(--nc-i-fg);
+  background: var(--nc-i-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .nc-root:not([data-nc-theme='light']):not([data-nc-theme='light'] .nc-root) {
+    --nc-i-bg: var(--nc-bg, #121212);
+    --nc-i-fg: var(--nc-fg, #ececec);
+    --nc-i-muted: var(--nc-muted, #b0b0b0);
+    --nc-i-border: var(--nc-border, #5c5c5c);
+    --nc-i-accent: var(--nc-accent, #8ab4f8);
+    --nc-i-danger: var(--nc-danger, #f2b8b5);
+  }
+}
+
+.nc-root[data-nc-theme='dark'],
+[data-nc-theme='dark'] .nc-root {
+  --nc-i-bg: var(--nc-bg, #121212);
+  --nc-i-fg: var(--nc-fg, #ececec);
+  --nc-i-muted: var(--nc-muted, #b0b0b0);
+  --nc-i-border: var(--nc-border, #5c5c5c);
+  --nc-i-accent: var(--nc-accent, #8ab4f8);
+  --nc-i-danger: var(--nc-danger, #f2b8b5);
+}
+
+.nc-root.nc-approvals {
+  display: grid;
+  grid-template-columns: minmax(14rem, 22rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.nc-root .nc-queue,
+.nc-root .nc-live,
+.nc-root .nc-detail {
+  min-width: 0;
+}
+
+.nc-root .nc-live {
+  grid-column: 1;
+}
+
+.nc-root .nc-detail {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  border: 1px solid var(--nc-i-border);
+  border-radius: var(--nc-i-radius);
+  padding: 1rem;
+}
+
+@media (max-width: 40rem) {
+  .nc-root.nc-approvals {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nc-root .nc-detail {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
+.nc-root .nc-muted {
+  color: var(--nc-i-muted);
+}
+
+.nc-root .nc-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.nc-root .nc-row {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  text-align: start;
+}
+
+/* A row with a checkbox for "Approve selected": the box beside the row's button. */
+.nc-root .nc-rows li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.nc-root .nc-rows li > .nc-row {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.nc-root .nc-choose {
+  display: inline-flex;
+  align-items: center;
+  padding-block: 0.375rem;
+}
+
+/* Text for a screen reader only: the checkbox's name, which the page does not repeat in view. */
+.nc-root .nc-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.nc-root .nc-tabs,
+.nc-root .nc-batch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+}
+
+.nc-root .nc-tabs button[aria-pressed='true'] {
+  border-width: 3px;
+  border-style: double;
+}
+
+/*
+ * Server text in a row or the heading cannot grow past its box and cover what is around it: the tool reference
+ * is cut at 200 characters in the markup, and whatever else it holds (wide glyphs, stacked combining marks)
+ * is clipped here. The detail's facts show the whole value and scroll.
+ */
+.nc-root .nc-row-tool,
+.nc-root .nc-detail > h3 {
+  overflow: hidden;
+  contain: paint;
+  max-height: 6em;
+  overflow-wrap: anywhere;
+}
+
+/* The heading takes focus; its ring is drawn inside, where the clipping does not reach. */
+.nc-root .nc-detail > h3:focus-visible {
+  outline-offset: -3px;
+}
+
+/* The row that is open is marked by a border width and a rule, never by colour alone. */
+.nc-root .nc-row[aria-current='true'] {
+  border-width: 3px;
+  border-style: double;
+}
+
+.nc-root button,
+.nc-root textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--nc-i-bg);
+  border: 1px solid var(--nc-i-border);
+  border-radius: var(--nc-i-radius);
+  padding: 0.375rem 0.625rem;
+}
+
+.nc-root button:disabled,
+.nc-root textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.nc-root :focus-visible {
+  outline: 3px solid var(--nc-i-accent);
+  outline-offset: 2px;
+}
+
+.nc-root .nc-error {
+  border: 1px solid var(--nc-i-danger);
+  border-inline-start-width: 6px;
+  border-radius: var(--nc-i-radius);
+  padding: 0.5rem 0.75rem;
+}
+
+.nc-root .nc-facts {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.nc-root .nc-fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.nc-root .nc-fact dt {
+  font-weight: 600;
+}
+
+.nc-root .nc-fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.nc-root .nc-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--nc-i-border);
+  border-radius: var(--nc-i-radius);
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.nc-root .nc-digest {
+  overflow-wrap: anywhere;
+}
+
+.nc-root .nc-actions {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 1rem;
+}
+
+.nc-root .nc-actions label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.nc-root .nc-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

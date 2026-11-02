@@ -1,0 +1,963 @@
+# Contract revision 13: an agent is bound to one service principal, every caller holds the reserved role
+# `everyone`, a set of proposed policies is simulated without storing any, and `unsupported_policy_form` names its
+# member. Every scenario that binds a service principal binds it as the administrator, never as the service
+# principal itself (`admin` falls back to `creator` without an administrator token, so each one `needs` admin),
+# and unbinds in `cleanup`, which runs whether the steps passed or failed, so that a run can repeat on a real
+# deployment. A binding a crashed run of an earlier build left behind is not unbound by a first step (a 409
+# principal_bound names the agent that holds the service principal in `agent_id`, but a scenario step cannot act on
+# an answer it only sometimes gets): `cleanup` is the only guard.
+- id: agent-binding-admin-only
+  title: Only an administrator binds an agent to a service principal - the service principal itself and a member are 403, the administrator is 200 and the agent reads the binding, a service principal already bound to another agent is 409 principal_bound naming that agent, an id that is no service principal is 404, and unbinding is idempotent
+  tags: [both, negative]
+  requires: agents
+  needs: [admin, member]
+  steps:
+    - name: two agents
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'binding one ${uniq}' } }
+      expect: { status: 201, body: [{ path: data.principal_id, equals: null }] }
+      save: { first: data.id }
+    - as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'binding two ${uniq}' } }
+      expect: { status: 201 }
+      save: { second: data.id }
+    - name: the creator appends a record, which names it as the actor, so that the binding names its own principal id
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'bi:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: the service principal may not bind itself
+      as: creator
+      request:
+        method: PUT
+        path: '/v1/agents/${first}/principal'
+        body: { principal_id: '${sp}' }
+      expect: { status: 403, problem: forbidden }
+    - name: a member may not bind
+      as: member
+      request:
+        method: PUT
+        path: '/v1/agents/${first}/principal'
+        body: { principal_id: '${sp}' }
+      expect: { status: 403, problem: forbidden }
+    - name: the administrator binds, and the agent reads the binding
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${first}/principal'
+        body: { principal_id: '${sp}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${first}' }
+          - { path: data.principal_id, equals: '${sp}' }
+    - as: creator
+      request: { method: GET, path: '/v1/agents/${first}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: '${sp}' }] }
+    - name: the same service principal cannot be bound to a second agent
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${second}/principal'
+        body: { principal_id: '${sp}' }
+      expect:
+        status: 409
+        problem: principal_bound
+        body: [{ path: agent_id, equals: '${first}' }]
+    - name: repeating the same binding is a 200 no-op
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${first}/principal'
+        body: { principal_id: '${sp}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${first}' }
+          - { path: data.principal_id, equals: '${sp}' }
+    - name: an id that is no service principal of the organisation is 404
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${second}/principal'
+        body: { principal_id: 'nobody-${uniq}' }
+      expect: { status: 404, problem: not_found }
+    - name: the administrator check comes before the lookup, so a member is 403 for an agent that does not exist
+      as: member
+      request:
+        method: PUT
+        path: '/v1/agents/agent_missing_${uniq}/principal'
+        body: { principal_id: '${sp}' }
+      expect: { status: 403, problem: forbidden }
+    - name: a service principal may not unbind either
+      as: creator
+      request: { method: DELETE, path: '/v1/agents/${first}/principal' }
+      expect: { status: 403, problem: forbidden }
+    - name: the administrator unbinds, twice
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${first}/principal' }
+      expect: { status: 204 }
+    - as: admin
+      request: { method: DELETE, path: '/v1/agents/${first}/principal' }
+      expect: { status: 204 }
+    - as: creator
+      request: { method: GET, path: '/v1/agents/${first}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: null }] }
+  cleanup:
+    - name: whatever the steps did, the first agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${first}/principal' }
+      expect: { status: 204 }
+    - name: and so is the second, which a deployment that let the 409 through bound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${second}/principal' }
+      expect: { status: 204 }
+- id: agent-binding-refuses-a-user
+  title: A user principal of the directory, and a principal of another organisation, cannot be bound to an agent - the administrator's attempt is 404 not_found, the same answer as for an id that names no service principal, and the agent stays unbound
+  tags: [both, negative]
+  requires: [agents, principals]
+  needs: [admin, other_org]
+  steps:
+    - name: an agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'binding a user ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - name: a user principal of the directory
+      as: admin
+      request: { method: GET, path: '/v1/principals?type=user&limit=1' }
+      expect: { status: 200, body: [{ path: data.0.id, exists: true }] }
+      save: { user_principal: data.0.id }
+    - name: a user cannot be bound
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${agent}/principal'
+        body: { principal_id: '${user_principal}' }
+      expect: { status: 404, problem: not_found }
+    - name: a principal of another organisation appends a record, which names it as the actor
+      as: other_org
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'oo:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { foreign: data.actor.id }
+    - name: it cannot be bound to an agent of this organisation
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${agent}/principal'
+        body: { principal_id: '${foreign}' }
+      expect: { status: 404, problem: not_found }
+    - as: creator
+      request: { method: GET, path: '/v1/agents/${agent}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: null }] }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+- id: agent-policy-from-binding-only
+  title: An agent's policy applies to the service principal bound to the agent and to no other caller - a caller that only names the agent in actor.agent_id gets none of it, and the bound caller keeps it whatever agent it names, for a stored policy and for a proposed body of a set simulation alike
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals, policies]
+  serves_policy_subject_type: [role, agent]
+  needs: [admin, other_service]
+  steps:
+    - name: an agent, and a tool the organisation shares
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'bound agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'other agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { other_agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ap:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the creator appends a record, which names it as the actor
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ap:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: a policy that denies the agent
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: agent, id: '${agent}' }]
+          targets: { tools: ['ext:ap:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { agent_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${agent_policy}/publish' }
+      expect: { status: 200 }
+    - name: before any binding, the creator holds nothing of the agent's, whatever it names
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          actor: { agent_id: '${agent}' }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'unbound-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${agent_policy}' } }
+    - name: the same holds for a proposed agent body in a set simulation - the unbound creator naming the agent gets none of it
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: agent, id: '${agent}' }]
+              targets: { tools: ['ext:ap:${uniq}'] }
+              config: { mode: deny }
+          actor: { agent_id: '${agent}' }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'set-unbound-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - path: data.considered.policies
+            lacks_where: { key: proposed_index, equals: 0 }
+    - name: the administrator binds the creator to the agent
+      as: admin
+      request:
+        method: PUT
+        path: '/v1/agents/${agent}/principal'
+        body: { principal_id: '${sp}' }
+      expect: { status: 200 }
+    - name: the bound creator holds the agent's policy, and it contributed
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'bound-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${agent_policy}', result: deny, contributed: true }
+    - name: naming another agent does not take it away
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          actor: { agent_id: '${other_agent}' }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'bound-other-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${agent_policy}', result: deny }
+    - name: in a set simulation, the bound creator holds a proposed body on its agent with no hint
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: agent, id: '${agent}' }]
+              targets: { tools: ['ext:ap:${uniq}'] }
+              config: { mode: deny }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'set-bound-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - path: data.considered.policies
+            contains_members: { id: null, proposed_index: 0, result: deny }
+    - name: and naming another agent does not take it away
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: agent, id: '${agent}' }]
+              targets: { tools: ['ext:ap:${uniq}'] }
+              config: { mode: deny }
+          actor: { agent_id: '${other_agent}' }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'set-bound-other-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - path: data.considered.policies
+            contains_members: { id: null, proposed_index: 0, result: deny }
+    - name: another service principal that names the agent gets none of its policy
+      as: other_service
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          actor: { agent_id: '${agent}' }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'named-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${agent_policy}' } }
+    - name: nor of a proposed body on the agent in a set simulation
+      as: other_service
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: agent, id: '${agent}' }]
+              targets: { tools: ['ext:ap:${uniq}'] }
+              config: { mode: deny }
+          actor: { agent_id: '${agent}' }
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'set-named-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - path: data.considered.policies
+            lacks_where: { key: proposed_index, equals: 0 }
+    - name: a second tool that no agent policy covers, and an everyone policy that asks for it
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ap2:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:ap2:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { ask_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${ask_policy}/publish' }
+      expect: { status: 200 }
+    - name: an approval the bound creator opens on that tool names its bound agent, and the hint is ignored
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ap2:${uniq}', arguments: { q: 'display-${uniq}' } }
+          actor: { agent_id: '${other_agent}' }
+          continuation: { kind: adk, delivery: pull }
+      expect:
+        status: 200
+        body: [{ path: data.decision, equals: step_up }]
+      save: { display_approval: data.approval.id }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${display_approval}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.agent.id, equals: '${agent}' }
+    - name: the administrator unbinds, and the creator holds nothing of the agent's again
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          action: { tool_ref: 'ext:ap:${uniq}', arguments: { q: 'unbound-again-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${agent_policy}' } }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+# A run is created naming an agent, and its `agent_id` is a hint as `actor.agent_id` is: it never selects policy.
+# Kept apart from agent-policy-from-binding-only so that a deployment serving no runs still runs that one.
+- id: agent-policy-not-from-a-run
+  title: A run's agent_id never selects an agent's policy - a service principal bound to no agent that names, in actor.run_id, a run it created for the agent gets none of the agent's policy
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, policies, runs]
+  needs: [admin, other_service]
+  steps:
+    - name: an agent, a tool the organisation shares and a policy that denies the agent
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'run agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ar:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: agent, id: '${agent}' }]
+          targets: { tools: ['ext:ar:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { agent_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${agent_policy}/publish' }
+      expect: { status: 200 }
+    - name: another service principal creates a run for the agent
+      as: other_service
+      request: { method: POST, path: /v1/runs, body: { kind: external, agent_id: '${agent}' } }
+      expect: { status: 201, body: [{ path: data.agent_id, equals: '${agent}' }] }
+      save: { run: data.id }
+    - name: naming the run selects none of the agent's policy
+      as: other_service
+      request:
+        method: POST
+        path: /v1/policies/${agent_policy}/simulate
+        body:
+          actor: { run_id: '${run}' }
+          action: { tool_ref: 'ext:ar:${uniq}', arguments: { q: 'run-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${agent_policy}' } }
+- id: everyone-role-reaches-every-caller
+  title: A policy on the reserved role everyone applies to every caller - a user and a service principal, each simulating as itself, get its result, and simulating as the role everyone gives the same
+  tags: [hosted]
+  only: hosted
+  requires: [policies, principals]
+  serves_policy_subject_type: role
+  needs: [admin, member]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ev:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a policy on the everyone role that denies
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:ev:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { everyone_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${everyone_policy}/publish' }
+      expect: { status: 200 }
+    - name: a user holds it
+      as: member
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body: { action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'user-${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: deny }
+    - name: a service principal holds it
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body: { action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'service-${uniq}' } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: deny }
+    - name: as the role everyone, the baseline gives the same
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: role, id: everyone }
+          action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'role-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: deny, contributed: true }
+    - name: a user of the directory
+      as: admin
+      request: { method: GET, path: '/v1/principals?type=user&limit=1' }
+      expect: { status: 200, body: [{ path: data.0.id, exists: true }] }
+      save: { user_principal: data.0.id }
+    - name: the deployment simulates as a user, or says it cannot
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: user, id: '${user_principal}' }
+          action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'as-user-${uniq}' } }
+      expect:
+        status: [200, 422]
+      gate:
+        status: 200
+        reason: the deployment cannot simulate as a user
+        otherwise:
+          status: 422
+          problem: unsupported_policy_form
+          member: subject
+          detail_matches: '\bsubject\b'
+    - name: as a user of the directory, the everyone policy is listed
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: user, id: '${user_principal}' }
+          action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'as-user-listed-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: deny }
+    - name: the deployment simulates as the organisation, or says it cannot
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: organization }
+          action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'as-org-${uniq}' } }
+      expect:
+        status: [200, 422]
+      gate:
+        status: 200
+        reason: the deployment cannot simulate as the organisation
+        otherwise:
+          status: 422
+          problem: unsupported_policy_form
+          member: subject
+          detail_matches: '\bsubject\b'
+    - name: as the organisation, which is no role, the everyone policy is not listed
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: organization }
+          action: { tool_ref: 'ext:ev:${uniq}', arguments: { q: 'as-org-lacks-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - {
+              path: data.considered.policies,
+              lacks_where: { key: id, equals: '${everyone_policy}' },
+            }
+# A role's id may come in the deployment's own form (a role subject's bare key is mapped to it, see PolicySubject),
+# so no entry may name everyone by an id that ends in it after a `:` or `/`, or by its display_name, in any case.
+- id: everyone-role-not-a-directory-role
+  title: The reserved role everyone is never listed as a directory role, by its bare key, by a prefixed id or by its display name, to a service principal or to an administrator
+  tags: [both, negative]
+  requires: principals
+  steps:
+    - name: the roles of the directory, every page to the last
+      as: creator
+      request: { method: GET, path: '/v1/principals?type=role&limit=200' }
+      expect:
+        status: 200
+        follow_pages: true
+        body:
+          - {
+              path: data,
+              lacks_where_matches: { key: id, matches: '(^|[:/])everyone$', ignore_case: true },
+            }
+          - {
+              path: data,
+              lacks_where_matches: { key: display_name, matches: '^everyone$', ignore_case: true },
+            }
+    - name: and no listing carries it, every page to the last
+      as: creator
+      request: { method: GET, path: '/v1/principals?limit=200' }
+      expect:
+        status: 200
+        follow_pages: true
+        body:
+          - {
+              path: data,
+              lacks_where_matches: { key: id, matches: '(^|[:/])everyone$', ignore_case: true },
+            }
+          - {
+              path: data,
+              lacks_where_matches: { key: display_name, matches: '^everyone$', ignore_case: true },
+            }
+    - name: nor the roles an administrator lists
+      as: admin
+      request: { method: GET, path: '/v1/principals?type=role&limit=200' }
+      expect:
+        status: 200
+        follow_pages: true
+        body:
+          - {
+              path: data,
+              lacks_where_matches: { key: id, matches: '(^|[:/])everyone$', ignore_case: true },
+            }
+          - {
+              path: data,
+              lacks_where_matches: { key: display_name, matches: '^everyone$', ignore_case: true },
+            }
+    - name: nor any listing an administrator reads
+      as: admin
+      request: { method: GET, path: '/v1/principals?limit=200' }
+      expect:
+        status: 200
+        follow_pages: true
+        body:
+          - {
+              path: data,
+              lacks_where_matches: { key: id, matches: '(^|[:/])everyone$', ignore_case: true },
+            }
+          - {
+              path: data,
+              lacks_where_matches: { key: display_name, matches: '^everyone$', ignore_case: true },
+            }
+- id: simulate-set-without-anything-stored
+  title: Proposed policies are simulated with nothing stored - each is listed with a null id and version, its proposed_index and no source, a malformed body is refused with a member naming it, an empty set is 400, and only an administrator simulates as a subject
+  tags: [both]
+  requires: policies
+  serves_policy_subject_type: role
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:s0:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: two proposed policies are listed, each by its index, with no source
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: everyone }]
+              targets: { tools: ['ext:s0:${uniq}'] }
+              config: { mode: always_allow }
+            - kind: tool_invocation
+              subjects: [{ type: role, id: everyone }]
+              targets: { tools: ['ext:s0:${uniq}'] }
+              config: { mode: always_allow }
+          action: { tool_ref: 'ext:s0:${uniq}', arguments: { q: 'set-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.enforced, equals: false }
+          - path: data.considered.policies
+            contains_members: { id: null, version: null, proposed_index: 0, result: always_allow }
+          - path: data.considered.policies
+            contains_members: { id: null, version: null, proposed_index: 1, result: always_allow }
+          # A proposed entry is not a default of the deployment: it never carries `source`.
+          - path: data.considered.policies
+            lacks_members: { proposed_index: 0, source: default }
+          - path: data.considered.policies
+            lacks_members: { proposed_index: 1, source: default }
+    - name: a body no deployment can enforce is refused, naming the member
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: duplicate_requests
+              subjects: [{ type: role, id: everyone }]
+              config: { after_rejection: deny }
+          action: { tool_ref: 'ext:s0:${uniq}', arguments: { q: 'bad-${uniq}' } }
+      expect:
+        status: 422
+        problem: unsupported_policy_form
+        body:
+          - { path: member, matches: '^policies\[0\]\.subjects' }
+    - name: an empty set is not a request
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies: []
+          action: { tool_ref: 'ext:s0:${uniq}', arguments: {} }
+      expect: { status: 400, problem: invalid_request }
+    - name: only an administrator simulates as a subject
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: everyone }]
+              targets: { tools: ['ext:s0:${uniq}'] }
+              config: { mode: always_allow }
+          subject: { type: role, id: everyone }
+          action: { tool_ref: 'ext:s0:${uniq}', arguments: {} }
+      expect: { status: 403, problem: forbidden }
+- id: simulate-set-stands-beside-stored-policies
+  title: A proposed policy stands beside the policies in force and never replaces one - a stored everyone-role deny and a proposed everyone-role always_allow are both listed and the deny decides
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:s1:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a stored policy on the everyone role that denies
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:s1:${uniq}'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { stored: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${stored}/publish' }
+      expect: { status: 200 }
+    - name: a proposed body for the same subject and tool is listed beside it
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: everyone }]
+              targets: { tools: ['ext:s1:${uniq}'] }
+              config: { mode: always_allow }
+          action: { tool_ref: 'ext:s1:${uniq}', arguments: { q: 'beside-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${stored}', result: deny, contributed: true }
+          - path: data.considered.policies
+            contains_members: { id: null, version: null, result: always_allow, proposed_index: 0 }
+# Publishes an organisation duplicate-requests policy equal to the default (deny, 24 hours), as the last step of
+# 25-rejected-duplicate-ask-again.yaml does, so that the setting in force after it is what it was before.
+- id: simulate-set-duplicate-stands-beside-in-force
+  title: A proposed duplicate_requests body stands beside the organisation's duplicate-requests setting in force and never replaces it - both are listed, and a second proposed duplicate_requests body is 422 naming its index
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  needs: [admin]
+  steps:
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:s2:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the setting in force is a published duplicate-requests policy
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: duplicate_requests
+          name: 'conformance duplicate default ${uniq}'
+          subjects: [{ type: organization }]
+          config: { after_rejection: deny, window_seconds: 86400 }
+      expect: { status: 201 }
+      save: { in_force: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${in_force}/publish' }
+      expect: { status: 200 }
+    - name: a proposed body is listed beside it
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: duplicate_requests
+              subjects: [{ type: organization }]
+              config: { after_rejection: ask_again, max_reasks: 1 }
+          action: { tool_ref: 'ext:s2:${uniq}', arguments: { q: 'dup-${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - path: data.considered.policies
+            contains_members: { kind: duplicate_requests, id: '${in_force}' }
+          - path: data.considered.policies
+            contains_members:
+              { kind: duplicate_requests, id: null, version: null, proposed_index: 0 }
+    - name: a second proposed body of the kind is refused, naming it
+      as: creator
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: duplicate_requests
+              subjects: [{ type: organization }]
+              config: { after_rejection: ask_again }
+            - kind: duplicate_requests
+              subjects: [{ type: organization }]
+              config: { after_rejection: deny }
+          action: { tool_ref: 'ext:s2:${uniq}', arguments: {} }
+      expect:
+        status: 422
+        problem: unsupported_policy_form
+        body:
+          - { path: member, equals: 'policies[1].kind' }
+- id: unsupported-policy-form-names-member
+  title: Every unsupported_policy_form the deployment can be driven to answer names the offending member in member - a create, a set simulation and a simulation as a subject
+  tags: [hosted, negative]
+  only: hosted
+  requires: policies
+  serves_policy_subject_type: role
+  needs: [admin]
+  steps:
+    - name: a duplicate-requests policy takes the organisation subject only
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: duplicate_requests
+          subjects: [{ type: role, id: everyone }]
+          config: { after_rejection: deny }
+      expect:
+        status: 422
+        problem: unsupported_policy_form
+        body:
+          - { path: member, matches: '^subjects' }
+    - name: a tool for the policies to name
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:um:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the same body proposed to a set simulation names it under policies
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/simulate
+        body:
+          policies:
+            - kind: tool_invocation
+              subjects: [{ type: role, id: everyone }]
+              targets: { tools: ['ext:um:${uniq}'] }
+              config: { mode: always_allow }
+            - kind: duplicate_requests
+              subjects: [{ type: role, id: everyone }]
+              config: { after_rejection: deny }
+          action: { tool_ref: 'ext:um:${uniq}', arguments: {} }
+      expect:
+        status: 422
+        problem: unsupported_policy_form
+        body:
+          - { path: member, matches: '^policies\[1\]\.subjects' }
+    - name: a draft policy, to simulate against
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:um:${uniq}'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { draft: data.id }
+    - name: a service is not a subject a simulation takes, and says so in member
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${draft}/simulate
+        body:
+          subject: { type: service, id: '00000000-0000-4000-8000-0000000005e5' }
+          action: { tool_ref: 'ext:um:${uniq}', arguments: {} }
+      expect:
+        status: 422
+        problem: unsupported_policy_form
+        body:
+          - { path: member, equals: subject }

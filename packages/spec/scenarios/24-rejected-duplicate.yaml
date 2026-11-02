@@ -1,0 +1,200 @@
+# Rev 10: the rejected-duplicate rule (the API description, Terminal states free the identity). Each
+# scenario runs only where the deployment advertises the feature approvals.rejected_duplicate, as a user
+# principal (whose principal scope the rule covers, so no run is needed), and carries ${uniq} in its call
+# arguments, so a repeated run on a persistent deployment never meets an earlier run's rejection. The
+# organisation's duplicate-requests setting is the only shared state: the ask_again scenario, in the last
+# file of this directory, sets it and restores the default before it ends.
+- id: rejected-duplicate-is-denied-by-default
+  title: After a resolver rejects an approval, an identical call is denied with reason rejected_duplicate and rejected_approval_id, and opens nothing
+  tags: [both, negative]
+  requires: approvals
+  features: [approvals.rejected_duplicate]
+  needs: [creator_user, approver]
+  steps:
+    - name: a user's call steps up
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-default ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.created, equals: true }
+      save: { rejected_id: data.approval.id, digest: data.action_digest }
+    - name: the approver rejects it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${rejected_id}/deny
+        body: { reason: no, expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the identical call is denied as a duplicate, naming the rejection
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-default ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: rejected_duplicate }
+          - { path: data.rejected_approval_id, equals: '${rejected_id}' }
+          - { path: data.approval, exists: false }
+    - name: the rejection is still the only approval for the call
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${rejected_id}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: changed arguments are a different call, and step up
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-default other ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.created, equals: true }
+- id: rejected-duplicate-create-approval-is-409
+  title: After a resolver rejects an approval, POST /v1/approvals for the identical call is 409 rejected_duplicate, carrying rejected_approval_id
+  tags: [both, negative]
+  requires: approvals
+  features: [approvals.rejected_duplicate]
+  needs: [creator_user, approver]
+  steps:
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-create ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201, body: [{ path: data.created, equals: true }] }
+      save: { rejected_id: data.id }
+    - as: creator_user
+      request: { method: GET, path: '/v1/approvals/${rejected_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: the approver rejects it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${rejected_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: opening the identical call again is refused
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-create ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 409
+        problem: rejected_duplicate
+        body:
+          - { path: rejected_approval_id, equals: '${rejected_id}' }
+- id: rejected-duplicate-frees-the-call-outside-the-window
+  title: Once the window of the duplicate-requests policy has passed, an identical call after a rejection opens a fresh approval
+  tags: [both, negative, needs-mock-control]
+  requires: approvals
+  features: [approvals.rejected_duplicate]
+  needs: [creator_user, approver]
+  steps:
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-window ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { rejected_id: data.approval.id, digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${rejected_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    # The organisation's setting is the default (the ask_again scenario restores it before it ends): a
+    # window of 24 hours.
+    - advance_seconds: 86401
+    - name: the identical call opens a fresh approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-window ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.created, equals: true }
+          - { path: data.approval.id, not_equals: '${rejected_id}' }
+- id: rejected-duplicate-batch-decides-identical-elements-as-one
+  title: Identical elements of a batch are one obligation, and after its rejection they are denied with it as duplicates
+  tags: [both, negative]
+  requires: approvals
+  features: [approvals.rejected_duplicate]
+  needs: [creator_user, approver]
+  steps:
+    - name: two identical elements open one approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            - action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-batch ${uniq}' } }
+            - action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-batch ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions.0.decision, equals: step_up }
+          - { path: data.decisions.0.approval.created, equals: true }
+          - { path: data.decisions.1.decision, equals: step_up }
+          - { path: data.decisions.1.approval.created, equals: false }
+      save:
+        rejected_id: data.decisions.0.approval.id
+        second_id: data.decisions.1.approval.id
+        digest: data.decisions.0.action_digest
+    - name: the second element joined the first one's approval
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${second_id}' }
+      expect: { status: 200, body: [{ path: data.id, equals: '${rejected_id}' }] }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${rejected_id}/deny
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the same batch again is denied whole, each element naming the rejection
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions/batch
+        body:
+          requests:
+            - action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-batch ${uniq}' } }
+            - action: { tool_ref: '${proxied_tool}', arguments: { title: 'rd-batch ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decisions.0.decision, equals: deny }
+          - { path: data.decisions.0.reason, equals: rejected_duplicate }
+          - { path: data.decisions.0.rejected_approval_id, equals: '${rejected_id}' }
+          - { path: data.decisions.1.decision, equals: deny }
+          - { path: data.decisions.1.reason, equals: rejected_duplicate }
+          - { path: data.decisions.1.rejected_approval_id, equals: '${rejected_id}' }

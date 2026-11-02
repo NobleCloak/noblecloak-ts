@@ -1,0 +1,53 @@
+{
+  "name": "@noblecloak/client",
+  "version": "0.11.0",
+  "description": "Typed client for the NobleCloak module API.",
+  "license": "Apache-2.0",
+  "author": "NobleCloak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NobleCloak/noblecloak-ts.git",
+    "directory": "packages/client"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js"
+    },
+    "./service-principal": {
+      "types": "./dist/service-principal.d.ts",
+      "import": "./dist/service-principal.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json && bun tools/assert-schema-dist.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --coverage",
+    "clean": "rm -rf dist coverage .turbo",
+    "generate": "bun tools/generate-schema.ts",
+    "generate:check": "bun tools/generate-schema.ts --check"
+  },
+  "dependencies": {
+    "canonicalize": "5.1.0",
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "yaml": "2.9.1"
+  }
+}

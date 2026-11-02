@@ -1,0 +1,27 @@
+bun.lock
+LICENSE
+NOTICE
+**/dist/
+**/coverage/
+**/.turbo/
+**/.next/
+**/.astro/
+**/storybook-static/
+**/next-env.d.ts
+artifacts/
+packages/client/src/schema.ts
+# Written byte for byte by the spec repository's build; a test there holds it to that output.
+packages/spec/openapi.public.yaml
+packages/spec/fixtures/resumption/valid.payload.json
+**/test-results/
+**/playwright-report/
+# Written by packages/react/tools/capture-hosted-fixtures.ts; not reformatted by hand.
+packages/react/src/testing/fixtures/
+packages/theme/src/tokens.json
+# Golden files (byte-exact exporter output) and upstream fixtures copied byte for byte.
+packages/policy-formats/test-fixtures/
+**/e2e/.build/
+# Keeps the minified `@import"https://..."` shape the no-network control reproduces.
+packages/theme/e2e/fixtures/string-import-control.css
+# The stylesheet @noblecloak/react 0.4.2 shipped, kept byte for byte as the golden file of its e2e spec.
+packages/react/test-fixtures/styles-0.4.2.css

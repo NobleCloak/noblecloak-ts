@@ -1,0 +1,1408 @@
+- id: approval-arguments-single-read-only
+  title: A tool that shows its arguments to approvers has them on GET /v1/approvals/{id} for the creator and an eligible approver, and on no other operation or delivery; a tool that does not has them nowhere
+  tags: [both, negative, lifecycle]
+  needs: [approver]
+  requires: approvals
+  serves_resolution: escalated
+  steps:
+    - name: register tool A, which shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argA:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect:
+        status: 201
+        body:
+          - { path: data.show_arguments_to_approvers, equals: true }
+    - name: register tool B, which does not
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argB:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the creator decides on A with arguments; the handle carries none
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argA:${uniq}', arguments: { q: 'arg-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.arguments, exists: false }
+      save: { a_id: data.approval.id, a_digest: data.action_digest }
+    - name: the same action through POST /v1/approvals matches the open approval and carries none
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: 'ext:argA:${uniq}', arguments: { q: 'arg-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${a_id}' }
+          - { path: data.arguments, exists: false }
+    - name: a fresh POST /v1/approvals opens another approval (201) and carries none
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: 'ext:argA:${uniq}', arguments: { q: 'fresh-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect:
+        status: 201
+        body:
+          - { path: data.arguments, exists: false }
+      save: { f_id: data.id }
+    - name: the creator reads the arguments it sent
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'arg-${uniq}' } }
+          - { path: data.arguments_state, equals: shown }
+          - { path: data.action_digest, equals: '${a_digest}' }
+    - name: the creator's own list names the approvals and carries no arguments
+      as: creator
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=100' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${a_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${f_id}' } }
+          - { path: data, lacks_where: { key: arguments, equals: { q: 'arg-${uniq}' } } }
+          - { path: data, lacks_where: { key: arguments, equals: { q: 'fresh-${uniq}' } } }
+    - name: the creator's wait carries none
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${a_id}/wait?timeout=0' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${a_id}' }
+          - { path: data.arguments, exists: false }
+    - name: the creator's own stream delivers a pending approval and carries none
+      stream_events:
+        as: creator
+        path: /v1/approvals/stream
+        during:
+          - as: creator
+            request:
+              method: POST
+              path: /v1/decisions
+              body:
+                action: { tool_ref: 'ext:argA:${uniq}', arguments: { q: 'st-${uniq}' } }
+                continuation: { kind: adk, delivery: pull }
+            expect: { status: 200 }
+            save: { st_id: data.approval.id, st_digest: data.action_digest }
+          - name: an escalation is an update that leaves the approval pending
+            as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${st_id}/resolve
+              body: { resolution: escalated, expected_action_digest: '${st_digest}' }
+            expect:
+              status: 200
+              body:
+                - { path: data.state, equals: pending }
+        expect:
+          delivers:
+            - id: '${st_id}'
+              body:
+                - { path: state, equals: pending }
+                - { path: arguments, exists: false }
+    - name: an eligible approver reads them
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'arg-${uniq}' } }
+    - name: the pending list the approver sees names the approval and carries no arguments
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&state=pending&limit=100' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${a_id}' } }
+          - { path: data, lacks_where: { key: arguments, equals: { q: 'arg-${uniq}' } } }
+    - name: wait carries none
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}/wait?timeout=0' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${a_id}' }
+          - { path: data.arguments, exists: false }
+    - name: the stream event and the approve response carry none
+      stream_events:
+        as: approver
+        path: /v1/approvals/stream
+        during:
+          - as: approver
+            request:
+              method: POST
+              path: /v1/approvals/${a_id}/approve
+              body: { expected_action_digest: '${a_digest}' }
+            expect:
+              status: 200
+              body:
+                - { path: data.state, equals: approved }
+                - { path: data.arguments, exists: false }
+        expect:
+          delivers:
+            - id: '${a_id}'
+              body:
+                - { path: state, equals: approved }
+                - { path: arguments, exists: false }
+    - name: the deny response carries none
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${st_id}/deny
+        body: { expected_action_digest: '${st_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - { path: data.arguments, exists: false }
+    - name: the withdraw response carries none
+      as: creator
+      request: { method: POST, path: '/v1/approvals/${f_id}/withdraw' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: withdrawn }
+          - { path: data.arguments, exists: false }
+    - name: after approval the single read still returns them to the creator
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.arguments, equals_canonical: { q: 'arg-${uniq}' } }
+    - name: and to the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'arg-${uniq}' } }
+    - name: the creator's Resumption carries none
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${a_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval_id, equals: '${a_id}' }
+          - { path: data.arguments, exists: false }
+    - name: the creator decides on B with arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argB:${uniq}', arguments: { q: 'arg-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { b_id: data.approval.id }
+    - name: nobody reads B's arguments - the creator
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${b_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.action_digest, exists: true }
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: not_enabled }
+    - name: nor an eligible approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${b_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.action_digest, exists: true }
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: not_enabled }
+    - name: an AuthZEN evaluation that sends no arguments opens an approval for tool A
+      authzen:
+        as: creator
+        request:
+          subject: { type: user, id: someone }
+          action: { name: invoke }
+          resource: { type: tool, id: 'ext:argA:${uniq}' }
+          context: {}
+        expect: { decision: false, noblecloak_decision: step_up }
+    - name: it is the creator's newest approval
+      as: creator
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.tool_ref, equals: 'ext:argA:${uniq}' }
+      save: { z_id: data.0.id }
+    - name: and its single read has no arguments member, not an empty one, for the creator
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${z_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.tool_ref, equals: 'ext:argA:${uniq}' }
+          - { path: data.arguments, exists: false }
+    - name: nor for the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${z_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+- id: approval-arguments-withheld-from-a-member-list
+  title: A user who may not approve lists the organisation's approvals, which are named, and sees no arguments in any of them
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [member]
+  steps:
+    - name: register a tool that shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argM:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - name: the creator opens an approval with arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'arg-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { a_id: data.approval.id }
+    - name: and another
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'fresh-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 201 }
+      save: { f_id: data.id }
+    - name: the creator reads the arguments, so the approvals do hold them
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${a_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'arg-${uniq}' } }
+    - name: a user who may not approve lists the organisation's approvals and sees no arguments
+      as: member
+      request: { method: GET, path: '/v1/approvals?limit=100' }
+      expect:
+        status: 200
+        body:
+          - { path: data, contains_where: { key: id, equals: '${a_id}' } }
+          - { path: data, contains_where: { key: id, equals: '${f_id}' } }
+          - { path: data, lacks_where: { key: arguments, equals: { q: 'arg-${uniq}' } } }
+          - { path: data, lacks_where: { key: arguments, equals: { q: 'fresh-${uniq}' } } }
+- id: approval-arguments-follow-the-setting
+  title: Turning show_arguments_to_approvers off takes the arguments of an open approval away from its readers, turning it on again restores nothing, and a tool at the external level shows its arguments when the setting is on
+  tags: [both, negative, lifecycle]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register a tool with the setting on
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argS:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect:
+        status: 201
+        body:
+          - { path: data.show_arguments_to_approvers, equals: true }
+      save: { s_tool: data.id }
+    - name: the creator opens an approval with arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argS:${uniq}', arguments: { q: 'set-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { s_id: data.approval.id }
+    - name: the approver reads the arguments
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${s_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'set-${uniq}' } }
+    - name: the setting is turned off
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${s_tool}
+        body: { show_arguments_to_approvers: false }
+      expect:
+        status: 200
+        body:
+          - { path: data.show_arguments_to_approvers, equals: false }
+    - name: the approver no longer reads them
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${s_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.arguments, exists: false }
+    - name: nor does the creator
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${s_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+    - name: the setting is turned on again
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${s_tool}
+        body: { show_arguments_to_approvers: true }
+      expect:
+        status: 200
+        body:
+          - { path: data.show_arguments_to_approvers, equals: true }
+    - name: nothing is restored for the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${s_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.arguments, exists: false }
+    - name: nor for the creator
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${s_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+    - name: an approval opened after the setting came back on shows its arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argS:${uniq}', arguments: { q: 'later-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { l_id: data.approval.id }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${l_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'later-${uniq}' } }
+    - name: an approved approval opened with arguments
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argS:${uniq}', arguments: { q: 'appr-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { p_id: data.approval.id, p_digest: data.action_digest }
+    - name: the approver approves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${p_id}/approve
+        body: { expected_action_digest: '${p_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+    - name: before the setting goes off the creator still reads its arguments
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${p_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'appr-${uniq}' } }
+    - name: the setting is turned off again
+      as: admin
+      request:
+        method: PATCH
+        path: /v1/tools/${s_tool}
+        body: { show_arguments_to_approvers: false }
+      expect: { status: 200 }
+    - name: the creator no longer reads the arguments of the approved approval
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${p_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.arguments, exists: false }
+    - name: nor does the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${p_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+    - name: a tool at the external level with the setting on shows its arguments
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argX:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect:
+        status: 201
+        body:
+          - { path: data.side_effect_level, equals: external }
+          - { path: data.show_arguments_to_approvers, equals: true }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argX:${uniq}', arguments: { q: 'x-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { x_id: data.approval.id }
+    - name: the approver reads them
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${x_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'x-${uniq}' } }
+- id: approval-arguments-cleared-at-every-final-state
+  title: The arguments an approval held are gone once it is rejected, withdrawn or consumed, for the creator and the approver alike, and the digest stays
+  tags: [both, negative, lifecycle]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register a tool that shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argF:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - name: an approval that will be rejected, readable while it is pending
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argF:${uniq}', arguments: { q: 'rej-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { rej_id: data.approval.id, rej_digest: data.action_digest }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${rej_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'rej-${uniq}' } }
+    - name: rejected
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${rej_id}/deny
+        body: { expected_action_digest: '${rej_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the creator no longer reads them
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${rej_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: final }
+          - { path: data.action_digest, equals: '${rej_digest}' }
+    - name: nor the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${rej_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${rej_digest}' }
+    - name: an approval that will be withdrawn
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argF:${uniq}', arguments: { q: 'wd-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { wd_id: data.approval.id, wd_digest: data.action_digest }
+    - as: creator
+      request: { method: POST, path: '/v1/approvals/${wd_id}/withdraw' }
+      expect: { status: 200, body: [{ path: data.state, equals: withdrawn }] }
+    - name: the creator no longer reads them
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${wd_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${wd_digest}' }
+    - name: nor the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${wd_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${wd_digest}' }
+    - name: an approval that is approved and then consumed
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argF:${uniq}', arguments: { q: 'con-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { con_id: data.approval.id, con_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${con_id}/approve
+        body: { expected_action_digest: '${con_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: approved is not final, so the approver still reads them
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${con_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'con-${uniq}' } }
+    - as: creator
+      request: { method: GET, path: '/v1/approvals/${con_id}/resumption' }
+      expect: { status: 200 }
+      save: { con_token: data.resume_token }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${con_id}/consume
+        body:
+          resume_token: '${con_token}'
+          action: { tool_ref: 'ext:argF:${uniq}', arguments: { q: 'con-${uniq}' } }
+      expect: { status: 200, body: [{ path: data.state, equals: consumed }] }
+    - name: the creator no longer reads them
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${con_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${con_digest}' }
+    - name: nor the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${con_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${con_digest}' }
+- id: approval-arguments-cleared-on-expiry
+  title: The arguments an approval held are gone once it expires, whether it was pending or approved, for the creator and the approver alike, and the digest stays
+  tags: [both, negative, lifecycle, needs-mock-control]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register a tool that shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argE:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - name: an approval that stays pending
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argE:${uniq}', arguments: { q: 'pend-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { pe_id: data.approval.id, pe_digest: data.action_digest }
+    - name: an approval that is approved and never consumed
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argE:${uniq}', arguments: { q: 'appr-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { ae_id: data.approval.id, ae_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${ae_id}/approve
+        body: { expected_action_digest: '${ae_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: both are readable while open
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${pe_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'pend-${uniq}' } }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${ae_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'appr-${uniq}' } }
+    - advance_seconds: 7200
+    - name: the pending one has expired and the creator no longer reads its arguments
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${pe_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: expired }
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${pe_digest}' }
+    - name: nor the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${pe_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: expired }
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${pe_digest}' }
+    - name: the approved one has expired and the creator no longer reads its arguments
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${ae_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: expired }
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${ae_digest}' }
+    - name: nor the approver
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${ae_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: expired }
+          - { path: data.arguments, exists: false }
+          - { path: data.action_digest, equals: '${ae_digest}' }
+- id: approval-arguments-withheld-from-an-ineligible-user
+  title: A user of the organisation who may not approve reads the approval's digest and never its arguments, and may not resolve it
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  needs: [member, creator_user, approver]
+  steps:
+    - name: register a tool that shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argM:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'mem-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { m_id: data.approval.id, m_digest: data.action_digest }
+    - name: the member may not resolve it
+      as: member
+      request:
+        method: POST
+        path: /v1/approvals/${m_id}/approve
+        body: { expected_action_digest: '${m_digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: the member reads the approval, with the digest and without the arguments
+      as: member
+      request: { method: GET, path: '/v1/approvals/${m_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${m_id}' }
+          - { path: data.action_digest, equals: '${m_digest}' }
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: withheld }
+    - name: an eligible approver reads them, so the setting is on
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${m_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'mem-${uniq}' } }
+          - { path: data.arguments_state, equals: shown }
+    - name: the approver approves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${m_id}/approve
+        body: { expected_action_digest: '${m_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: an eligible approver still reads them, once approved
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${m_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'mem-${uniq}' } }
+    - name: the member, once it is approved, still reads the digest and never the arguments
+      as: member
+      request: { method: GET, path: '/v1/approvals/${m_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.action_digest, equals: '${m_digest}' }
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: withheld }
+    - name: a second approval is rejected
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'memrej-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { mr_id: data.approval.id, mr_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${mr_id}/deny
+        body: { expected_action_digest: '${mr_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the member, once it is rejected, reads the digest and never the arguments
+      as: member
+      request: { method: GET, path: '/v1/approvals/${mr_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: rejected }
+          - { path: data.action_digest, equals: '${mr_digest}' }
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: final }
+    - name: a third approval is withdrawn
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'memwd-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { mw_id: data.approval.id, mw_digest: data.action_digest }
+    - as: creator
+      request: { method: POST, path: '/v1/approvals/${mw_id}/withdraw' }
+      expect: { status: 200, body: [{ path: data.state, equals: withdrawn }] }
+    - name: the member, once it is withdrawn, reads the digest and never the arguments
+      as: member
+      request: { method: GET, path: '/v1/approvals/${mw_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: withdrawn }
+          - { path: data.action_digest, equals: '${mw_digest}' }
+          - { path: data.arguments, exists: false }
+    - name: a user who created the approval is read by an eligible user who did not, and the other way round
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'cu-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { cu_id: data.approval.id }
+    - name: the approver reads what the first user sent
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${cu_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'cu-${uniq}' } }
+    - name: the approver creates one
+      as: approver
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argM:${uniq}', arguments: { q: 'ap-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { ap_id: data.approval.id }
+    - name: and the first user, eligible and not its creator, reads what the approver sent
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${ap_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'ap-${uniq}' } }
+    - name: the member reads neither
+      as: member
+      request: { method: GET, path: '/v1/approvals/${ap_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+- id: approval-policy-absent-when-the-default-applied
+  title: An approval the default policy decided has no policy member on the approval, the approve response or the Resumption, and the Resumption verifies
+  tags: [both, negative, lifecycle]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register a tool, which no explicit policy matches
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:pol:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:pol:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200, body: [{ path: data.decision, equals: step_up }] }
+      save: { p_id: data.approval.id, p_digest: data.action_digest }
+    - name: the approval read carries no policy
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${p_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy, exists: false }
+    - name: nor does the approve response
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${p_id}/approve
+        body: { expected_action_digest: '${p_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.policy, exists: false }
+    - name: nor the Resumption
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${p_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.policy, exists: false }
+      save: { resumption: data }
+    - as: none
+      request: { method: GET, path: /.well-known/jwks.json }
+      expect: { status: 200 }
+      save: { jwks: '$' }
+    - name: the Resumption without a policy verifies
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:pol:${uniq}', arg_digest: '${p_digest}' }
+        result: valid
+- id: negative-approval-unroutable
+  title: An approval for a tool with no catalog row is 422 approval_unroutable, not a bare 400, and a decision for the tool is still deny unknown_tool
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  steps:
+    - name: POST /v1/approvals for a tool nobody registered
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: 'ext:nobody:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: adk, delivery: pull }
+      expect:
+        status: 422
+        problem: approval_unroutable
+        body:
+          - { path: detail, matches: '.+' }
+    - name: a decision for it is unchanged
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body: { action: { tool_ref: 'ext:nobody:${uniq}', arguments: { n: 1 } } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.reason, equals: unknown_tool }
+- id: decision-ask-is-step-up-on-every-channel
+  title: A policy ask is step_up with an approval the creator can read, pending, on the interactive, headless and workflow channels alike, for a tool registered through the API and for a proxied one
+  tags: [both, negative, lifecycle]
+  requires: approvals
+  steps:
+    - name: register a tool whose policy asks
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ask:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: external tool, interactive
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ask:${uniq}', arguments: { channel: 'interactive-ext-${uniq}' } }
+          context: { invocation_channel: interactive }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, matches: '.+' }
+      save: { ext_interactive_id: data.approval.id }
+    - name: the approval it names is there to read, and pending
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${ext_interactive_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${ext_interactive_id}' }
+          - { path: data.state, equals: pending }
+    - name: external tool, headless
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ask:${uniq}', arguments: { channel: 'headless-ext-${uniq}' } }
+          context: { invocation_channel: headless }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, matches: '.+' }
+      save: { ext_headless_id: data.approval.id }
+    - name: the approval it names is there to read, and pending
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${ext_headless_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${ext_headless_id}' }
+          - { path: data.state, equals: pending }
+    - name: external tool, workflow
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ask:${uniq}', arguments: { channel: 'workflow-ext-${uniq}' } }
+          context: { invocation_channel: workflow }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, matches: '.+' }
+      save: { ext_workflow_id: data.approval.id }
+    - name: the approval it names is there to read, and pending
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${ext_workflow_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${ext_workflow_id}' }
+          - { path: data.state, equals: pending }
+    - name: proxied tool, interactive
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { channel: 'interactive-prx-${uniq}' } }
+          context: { invocation_channel: interactive }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, matches: '.+' }
+      save: { prx_interactive_id: data.approval.id }
+    - name: the approval it names is there to read, and pending
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${prx_interactive_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${prx_interactive_id}' }
+          - { path: data.state, equals: pending }
+    - name: proxied tool, headless
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { channel: 'headless-prx-${uniq}' } }
+          context: { invocation_channel: headless }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, matches: '.+' }
+      save: { prx_headless_id: data.approval.id }
+    - name: the approval it names is there to read, and pending
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${prx_headless_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${prx_headless_id}' }
+          - { path: data.state, equals: pending }
+    - name: proxied tool, workflow
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { channel: 'workflow-prx-${uniq}' } }
+          context: { invocation_channel: workflow }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, matches: '.+' }
+      save: { prx_workflow_id: data.approval.id }
+    - name: the approval it names is there to read, and pending
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${prx_workflow_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.id, equals: '${prx_workflow_id}' }
+          - { path: data.state, equals: pending }
+- id: rejection-yields-a-resumption
+  title: A rejected approval has a signed Resumption with resolution rejected and no resume_token, which the creator reads and which the verifier does not accept as an approval
+  tags: [both, lifecycle, resumption]
+  needs: [approver]
+  requires: approvals
+  steps:
+    - name: register an external tool, for which approval would issue a resume_token
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rej:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rej:${uniq}', arguments: { n: 1 } }
+          continuation: { kind: adk, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval.resume_token_will_issue, equals: true }
+      save: { r_id: data.approval.id, r_digest: data.action_digest }
+    - name: the approver rejects it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${r_id}/deny
+        body: { expected_action_digest: '${r_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the creator reads a Resumption that says rejected and carries no token
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${r_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval_id, equals: '${r_id}' }
+          - { path: data.resolution, equals: rejected }
+          - { path: data.resume_token, exists: false }
+      save: { resumption: data, r_resolved_at: data.resolved_at }
+    - name: reading it again is the same answer, since a rejection is not a consumption
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${r_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval_id, equals: '${r_id}' }
+          - { path: data.resolution, equals: rejected }
+          - { path: data.resolved_at, equals: '${r_resolved_at}' }
+          - { path: data.resume_token, exists: false }
+    - as: none
+      request: { method: GET, path: /.well-known/jwks.json }
+      expect: { status: 200 }
+      save: { jwks: '$' }
+    - name: its signature verifies and the verifier, which accepts approved only, refuses it for that reason
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:rej:${uniq}', arg_digest: '${r_digest}' }
+        result: not_approved
+    - name: a tampered digest breaks the signature, so the refusal above was not a signature failure
+      verify_resumption:
+        resumption: '${resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:rej:${uniq}', arg_digest: '${r_digest}' }
+        tamper: action_digest
+        result: bad_signature
+    - name: a rejection through resolve is the same, for a second external approval
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rej:${uniq}', arguments: { n: 2 } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { x_id: data.approval.id, x_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${x_id}/resolve
+        body: { resolution: rejected, expected_action_digest: '${x_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the creator reads a rejected Resumption without a token
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${x_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval_id, equals: '${x_id}' }
+          - { path: data.resolution, equals: rejected }
+          - { path: data.resume_token, exists: false }
+      save: { x_resumption: data }
+    - name: the verifier refuses it as not approved
+      verify_resumption:
+        resumption: '${x_resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: 'ext:rej:${uniq}', arg_digest: '${x_digest}' }
+        result: not_approved
+    - name: a proxied tool, whose approval would carry no token either, is rejected through deny
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'rej ${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { y_id: data.approval.id, y_digest: data.action_digest }
+    - as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${y_id}/deny
+        body: { expected_action_digest: '${y_digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: rejected }] }
+    - name: the creator reads its rejected Resumption
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${y_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.approval_id, equals: '${y_id}' }
+          - { path: data.resolution, equals: rejected }
+          - { path: data.resume_token, exists: false }
+      save: { y_resumption: data }
+    - name: the verifier refuses it as not approved
+      verify_resumption:
+        resumption: '${y_resumption}'
+        jwks: '${jwks}'
+        expect: { tool_ref: '${proxied_tool}', arg_digest: '${y_digest}' }
+        result: not_approved
+- id: approval-arguments-beyond-the-advertised-bound
+  title: Arguments larger than limits.approval_arguments_max_bytes, for a tool that shows its arguments to approvers, are 400 invalid_request and never truncated, and arguments within it are kept
+  tags: [both, negative, lifecycle]
+  needs: [approver]
+  requires: approvals
+  advertises: [approval_arguments_max_bytes]
+  steps:
+    - name: register a tool that shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:argX:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - name: arguments larger than the bound are refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: 'ext:argX:${uniq}'
+            arguments: { items: { $repeat: '${approval_arguments_max_bytes}', item: 'x' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 400, problem: invalid_request }
+    - name: and through POST /v1/approvals
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'ext:argX:${uniq}'
+            arguments: { items: { $repeat: '${approval_arguments_max_bytes}', item: 'x' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 400, problem: invalid_request }
+    - name: small arguments are kept and read back whole
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:argX:${uniq}', arguments: { q: 'small-${uniq}' } }
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { x_id: data.approval.id }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${x_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, equals_canonical: { q: 'small-${uniq}' } }
+- id: approval-arguments-not-sent-when-opened-with-a-digest
+  title: An approval opened with only an argument digest, on a tool that shows arguments to approvers, says `not_sent` and carries no arguments, to its creator and to an eligible approver alike
+  tags: [both, lifecycle]
+  requires: approvals
+  needs: [creator_user, approver]
+  steps:
+    - name: register a tool that shows its arguments to approvers
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ns:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          show_arguments_to_approvers: true
+      expect: { status: 201 }
+    - name: a user opens an approval naming the digest and no arguments
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            tool_ref: 'ext:ns:${uniq}'
+            arg_digest: '${uniq}${uniq}${uniq}${uniq}${uniq}0000'
+          continuation: { kind: adk, delivery: pull }
+      expect: { status: 200 }
+      save: { ns_id: data.approval.id }
+    - name: its creator reads it, and is told no arguments were sent
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${ns_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: not_sent }
+    - name: an eligible approver reads it, and is told the same
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${ns_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.arguments, exists: false }
+          - { path: data.arguments_state, equals: not_sent }

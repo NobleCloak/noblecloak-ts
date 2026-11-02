@@ -1,0 +1,8 @@
+entity Agent;
+entity Tool;
+entity PolicyTarget;
+action "pre_tool_call" appliesTo {
+  principal: [Agent],
+  resource: [Tool],
+  context: {}
+};

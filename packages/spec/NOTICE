@@ -1,0 +1,18 @@
+NobleCloak UI
+Copyright 2026 NobleCloak
+
+This product includes software developed by NobleCloak (https://www.noblecloak.com).
+
+== Third-party ==
+Runtime dependencies of the published packages. None is copied into this repository or bundled into a
+published file; each is installed from the registry under its own licence.
+
+@noblecloak/spec
+@rocksolidknowledge/authzen-client 1.0.0 - MIT - https://github.com/rocksolidknowledge
+  An AuthZEN client. nc-conform drives the AuthZEN scenarios through it, unmodified.
+@hono/node-server 2.1.3 and hono 4.13.13 - MIT - https://github.com/honojs/hono
+  The mock server and its Node adapter.
+ajv 8.20.0 and ajv-formats 3.0.1 - MIT - https://github.com/ajv-validator/ajv
+  Validates responses against the module API document.
+yaml 2.9.1 - ISC - https://github.com/eemeli/yaml
+  Parses the document and the conformance scenarios.

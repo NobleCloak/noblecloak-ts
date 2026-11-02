@@ -1,0 +1,155 @@
+# Contract revision 15: Approval.available_actions, what the reader may do on one approval. It is set only on the
+# single read of a pending approval, only for a reader who may resolve it, and only by a deployment that lists the
+# feature approvals.available_actions. The first scenario opens a pending approval and resolves nothing: it asks for a
+# listed action of kind resolve, and checks the first listed action only against Capabilities.resolutions: the engine
+# has no predicate that tests every element of a list against another list, so the deployment is taken to list a
+# resolve action first. The second resolves its approval, to read it once resolved. The third resolves nothing and
+# needs a deployment that advertises user_resolve_scope.
+- id: available-actions-for-approvers
+  title: The single read of a pending approval, by a person who may resolve it, lists the actions available on it, and the resolution of the first action is one the deployment can produce
+  tags: [both, lifecycle]
+  requires: approvals
+  features: [approvals.available_actions]
+  needs: [creator_user, approver]
+  steps:
+    - name: a person opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'actions ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: an approver reads it and is told what they may do
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.available_actions, exists: true }
+          - { path: data.available_actions.0.id, exists: true }
+          - { path: data.available_actions.0.label, exists: true }
+          - { path: data.available_actions.0.inputs, exists: true }
+          - { path: data.available_actions, contains_where: { key: kind, equals: resolve } }
+          - { path: data.available_actions.0.resolution, in: [approved, rejected, escalated] }
+      save: { first_resolution: data.available_actions.0.resolution }
+    - name: capabilities list the resolution that the first action sends
+      as: approver
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body:
+          - { path: data.resolutions, contains: '${first_resolution}' }
+- id: available-actions-hidden-from-others
+  title: A reader who may not resolve a pending approval (the person who opened it, a member who is not eligible) sees no available actions, nobody sees them once it is resolved, and a list row carries none for anyone
+  tags: [both, negative]
+  requires: approvals
+  features: [approvals.available_actions]
+  needs: [creator_user, approver, member]
+  steps:
+    - name: a person opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'actions-hidden ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: an approver reads it and sees the actions, so the absence below is the reader's alone
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.available_actions, exists: true }
+      save: { digest: data.action_digest }
+    - name: a member who is not eligible to approve it reads it, and sees none
+      as: member
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.available_actions, exists: false }
+    - name: the person who opened it reads it with their own token, and sees none
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.available_actions, exists: false }
+    - name: its list row for the person who opened it carries none
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals?created_by=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${approval_id}' }
+          - { path: data.0.available_actions, exists: false }
+    - name: and an approver's list row for it carries none either
+      as: approver
+      request: { method: GET, path: '/v1/approvals?approver=me&limit=1' }
+      expect:
+        status: 200
+        body:
+          - { path: data.0.id, equals: '${approval_id}' }
+          - { path: data.0.available_actions, exists: false }
+    - name: the approver resolves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+    - name: and the approver who may resolve it reads it once it is resolved, and sees none
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.available_actions, exists: false }
+- id: available-actions-hidden-without-resolve-scope
+  title: Where a deployment advertises user_resolve_scope, the approver's token without it reads a pending approval and sees no available actions, and the same user with it sees them
+  tags: [both, negative]
+  requires: approvals
+  features: [approvals.available_actions]
+  advertises: [user_resolve_scope]
+  needs: [creator_user, approver, approver_token_without_resolve_scope]
+  steps:
+    - name: a person opens an approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'actions-scope ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: the approver's token without the scope reads it and sees none
+      as: approver_token_without_resolve_scope
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.available_actions, exists: false }
+    - name: the same user with the scope reads it and sees the actions, so the absence above is the scope's alone
+      as: approver
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.available_actions, exists: true }

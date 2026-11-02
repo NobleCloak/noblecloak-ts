@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/index.ts", "src/cli/nc-conform.ts", "src/cli/nc-mock.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
