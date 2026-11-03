@@ -1,6 +1,6 @@
 {
   "name": "@noblecloak/theme",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "NobleCloak design tokens and a small set of slot-replaceable primitives, scoped to the module root.",
   "license": "Apache-2.0",
   "author": "NobleCloak",

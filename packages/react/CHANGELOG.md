@@ -1,5 +1,14 @@
 # @noblecloak/react
 
+## 0.8.4
+
+### Patch Changes
+
+- First release on the public npm registry. No code change: the versions step past the ones published to the organisation's package registry so that the public release is strictly newer.
+- Updated dependencies
+  - @noblecloak/client@0.11.1
+  - @noblecloak/theme@0.1.2
+
 ## 0.8.3
 
 ### Patch Changes
