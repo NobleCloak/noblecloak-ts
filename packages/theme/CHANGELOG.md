@@ -1,5 +1,11 @@
 # @noblecloak/theme
 
+## 0.1.2
+
+### Patch Changes
+
+- First release on the public npm registry. No code change: the versions step past the ones published to the organisation's package registry so that the public release is strictly newer.
+
 ## 0.1.1
 
 ### Patch Changes

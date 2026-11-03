@@ -1,6 +1,6 @@
 {
   "name": "@noblecloak/spec",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "The NobleCloak module API contract: the OpenAPI document, a mock server and a conformance suite.",
   "license": "Apache-2.0",
   "author": "NobleCloak",
