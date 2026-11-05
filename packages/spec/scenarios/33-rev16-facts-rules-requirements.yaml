@@ -1,0 +1,510 @@
+# Contract revision 16: fact-conditioned policies and approval requirements. A tool declares facts (Tool.facts), read
+# by the deployment from the arguments of the call; a tool_invocation policy's rules test them, first match wins, and a
+# fact with no value makes the policy ask; each policy whose result asks contributes a requirement with the approvers it
+# names, and every requirement must be met; an approval_routing policy says whether an organisation administrator may
+# meet them all (break-glass). Authoring needs an administrator, and each scenario registers its own organisation-owned
+# tool so that its policies meet no other policy's (tool, subject) pair. The organisation subject reaches every caller;
+# a second policy on the same tool takes the reserved role `everyone`, which every caller holds, so the two do not
+# conflict. The break-glass scenario publishes the organisation's setting off, then on again, so it leaves the setting
+# at its default.
+- id: rev16-rules-decide-by-the-facts-of-the-call
+  title: A policy's rules decide a call by the facts its arguments carry (first match wins, mode when none does), a digest-only call asks, and a simulation names the rule that decided or the facts that were missing
+  tags: [hosted]
+  only: hosted
+  requires: [policies, approvals]
+  features: [tools.facts, policies.rules]
+  serves_policy_subject_type: organization
+  needs: [admin, creator_user]
+  steps:
+    - name: register a tool that declares the fact amount
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:fr:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+          facts: { amount: { path: .amount, type: number } }
+      expect:
+        status: 201
+        body:
+          - { path: data.facts.amount.path, equals: .amount }
+          - { path: data.facts.amount.type, equals: number }
+    - name: above 5000 deny, at most 50 allow, else ask
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: organization }]
+          targets: { tools: ['ext:fr:${uniq}'] }
+          config:
+            mode: ask
+            rules:
+              - when: [{ fact: amount, op: gt, value: 5000 }]
+                then: deny
+              - when: [{ fact: amount, op: lte, value: 50 }]
+                then: always_allow
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - name: 6000 is denied by the first rule
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:fr:${uniq}', arguments: { amount: 6000 } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - { path: data.policy.id, equals: '${policy_id}' }
+    - name: 20 is allowed by the second
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:fr:${uniq}', arguments: { amount: 20 } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: allow }
+          - { path: data.policy.id, equals: '${policy_id}' }
+    - name: 300 matches no rule, so the mode asks
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:fr:${uniq}', arguments: { amount: 300 } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.policy.id, equals: '${policy_id}' }
+    - name: a call that sends only the digest has no facts, so it asks and names the fact that was missing
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action:
+            {
+              tool_ref: 'ext:fr:${uniq}',
+              arg_digest: '0000000000000000000000000000000000000000000000000000000000000016',
+            }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.missing_facts, equals: [amount] }
+    - name: simulated for the organisation, 6000 names the rule that decided
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body:
+          action: { tool_ref: 'ext:fr:${uniq}', arguments: { amount: 6000 } }
+          subject: { type: organization }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${policy_id}', result: deny, rule: { index: 0, then: deny } }
+    - name: and a digest names the fact that was missing
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${policy_id}/simulate
+        body:
+          action:
+            {
+              tool_ref: 'ext:fr:${uniq}',
+              arg_digest: '0000000000000000000000000000000000000000000000000000000000000016',
+            }
+          subject: { type: organization }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - path: data.considered.policies
+            contains_members: { id: '${policy_id}', result: ask, missing_facts: [amount] }
+- id: rev16-requirements-met-one-by-one
+  title: Two asking policies with different approvers open one approval with two requirements; the first approver meets one and the approval stays pending, the second meets the other and it is approved
+  tags: [hosted]
+  only: hosted
+  requires: [policies, approvals]
+  features: [approvals.requirements]
+  serves_policy_subject_type: [organization, role]
+  needs: [admin, creator_user, approver]
+  fixtures: [admin_role]
+  steps:
+    - name: the approver opens an approval to learn its own id
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'requirements ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { approver_approval: data.id }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${approver_approval}' }
+      expect: { status: 200 }
+      save: { approver_id: data.requester.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rq:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: one policy asks the approver by name
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: organization }]
+          targets: { tools: ['ext:rq:${uniq}'] }
+          config: { mode: ask, approvers: [{ user: '${approver_id}' }] }
+      expect: { status: 201 }
+      save: { by_name: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${by_name}/publish' }
+      expect: { status: 200 }
+    - name: the other asks the holders of the administrator's role
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:rq:${uniq}'] }
+          config: { mode: ask, approvers: [{ role: '${admin_role}' }] }
+      expect: { status: 201 }
+      save: { by_role: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${by_role}/publish' }
+      expect: { status: 200 }
+    - name: an approval opened through POST /v1/approvals carries the two requirements a decision would set
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: 'ext:rq:${uniq}', arguments: { n: 'door ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { door_approval: data.id }
+    - as: creator_user
+      request: { method: GET, path: '/v1/approvals/${door_approval}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.requirements, length: 2 }
+    - name: and a decision of the same call joins it
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rq:${uniq}', arguments: { n: 'door ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.id, equals: '${door_approval}' }
+    - name: a call opens one approval
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:rq:${uniq}', arguments: { n: 'one ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: it carries two unmet requirements, one per policy
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.requirements, length: 2 }
+          - path: data.requirements
+            contains_members: { approvers: [{ user: '${approver_id}' }], met: false, needed: 1 }
+          - path: data.requirements
+            contains_members: { approvers: [{ role: '${admin_role}' }], met: false, needed: 1 }
+    - name: the approver meets its requirement, and the approval stays pending
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.resolution, exists: false }
+          - path: data.requirements
+            contains_members: { approvers: [{ user: '${approver_id}' }], met: true }
+          - path: data.requirements
+            contains_members: { approvers: [{ role: '${admin_role}' }], met: false }
+    - name: the administrator meets the other, and it is approved
+      as: admin
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.resolution, equals: approved }
+- id: rev16-exclude-requester-refuses-the-requester
+  title: A requirement that excludes the requester is never met by the person who opened the approval, even listed by name and from the approver surface, and another listed approver meets it
+  tags: [hosted, negative]
+  only: hosted
+  requires: [policies, approvals]
+  features: [approvals.requirements]
+  serves_policy_subject_type: organization
+  self_approval_from_approver_surface: true
+  needs: [admin, creator_user, approver_surface_token]
+  fixtures: [admin_role]
+  steps:
+    - name: the person who will open the approval learns its own id
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'exclude ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { own_approval: data.id }
+    - as: creator_user
+      request: { method: GET, path: '/v1/approvals/${own_approval}' }
+      expect: { status: 200 }
+      save: { creator_id: data.requester.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ex:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a policy that lists the requester by name and the administrator's role, and excludes the requester
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: organization }]
+          targets: { tools: ['ext:ex:${uniq}'] }
+          config:
+            mode: ask
+            approvers: [{ user: '${creator_id}' }, { role: '${admin_role}' }]
+            exclude: [requester]
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:ex:${uniq}', arguments: { n: 'exclude ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the requester, from the approver surface, may not approve it
+      as: approver_surface_token
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: it is still pending, with its requirement unmet
+      as: creator_user
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.requirements.0.exclude, equals: [requester] }
+          - { path: data.requirements.0.met, equals: false }
+    - name: the administrator, listed by role, approves it
+      as: admin
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+- id: rev16-break-glass-follows-the-organisation-setting
+  title: With the organisation's approval_routing setting off, an administrator who is not listed is not eligible and the listed approver meets the requirement; with it on, the administrator meets it by break-glass
+  tags: [hosted, negative]
+  only: hosted
+  requires: [policies, approvals]
+  features: [approvals.requirements]
+  serves_policy_subject_type: organization
+  needs: [admin, creator_user, approver]
+  steps:
+    - name: the approver opens an approval to learn its own id
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'break-glass ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect: { status: 201 }
+      save: { approver_approval: data.id }
+    - as: approver
+      request: { method: GET, path: '/v1/approvals/${approver_approval}' }
+      expect: { status: 200 }
+      save: { approver_id: data.requester.id }
+    - name: break-glass off
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: approval_routing
+          subjects: [{ type: organization }]
+          config: { org_admin_break_glass: false }
+      expect: { status: 201 }
+      save: { off_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${off_id}/publish' }
+      expect: { status: 200 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:bg:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a policy that asks the approver by name
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: organization }]
+          targets: { tools: ['ext:bg:${uniq}'] }
+          config: { mode: ask, approvers: [{ user: '${approver_id}' }] }
+      expect: { status: 201 }
+      save: { policy_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${policy_id}/publish' }
+      expect: { status: 200 }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:bg:${uniq}', arguments: { n: 'off ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+      save: { off_approval: data.approval.id, off_digest: data.action_digest }
+    - name: the administrator, not listed, may not approve it
+      as: admin
+      request:
+        method: POST
+        path: /v1/approvals/${off_approval}/approve
+        body: { expected_action_digest: '${off_digest}' }
+      expect: { status: 403, problem: not_eligible }
+    - name: the listed approver approves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${off_approval}/approve
+        body: { expected_action_digest: '${off_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+    - name: break-glass on again, the default
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: approval_routing
+          subjects: [{ type: organization }]
+          config: { org_admin_break_glass: true }
+      expect: { status: 201 }
+      save: { on_id: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${on_id}/publish' }
+      expect: { status: 200 }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:bg:${uniq}', arguments: { n: 'on ${uniq}' } }
+          continuation: { kind: langgraph, delivery: pull }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+      save: { on_approval: data.approval.id, on_digest: data.action_digest }
+    - name: the administrator meets the requirement by break-glass
+      as: admin
+      request:
+        method: POST
+        path: /v1/approvals/${on_approval}/approve
+        body: { expected_action_digest: '${on_digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: approved }
+          - { path: data.requirements.0.approvals.0.basis, equals: break_glass }

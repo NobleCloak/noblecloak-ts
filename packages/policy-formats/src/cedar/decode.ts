@@ -4,8 +4,18 @@
  * The body is authoritative for what Cedar says (the effect, the principal, the tools); `@noblecloak_*`
  * annotations supply only what Cedar cannot. A statement whose body and annotations disagree is a
  * conflict, and nothing of it is imported, so an edited body is never overridden by a stale annotation.
- * The one sanctioned difference is `@noblecloak_encoding("fail_closed")`: an `ask` or `escalate` policy
- * written as a `forbid` for an engine that has no approval outcome.
+ * Two differences are sanctioned, both through the one `@noblecloak_encoding` annotation, so a statement
+ * carries at most one:
+ * - `fail_closed`: an `ask` or `escalate` policy written as a `forbid` for an engine that has no approval
+ *   outcome.
+ * - `rules_tightest`: a policy with `@noblecloak_rules`, written as the tightest outcome of
+ *   `@noblecloak_mode` and the rules (`tightestOutcome`), which can differ from the mode. The marker and
+ *   `@noblecloak_rules` come together or not at all. The decoder recomputes that outcome and requires the
+ *   body (and for an approval outcome the `@advice` verdict) to equal it, so an edited body or rules list
+ *   is a conflict, never a looser policy. It takes precedence over `fail_closed`: a rule-bearing policy
+ *   whose outcome is `ask` or `escalate` written as a `forbid` is marked `rules_tightest`, and the
+ *   decoder reads the approval encoding from the body. `@id` and the `@advice` reason name the encoded
+ *   outcome, not `@noblecloak_mode`.
  *
  * A policy is imported whole or not at all: when any statement of a policy key is unsupported or in
  * conflict, none of that key's statements is imported, and each is reported.
@@ -14,10 +24,19 @@ import canonicalize from 'canonicalize';
 
 import { pointer, quote, show } from '../pointer.js';
 import type { PolicySubject, PolicyWrite, ReportEntry, ToolInvocationConfig } from '../types.js';
-import { APPROVAL_MODES, isMode, toolInvocationProblems } from '../validate.js';
+import {
+  APPROVAL_MODES,
+  approversProblems,
+  excludeProblems,
+  isMode,
+  rulesProblems,
+  toolInvocationProblems,
+} from '../validate.js';
+import type { Problem } from '../validate.js';
 import type { Mode } from '../validate.js';
 import type { Dialect, EntityRef, Scope } from './ast.js';
-import { ANNOTATION, FAIL_CLOSED, statementReason } from './encode.js';
+import { tightestOutcome } from '../rules.js';
+import { ANNOTATION, FAIL_CLOSED, RULES_TIGHTEST, statementReason } from './encode.js';
 import type { ApprovalEncoding } from './encode.js';
 
 /** Resolves a tool entity id to a `tool_ref`, with a lossy entry when the mapping is not exact. */
@@ -59,6 +78,9 @@ const KNOWN_NOBLECLOAK = new Set<string>([
   ANNOTATION.onDeny,
   ANNOTATION.expiresAfter,
   ANNOTATION.approverGroups,
+  ANNOTATION.approvers,
+  ANNOTATION.exclude,
+  ANNOTATION.rules,
   ANNOTATION.encoding,
   ANNOTATION.baseline,
 ]);
@@ -241,17 +263,51 @@ function readMode(
   mode: string | undefined,
   encoding: string | undefined,
   advice: Advice | undefined,
+  rules: ToolInvocationConfig['rules'],
   path: string
-): { mode: Mode; encoding?: ApprovalEncoding } | { conflict: ReportEntry } {
+): { mode: Mode; outcome: Mode; encoding?: ApprovalEncoding } | { conflict: ReportEntry } {
   const conflict = (reason: string): { conflict: ReportEntry } => ({ conflict: { path, reason } });
   if (mode !== undefined && !isMode(mode))
     return conflict(`@noblecloak_mode ${quote(mode)} is not a mode`);
+  if (rules !== undefined || encoding === RULES_TIGHTEST) {
+    if (rules === undefined)
+      return conflict(
+        `@noblecloak_encoding("${RULES_TIGHTEST}") is on a statement without @noblecloak_rules`
+      );
+    if (encoding !== RULES_TIGHTEST)
+      return conflict(
+        `@noblecloak_rules is on a statement without @noblecloak_encoding("${RULES_TIGHTEST}")`
+      );
+    if (mode === undefined)
+      return conflict(
+        '@noblecloak_rules needs @noblecloak_mode: the tightest outcome is recomputed from both'
+      );
+    const outcome = tightestOutcome(mode, rules);
+    const outcomeIs = `the tightest outcome of @noblecloak_mode and @noblecloak_rules is ${outcome}`;
+    const approval = APPROVAL_MODES.includes(outcome);
+    if (effect === 'permit') {
+      if (advice === undefined)
+        return outcome === 'always_allow'
+          ? { mode, outcome }
+          : conflict(`the body permits the call and ${outcomeIs}`);
+      if (!approval)
+        return conflict(
+          `@advice escalate is on a statement whose ${outcomeIs.replace(/^the /, '')}`
+        );
+      if (advice.mode !== undefined && advice.mode !== outcome)
+        return conflict(`the @advice reason names ${advice.mode} and ${outcomeIs}`);
+      return { mode, outcome, encoding: 'advice' };
+    }
+    if (advice !== undefined) return conflict('@advice is on a forbid, where no engine reads it');
+    if (outcome === 'always_allow') return conflict(`the body forbids the call and ${outcomeIs}`);
+    return approval ? { mode, outcome, encoding: 'fail_closed' } : { mode, outcome };
+  }
   if (effect === 'permit') {
     if (encoding !== undefined)
       return conflict('@noblecloak_encoding("fail_closed") is on a permit');
     if (advice === undefined) {
       return mode === undefined || mode === 'always_allow'
-        ? { mode: 'always_allow' }
+        ? { mode: 'always_allow', outcome: 'always_allow' }
         : conflict(`the body permits the call and @noblecloak_mode says ${mode}`);
     }
     const resolved = mode ?? advice.mode ?? 'ask';
@@ -261,12 +317,12 @@ function readMode(
       return conflict(
         `the @advice reason names ${advice.mode} and @noblecloak_mode says ${resolved}`
       );
-    return { mode: resolved, encoding: 'advice' };
+    return { mode: resolved, outcome: resolved, encoding: 'advice' };
   }
   if (advice !== undefined) return conflict('@advice is on a forbid, where no engine reads it');
   if (mode === undefined || mode === 'deny' || mode === 'not_granted') {
     return encoding === undefined
-      ? { mode: mode ?? 'deny' }
+      ? { mode: mode ?? 'deny', outcome: mode ?? 'deny' }
       : conflict(`@noblecloak_encoding is on a ${mode ?? 'deny'} policy`);
   }
   if (mode === 'always_allow')
@@ -275,7 +331,35 @@ function readMode(
     return conflict(
       `the body forbids the call and @noblecloak_mode says ${mode}, without @noblecloak_encoding("fail_closed")`
     );
-  return { mode, encoding: 'fail_closed' };
+  return { mode, outcome: mode, encoding: 'fail_closed' };
+}
+
+/**
+ * A JSON annotation read as a config member: undefined when absent, or when it is not JSON or fails its
+ * schema check (then the reason is added to `problems`, with the first problem's position in the value).
+ */
+function readMember(
+  text: string | undefined,
+  path: string,
+  label: string,
+  check: (value: unknown) => Problem[],
+  problems: ReportEntry[]
+): unknown {
+  if (text === undefined) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    problems.push({ path, reason: `${label} is not JSON` });
+    return undefined;
+  }
+  const [first] = check(value);
+  if (first === undefined) return value;
+  problems.push({
+    path,
+    reason: `${label} is not valid${first.path === '' ? '' : ` at ${first.path}`}: ${first.reason}`,
+  });
+  return undefined;
 }
 
 function annotationsOf(est: Record<string, unknown>): Map<string, string> | undefined {
@@ -379,6 +463,27 @@ export function decodeStatement(
         reason: '@noblecloak_approver_groups is not a JSON array of strings',
       });
   }
+  const rules = readMember(
+    annotations.get(ANNOTATION.rules),
+    at(ANNOTATION.rules),
+    '@noblecloak_rules',
+    (value) => rulesProblems(value, ''),
+    problems
+  ) as ToolInvocationConfig['rules'];
+  const approvers = readMember(
+    annotations.get(ANNOTATION.approvers),
+    at(ANNOTATION.approvers),
+    '@noblecloak_approvers',
+    (value) => approversProblems(value, ''),
+    problems
+  ) as ToolInvocationConfig['approvers'];
+  const exclude = readMember(
+    annotations.get(ANNOTATION.exclude),
+    at(ANNOTATION.exclude),
+    '@noblecloak_exclude',
+    (value) => excludeProblems(value, ''),
+    problems
+  ) as ToolInvocationConfig['exclude'];
   const onDenyText = annotations.get(ANNOTATION.onDeny);
   const onDeny = onDenyText === 'resume' || onDenyText === 'halt' ? onDenyText : undefined;
   if (onDenyText !== undefined && onDeny === undefined)
@@ -390,14 +495,15 @@ export function decodeStatement(
     annotations.get(ANNOTATION.mode),
     annotations.get(ANNOTATION.encoding),
     advice,
+    rules,
     path
   );
   if ('conflict' in decided) return reject('conflicts', [decided.conflict], key);
-  const { mode } = decided;
+  const { mode, outcome } = decided;
   const lossy: ReportEntry[] = [];
   const conflicts: ReportEntry[] = [];
   if (key !== undefined) {
-    const expected = statementReason(mode, key);
+    const expected = statementReason(outcome, key);
     const id = annotations.get(ANNOTATION.id);
     if (id !== undefined && id !== expected)
       conflicts.push({ path: at(ANNOTATION.id), reason: `@id is not ${quote(expected)}` });
@@ -456,6 +562,9 @@ export function decodeStatement(
       ? { expires_after: annotations.get(ANNOTATION.expiresAfter) ?? '' }
       : {}),
     ...(approverGroups === undefined ? {} : { approver_groups: approverGroups }),
+    ...(rules === undefined ? {} : { rules }),
+    ...(approvers === undefined ? {} : { approvers }),
+    ...(exclude === undefined ? {} : { exclude }),
   };
   const name = annotations.get(ANNOTATION.name);
   const description = annotations.get(ANNOTATION.description);
@@ -534,7 +643,7 @@ function sameFields(a: Fields, b: Fields): boolean {
  * Groups decoded statements into policies: statements with the same policy key are one policy, its
  * subjects in statement order; a statement without a key is a policy of its own. A policy is imported only
  * when every statement of it decoded, they agree on everything but the subject, and the result is a valid
- * rev 10 `tool_invocation` policy.
+ * `tool_invocation` policy (contract rev 16).
  */
 export function assemble(statements: readonly { path: string; decoded: Decoded }[]): Assembled {
   const out: Assembled = {

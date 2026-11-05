@@ -1,7 +1,9 @@
 /**
  * The mock server: Hono over in-memory state seeded with fixtures. It serves the document so modules
  * and adapters can build before the facade exists. It is NOT a reference
- * implementation of policy: its `decide` is a fixture lookup, `mode` on a tool row.
+ * implementation of policy: its `decide` is a fixture lookup, `mode` on a tool row, except for a call that a
+ * published policy carrying rev 16 members (`rules`, `approvers`, `exclude`) matches, which it decides by composing
+ * the matching policies (see `ruledDecision`).
  *
  * Request bodies are validated against the document's own schemas, so a client that drifts from the
  * contract fails here the way it would against the real thing.
@@ -36,6 +38,16 @@ import {
   tightnessOfMode,
 } from './proposal.js';
 import type { Proposal, Refusal } from './proposal.js';
+import { approversInForce, pathSegments, readFacts, refusedCondition, walkRules } from './rules.js';
+import type {
+  Approver,
+  ApproverRef,
+  Condition,
+  FactBindings,
+  FactType,
+  RuleConfig,
+  WalkResult,
+} from './rules.js';
 import { MockState, PROBLEM_BASE, linkKey, toolKey, without } from './store.js';
 import type {
   Continuation,
@@ -46,6 +58,7 @@ import type {
   Obligation,
   PolicyVersion,
   RecordRow,
+  Requirement,
   ToolRow,
 } from './store.js';
 import { loadDocument } from '../spec/default.js';
@@ -477,19 +490,38 @@ const AVAILABLE_ACTIONS = [
 /** The feature that says a deployment composes `tool_invocation` policies tightest-wins (rev 11, D-A89). */
 const TIGHTEST_WINS_FEATURE = 'policies.tightest_wins';
 
+/** Rev 16: the feature that says a deployment reads the facts of a call through `Tool.facts`. */
+const TOOLS_FACTS_FEATURE = 'tools.facts';
+/** Rev 16: the feature that says a deployment evaluates `ToolInvocationConfig.rules`. */
+const POLICY_RULES_FEATURE = 'policies.rules';
+/** Rev 16: the feature that says a deployment enforces approvers, serves `approval_routing` and sets requirements. */
+const APPROVAL_REQUIREMENTS_FEATURE = 'approvals.requirements';
+
 /**
  * The `tool_invocation` forms the mock enforces (rev 11, `Capabilities.policy_forms`): every mode but the
  * provisional `not_granted`, which it refuses with 422 (see `policyWriteRefused`), every subject type, a target
- * of every tool, and the three config members.
+ * of every tool, and the config members: rev 11's three, `rules` (rev 16) and, where it serves approvals, `approvers`
+ * and `exclude` (rev 16) with the `approval_routing` kind (see `policyForms`).
  */
 const POLICY_FORMS = {
   tool_invocation: {
     modes: ['always_allow', 'ask', 'escalate', 'deny'],
     subject_types: ['user', 'agent', 'service', 'group', 'role', 'organization'],
     targets_all: true,
-    config_members: ['on_deny', 'expires_after', 'approver_groups'],
+    config_members: [
+      'on_deny',
+      'expires_after',
+      'approver_groups',
+      'rules',
+      'approvers',
+      'exclude',
+    ],
   },
+  approval_routing: { config_members: ['org_admin_break_glass'] },
 } as const;
+
+/** Rev 16: the members of `ToolInvocationConfig` served only under `approvals.requirements`. */
+const REQUIREMENT_MEMBERS: readonly string[] = ['approvers', 'exclude'];
 
 /** The families that only a hosted deployment serves. */
 const HOSTED_ONLY_FAMILIES: readonly Family[] = ['records.checkpoints', 'evidence'];
@@ -531,6 +563,24 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
   };
   const broken = (flag: Break): boolean => config.breaks.has(flag);
   const served = servedFamilies(config.deployment, options.advertise);
+  /** Rev 16: `policies.rules` is served (and advertised) where the mock authors policies: hosted, serving `policies`. */
+  const rulesServed = (): boolean => config.deployment === 'hosted' && served.has('policies');
+  /** Rev 16: `approvals.requirements` is served where rules are and the mock serves approvals too. */
+  const requirementsServed = (): boolean => rulesServed() && served.has('approvals');
+  /** Rev 16: the policy forms the mock advertises: without approvals, no requirement members and no routing kind. */
+  const policyForms = (): Obj => {
+    const toolInvocation = {
+      ...POLICY_FORMS.tool_invocation,
+      config_members: POLICY_FORMS.tool_invocation.config_members.filter(
+        (member) => requirementsServed() || !REQUIREMENT_MEMBERS.includes(member)
+      ),
+      ...(options.restrictPolicyTargets === true ? { targets_all: false } : {}),
+    };
+    return {
+      tool_invocation: toolInvocation,
+      ...(requirementsServed() ? { approval_routing: POLICY_FORMS.approval_routing } : {}),
+    };
+  };
   const spec = options.spec ?? loadDocument();
   const index = new SpecIndex(spec);
   const state = new MockState();
@@ -559,8 +609,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     });
   }
   // The stored policies. `pol_default` is the policy the seeded tools name, `pol_silent` the one
-  // `mcp:tracker:add_comment` names. The mock's decision is still the tool's own `mode` (see `decide`):
-  // a policy is read for `on_deny`, for simulate and by the policy routes.
+  // `mcp:tracker:add_comment` names. The mock's decision is still the tool's own `mode` (see `decide`), unless a
+  // published policy with rev 16 members matches the call (see `ruledDecision`): a policy is read for `on_deny`, for
+  // simulate and by the policy routes.
   const seededAt = state.now().toISOString();
   const seedBy = { id: 'user_admin', kind: 'user' };
   state.policyVersions.set('pol_default', [
@@ -1197,12 +1248,78 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
   const fromApproverSurface = (reader: Principal): boolean =>
     reader.clientId === config.approverSurfaceClient && !broken('surface_self_approval_refused');
   /**
+   * Rev 16: whether the organisation's `approval_routing` setting lets an administrator satisfy every requirement
+   * (`org_admin_break_glass`): its most recently published `approval_routing` policy with the organisation subject,
+   * and on when it has none.
+   */
+  const breakGlassOn = (org: string): boolean => {
+    let best: PolicyVersion | undefined;
+    for (const row of state.policies.values()) {
+      if (row.org !== org) continue;
+      const version = inForce(String(row.id));
+      if (
+        version?.kind !== 'approval_routing' ||
+        !version.subjects.some((s) => s.type === 'organization')
+      )
+        continue;
+      if (best === undefined || String(version.published_at) > String(best.published_at))
+        best = version;
+    }
+    return best?.config.org_admin_break_glass !== false;
+  };
+  /**
+   * Rev 16: how `reader` may satisfy requirement `r` of `o`, or undefined when it may not: `listed` when it holds a
+   * role or is the user `r` lists (with none listed, when it is an administrator of the organisation), `break_glass`
+   * when it is an administrator and the organisation's setting is on. `exclude: [requester]` keeps the creator out
+   * of either. The defects: the setting is ignored (break-glass always on), and `exclude` is ignored.
+   */
+  const eligibleFor = (
+    reader: Principal,
+    o: Obligation,
+    r: Requirement
+  ): 'listed' | 'break_glass' | undefined => {
+    if (
+      r.exclude.includes('requester') &&
+      reader.org === o.org &&
+      reader.sub === o.creatorSub &&
+      !broken('exclude_requester_ignored')
+    )
+      return undefined;
+    const listed =
+      r.approvers.length === 0
+        ? isOrganisationAdmin(reader)
+        : r.approvers.some((a) =>
+            'role' in a ? reader.scopes.includes(roleScope(a.role)) : a.user === reader.sub
+          );
+    if (listed) return 'listed';
+    if (
+      isOrganisationAdmin(reader) &&
+      (breakGlassOn(o.org) || broken('break_glass_ignores_setting'))
+    )
+      return 'break_glass';
+    return undefined;
+  };
+  /**
    * Whether `reader` is a principal the mock would accept as an approver of `o` while it is pending: a
    * user, not its creator unless the token was issued to the approver surface, and not the organisation's
    * `member`. With `withBreaks` the two defects that let a service principal or the creator resolve apply,
-   * as they do for the resolve routes.
+   * as they do for the resolve routes. Rev 16: on an approval with requirements, also eligible for one of them (met
+   * or not, so eligibility does not depend on the state); `mayResolveNow` asks for an unmet one.
    */
   const isEligible = (reader: Principal, o: Obligation, withBreaks = false): boolean =>
+    baseEligible(reader, o, withBreaks) &&
+    (o.requirements === undefined ||
+      o.requirements.some((r) => eligibleFor(reader, o, r) !== undefined));
+  /**
+   * Rev 16: whether `reader` may approve or reject `o` now: eligible as `isEligible` says and, on an approval with
+   * requirements, for at least one that is unmet.
+   */
+  const mayResolveNow = (reader: Principal, o: Obligation, withBreaks = false): boolean =>
+    baseEligible(reader, o, withBreaks) &&
+    (o.requirements === undefined ||
+      o.requirements.some((r) => !r.met && eligibleFor(reader, o, r) !== undefined));
+  /** The rules of eligibility before rev 16's requirements (see `isEligible`). */
+  const baseEligible = (reader: Principal, o: Obligation, withBreaks = false): boolean =>
     (reader.kind !== 'service' || (withBreaks && broken('allow_service_resolve'))) &&
     (o.creatorSub !== reader.sub ||
       fromApproverSurface(reader) ||
@@ -1453,10 +1570,30 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         )
       : undefined;
 
+  /** Rev 16: what makes two requirements one: their approver entries in force and their `exclude`, in any order. */
+  const requirementKey = (r: Pick<Requirement, 'approvers' | 'exclude'>): string =>
+    jcs({
+      approvers: r.approvers.map((a) => jcs(a as unknown as JsonValue)).sort(),
+      exclude: [...r.exclude].sort(),
+    });
+  /**
+   * Rev 16: the requirements of `wanted` (what a call sets) that `o` carries none like (by `requirementKey`), each
+   * once. None when the call sets none.
+   */
+  const lackingRequirements = (
+    o: Obligation,
+    wanted: readonly Requirement[] | undefined
+  ): Requirement[] => {
+    const held = new Set((o.requirements ?? []).map(requirementKey));
+    return (wanted ?? []).filter((r) => !held.has(requirementKey(r)));
+  };
+
   /**
    * Opens an obligation, or returns the open one. A Response is a refusal; `rejectedDuplicate` is the
    * rejected-duplicate rule's refusal, which a decision answers `deny` and `POST /v1/approvals` 409.
-   * `split` is the `batch_duplicates_split` defect: an identical open obligation is not joined.
+   * `split` is the `batch_duplicates_split` defect: an identical open obligation is not joined. Rev 16: an open
+   * obligation that lacks a requirement of `requirements` gains it while pending (see `lackingRequirements`);
+   * an approved one is joined as it is.
    */
   const openObligation = (
     c: Ctx,
@@ -1469,6 +1606,10 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       arguments: Obj | undefined;
       door: string;
       split?: boolean;
+      /** Rev 16: the policy a composition of rule-bearing policies decided by (see `ruledDecision`). */
+      policy?: { id: string; version: number };
+      /** Rev 16: the requirements that composition gave. */
+      requirements?: Requirement[];
     }
   ):
     | { obligation: Obligation; created: boolean }
@@ -1481,6 +1622,19 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     if (tooLarge !== undefined) return tooLarge;
     const identity = identityOf(p.org, args.scope.key, args.tool.tool_ref, args.digest, args.door);
     const existing = args.split === true ? undefined : findOpen(identity);
+    // Rev 16: a pending approval that lacks requirements this call sets gains them, unmet. An approved one is
+    // joined as it is: it keeps the requirements it was approved under.
+    if (existing?.state === 'pending') {
+      const lacking = lackingRequirements(existing, args.requirements);
+      if (lacking.length > 0) {
+        const held = existing.requirements ?? [];
+        existing.requirements = [
+          ...held,
+          ...lacking.map((r, i) => ({ ...r, id: `r${String(held.length + i + 1)}` })),
+        ];
+        notify(existing);
+      }
+    }
     if (existing !== undefined) {
       const had = existing.continuation;
       if (args.continuation !== undefined) {
@@ -1541,8 +1695,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       approver: undefined,
       history: [],
       sideEffect: args.tool.side_effect_level,
-      policy: policyOfTool(asNamed(args.tool)),
-      onDeny: onDenyOf(policyOfTool(asNamed(args.tool))),
+      policy: args.policy ?? policyOfTool(asNamed(args.tool)),
+      onDeny: onDenyOf(args.policy ?? policyOfTool(asNamed(args.tool))),
       priorRejections:
         verdict?.kind === 'ask_again'
           ? { count: verdict.count, last_at: verdict.lastAt.toISOString() }
@@ -1554,6 +1708,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       preview: undefined,
       applying: false,
       explicit: args.continuation !== undefined,
+      ...(args.requirements === undefined ? {} : { requirements: args.requirements }),
     };
     state.obligations.set(o.id, o);
     state.open.set(identity, o.id);
@@ -1579,12 +1734,22 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         ...base,
       };
     }
-    const policy = policyMember(asNamed(tool), broken('null_policy_on_default'));
-    if (tool.mode === 'deny') return { decision: 'deny', reason: 'deny', ...policy, ...base };
+    // Rev 16: a call a rule-bearing policy matches is decided by composing the policies that match it.
+    const ruled = ruledDecision(c, body, tool);
+    const policy =
+      ruled === undefined
+        ? policyMember(asNamed(tool), broken('null_policy_on_default'))
+        : { policy: { ...ruled.policy, side_effect_level: tool.side_effect_level } };
+    const mode: string = ruled?.mode ?? tool.mode;
+    // Rev 16: a step-up names the facts whose absence made a contributing policy ask.
+    const missing =
+      ruled?.missing_facts === undefined ? {} : { missing_facts: ruled.missing_facts };
+    if (mode === 'deny' || mode === 'not_granted')
+      return { decision: 'deny', reason: mode, ...policy, ...base };
     // Rev 11: a call that opens no approval and needs a link the caller cannot use is refused for it.
-    if (tool.mode === 'always_allow' && blockingConnection(tool, principalOf(c)) !== undefined)
+    if (mode === 'always_allow' && blockingConnection(tool, principalOf(c)) !== undefined)
       return { decision: 'deny', reason: 'credential_link_required', ...policy, ...base };
-    if (tool.mode === 'always_allow') return { decision: 'allow', ...policy, ...base };
+    if (mode === 'always_allow') return { decision: 'allow', ...policy, ...base };
     // The defect: a policy `ask` is denied on the two channels with no one at the keyboard.
     const channel = isObj(body.context) ? body.context.invocation_channel : undefined;
     if (broken('headless_ask_denied') && (channel === 'headless' || channel === 'workflow'))
@@ -1600,7 +1765,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           'This deployment does not serve approvals, so it cannot store a continuation.'
         );
       }
-      return { decision: 'step_up', reason: 'approval_required', ...policy, ...base };
+      return { decision: 'step_up', reason: 'approval_required', ...policy, ...missing, ...base };
     }
     const scope = resolveScope(c, actor.run_id);
     if (scope instanceof Response) return scope;
@@ -1622,6 +1787,12 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       arguments: isObj(action.arguments) ? action.arguments : undefined,
       door: 'decisions',
       split,
+      ...(ruled === undefined
+        ? {}
+        : {
+            policy: ruled.policy,
+            ...(ruled.requirements === undefined ? {} : { requirements: ruled.requirements }),
+          }),
     });
     if (opened instanceof Response) return opened;
     // The rejected-duplicate rule: a deny that names the rejection and opens nothing. The defect answers a
@@ -1662,6 +1833,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       decision: 'step_up',
       reason: 'approval_required',
       ...policy,
+      ...missing,
       approval: handleOf(obligation, created),
       ...base,
     };
@@ -1850,7 +2022,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
    * the creator is a user, up to five of them. The count is of the principals this mock has seen call it
    * (`state.principals`), not of every member of the organisation: that is what the mock knows, and what
    * the specification says the count means is the owner's to settle. Each candidate is judged from its own
-   * stored record, never from the reader's attributes. The defects: it gives it to every reader, and (the
+   * stored record, never from the reader's attributes. Rev 16: on an approval with requirements, the candidates are
+   * those eligible for an unmet one (`mayResolveNow`). The defects: it gives it to every reader, and (the
    * second) wrong content: no one waited on; it puts it on list rows and stream events too.
    */
   const waitingOnOf = (o: Obligation, reader: Principal, singleRead: boolean): Obj | undefined => {
@@ -1866,7 +2039,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       (x) =>
         x.org === o.org &&
         x.kind === 'user' &&
-        isEligible(
+        mayResolveNow(
           {
             sub: String(x.id),
             org: x.org,
@@ -1979,7 +2152,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       const actions = availableActions();
       if (
         actions.length > 0 &&
-        ((isEligible(reader, o) &&
+        ((mayResolveNow(reader, o) &&
           (reader.scopes.includes(USER_RESOLVE_SCOPE) ||
             broken('available_actions_shown_without_resolve_scope'))) ||
           (reader.sub === MEMBER && broken('available_actions_shown_to_members')) ||
@@ -1987,6 +2160,14 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       )
         out.available_actions = actions;
     }
+    // Rev 16: the requirements, on every representation to every reader who sees the approval, with each approval
+    // that counts toward one naming its approver.
+    if (o.requirements !== undefined && requirementsServed())
+      out.requirements = o.requirements.map((r) => ({
+        ...r,
+        policies: r.policies.map((policy) => ({ ...policy })),
+        approvals: r.approvals.map((a) => ({ ...a, by: refOf(a.by.id, a.by.kind) })),
+      }));
     if (o.agentId !== undefined)
       out.agent = {
         id: o.agentId,
@@ -2109,6 +2290,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     if (refused !== undefined) return refused;
     const scope = resolveScope(c, body.run_id);
     if (scope instanceof Response) return scope;
+    // Rev 16: the requirements a step-up of the same call would carry, from the policies that match it, so that an
+    // approval opened here is routed as one a decision opens. A proposal is no tool a policy governs.
+    const ruled = proposed === undefined ? ruledDecision(c, body, tool) : undefined;
     const opened = openObligation(c, {
       tool,
       digest: await digestOf(action),
@@ -2118,6 +2302,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       agentId: proposed?.proposal.agent.id,
       arguments: isObj(action.arguments) ? action.arguments : undefined,
       door: 'approvals',
+      ...(ruled?.requirements === undefined
+        ? {}
+        : { policy: ruled.policy, requirements: ruled.requirements }),
     });
     if (opened instanceof Response) return opened;
     if ('rejectedDuplicate' in opened)
@@ -2416,8 +2603,11 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         `This deployment does not serve the ${resolution} resolution.`
       );
     // Two separate rules, each with its own break: a service principal never resolves, and the
-    // principal that created an obligation never resolves its own.
-    if (!skipEligibility && !isEligible(p, o, true))
+    // principal that created an obligation never resolves its own. Rev 16: while the approval is pending, the
+    // caller must be eligible for an unmet requirement; once it is not, for any, so that a repeat is the conflict
+    // below rather than 403.
+    const eligible = o.state === 'pending' ? mayResolveNow(p, o, true) : isEligible(p, o, true);
+    if (!skipEligibility && !eligible)
       return problem(
         c,
         403,
@@ -2437,6 +2627,21 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     // may pass the check above until its state is written.
     if (o.state !== 'pending' || o.applying) return problem(c, 409, 'already_resolved');
     const at = stamp();
+    // Rev 16: an approve satisfies every unmet requirement the approver is eligible for; while one is still unmet the
+    // approval stays pending, and the change is an `approval.updated` of the stream. A reject rejects it outright.
+    // The defect approves the whole approval on the first approve.
+    if (o.requirements !== undefined && resolution === 'approved') {
+      for (const r of o.requirements) {
+        const basis = r.met ? undefined : eligibleFor(p, o, r);
+        if (basis === undefined) continue;
+        r.approvals.push({ by: { id: p.sub, kind: p.kind }, at: at.toISOString(), basis });
+        r.met = r.approvals.length >= r.needed;
+      }
+      if (o.requirements.some((r) => !r.met) && !broken('partial_approve_resolves')) {
+        notify(o);
+        return ok(c, view(o, p));
+      }
+    }
     // Rev 14: approving a deployment-applied approval applies its change, all or nothing. When the deployment
     // refuses to apply it, the approval is rejected, by the administrator whose approval it refused, with the
     // reason in the history entry. The defect applies the change on a denial too.
@@ -3036,6 +3241,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     tool_invocation: 'ToolInvocationConfig',
     spending: 'SpendingConfig',
     duplicate_requests: 'DuplicateRequestsConfig',
+    // Rev 16, served only under `approvals.requirements` (see `policyWriteRefused`).
+    approval_routing: 'ApprovalRoutingConfig',
   };
   /**
    * A 422 `unsupported_policy_form` that names the offending member (rev 13): `member` is a path into the
@@ -3051,11 +3258,75 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       `${lead}: ${why}`,
       broken('unsupported_form_member_missing') ? {} : { member }
     );
+  /** Rev 16: the declared type of each fact of a tool, by name. */
+  const factTypesOf = (tool: ToolRow): Record<string, FactType> =>
+    Object.fromEntries(Object.entries(tool.facts ?? {}).map(([name, b]) => [name, b.type]));
+  /**
+   * Rev 16: the refusal of the rule-bearing members of a `tool_invocation` config. `rules` where `policies.rules` is
+   * not served, and `approvers`, `exclude` and a rule's `approvers` where `approvals.requirements` is not, are 422
+   * `unsupported_policy_form` naming the member. When every target names a tool the organisation has registered, a
+   * condition (of a rule, of a policy approver or of a rule's approver) whose fact one of them does not declare, or
+   * that compares a fact one of them declares as neither `number` nor `count`, is 400 `invalid_request` naming the
+   * condition's `fact` in `member`.
+   */
+  const ruleMembersRefused = (c: Ctx, body: Obj, config: Obj, at: string): Response | undefined => {
+    const rules = Array.isArray(config.rules) ? (config.rules as Obj[]) : [];
+    if (config.rules !== undefined && !rulesServed())
+      return unsupportedForm(c, `${at}config.rules`, 'this deployment does not evaluate rules.');
+    if (!requirementsServed()) {
+      for (const member of REQUIREMENT_MEMBERS)
+        if (config[member] !== undefined)
+          return unsupportedForm(
+            c,
+            `${at}config.${member}`,
+            'this deployment does not keep the requirements of an approval.'
+          );
+      const ruleWithApprovers = rules.findIndex((rule) => rule.approvers !== undefined);
+      if (ruleWithApprovers >= 0)
+        return unsupportedForm(
+          c,
+          `${at}config.rules[${String(ruleWithApprovers)}].approvers`,
+          'this deployment does not keep the requirements of an approval.',
+          `${at}config.rules`
+        );
+    }
+    const refs = targetRefs(body.targets);
+    const org = principalOf(c).org;
+    const tools = refs.map((ref) =>
+      [...state.tools.values()].find((t) => t.org === org && t.tool_ref === ref)
+    );
+    if (refs.length === 0 || tools.some((t) => t === undefined)) return undefined;
+    const declared = (tools as ToolRow[]).map(factTypesOf);
+    const conditionsAt: [string, unknown][] = [];
+    const approversAt = (path: string, approvers: unknown): void => {
+      if (Array.isArray(approvers))
+        (approvers as Obj[]).forEach((approver, k) =>
+          conditionsAt.push([`${path}[${String(k)}].when`, approver.when])
+        );
+    };
+    rules.forEach((rule, i) => {
+      conditionsAt.push([`${at}config.rules[${String(i)}].when`, rule.when]);
+      approversAt(`${at}config.rules[${String(i)}].approvers`, rule.approvers);
+    });
+    approversAt(`${at}config.approvers`, config.approvers);
+    for (const [path, when] of conditionsAt) {
+      if (!Array.isArray(when)) continue;
+      for (const [j, condition] of (when as Condition[]).entries()) {
+        const why = refusedCondition(condition, declared);
+        if (why !== undefined)
+          return problem(c, 400, 'invalid_request', `${path}[${String(j)}]: ${why}`, {
+            member: `${path}[${String(j)}].fact`,
+          });
+      }
+    }
+    return undefined;
+  };
   /**
    * The checks a policy write passes after the schema: the kind is one the mock implements (else 422), the
    * `config` fits the kind (else 400; the defect skips this), and the form is one the mock enforces (422):
-   * a `duplicate_requests` policy takes the organisation subject only and targets every tool, and
-   * `not_granted`, which is provisional, is implemented by no deployment yet.
+   * a `duplicate_requests` or (rev 16) `approval_routing` policy takes the organisation subject only and targets
+   * every tool, `not_granted`, which is provisional, is implemented by no deployment yet, and rev 16's members are
+   * checked by `ruleMembersRefused`.
    */
   const policyWriteRefused = (c: Ctx, body: Obj, at = ''): Response | undefined => {
     // Rev 14: a deployment-applied reference has a fixed policy; no policy names it as a target. The defect accepts one.
@@ -3071,7 +3342,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       );
     const kind = String(body.kind);
     const schema = CONFIG_OF_KIND[kind];
-    if (schema === undefined)
+    if (schema === undefined || (kind === 'approval_routing' && !requirementsServed()))
       return unsupportedForm(
         c,
         `${at}kind`,
@@ -3086,7 +3357,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         `config does not fit a policy of kind ${kind}: ${describeErrors(fits)}`
       );
     const config = (body.config ?? {}) as Obj;
-    if (kind === 'duplicate_requests') {
+    if (kind === 'duplicate_requests' || kind === 'approval_routing') {
       const stray = (body.subjects as Obj[]).findIndex(
         (subject) => subject.type !== 'organization'
       );
@@ -3094,14 +3365,14 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         return unsupportedForm(
           c,
           `${at}subjects[${String(stray)}].type`,
-          'a duplicate_requests policy takes the organization subject only.',
+          `a ${kind} policy takes the organization subject only.`,
           `${at}subjects`
         );
       if (body.targets !== undefined && (body.targets as Obj).tools !== 'all')
         return unsupportedForm(
           c,
           `${at}targets.tools`,
-          'a duplicate_requests policy targets every tool.',
+          `a ${kind} policy targets every tool.`,
           `${at}targets`
         );
     }
@@ -3131,7 +3402,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         `${at}config.mode`,
         'not_granted is provisional, and this deployment does not implement it.'
       );
-    return undefined;
+    return kind === 'tool_invocation' ? ruleMembersRefused(c, body, config, at) : undefined;
   };
   /** The members of a version a write sets. */
   const writtenVersion = (c: Ctx, body: Obj, version: number, name: string): PolicyVersion => {
@@ -3568,7 +3839,133 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     /** Rev 13: the index of the proposed body this entry comes from (`POST /v1/policies/simulate`). */
     proposed_index?: number;
     contributed?: boolean;
+    /** Rev 16: the rule that gave `result`, when one matched. */
+    rule?: { index: number; then: string };
+    /** Rev 16: the facts the rule that stopped the walk had no value for. */
+    missing_facts?: string[];
   }
+
+  /**
+   * Rev 16: what one `tool_invocation` policy's `config` gives for a call with `facts`: its rule walk where rules are
+   * served, else its mode. The defects: `rules_ignored` answers the mode whatever the rules say;
+   * `missing_fact_falls_to_mode` skips a rule it cannot evaluate, as if it were false, instead of asking.
+   */
+  const evaluatePolicy = (config: Obj, facts: ReadonlyMap<string, unknown>): WalkResult => {
+    const mode = String(config.mode);
+    if (!rulesServed() || broken('rules_ignored')) return { result: mode };
+    const ruleConfig = config as unknown as RuleConfig;
+    const known = facts as ReadonlyMap<string, string | number | boolean | null>;
+    if (!broken('missing_fact_falls_to_mode')) return walkRules(ruleConfig, known);
+    for (const [index, rule] of (ruleConfig.rules ?? []).entries()) {
+      const one = walkRules({ mode, rules: [rule] }, known);
+      if (one.rule !== undefined) return { ...one, rule: { index, then: one.rule.then } };
+    }
+    return { result: mode };
+  };
+  /** Rev 16: a considered entry's `rule` and `missing_facts`, from what its policy gave. */
+  const walkMembers = (walk: WalkResult): Pick<Considered, 'rule' | 'missing_facts'> => ({
+    ...(walk.rule === undefined ? {} : { rule: { ...walk.rule } }),
+    ...(walk.missing_facts === undefined ? {} : { missing_facts: [...walk.missing_facts] }),
+  });
+  /** Rev 16: the members of a `tool_invocation` config that make its policy rule-bearing. */
+  const RULE_BEARING: readonly string[] = ['rules', 'approvers', 'exclude'];
+
+  /**
+   * Rev 16: the requirements of an approval opened by `contributing` (the policies whose result asked, each once):
+   * one per policy, its approver entries in force (those its walk names, see `WalkResult.approvers`, else the
+   * policy's, keeping those whose `when` holds) and its `exclude`. Two with the same entries and `exclude` are one
+   * requirement listing both policies.
+   */
+  const requirementsOf = (
+    contributing: readonly { id: string; version: PolicyVersion; walk: WalkResult }[],
+    facts: ReadonlyMap<string, string | number | boolean | null>
+  ): Requirement[] => {
+    const out: Requirement[] = [];
+    const byKey = new Map<string, Requirement>();
+    for (const entry of contributing) {
+      const config = entry.version.config;
+      const approvers: ApproverRef[] = approversInForce(
+        (entry.walk.approvers ?? config.approvers) as readonly Approver[] | undefined,
+        facts
+      );
+      const exclude = Array.isArray(config.exclude) ? config.exclude.map(String).sort() : [];
+      const key = requirementKey({ approvers, exclude });
+      const ref = { id: entry.id, version: entry.version.version };
+      const same = byKey.get(key);
+      if (same !== undefined) {
+        same.policies.push(ref);
+        continue;
+      }
+      const requirement: Requirement = {
+        id: `r${String(out.length + 1)}`,
+        policies: [ref],
+        approvers,
+        exclude,
+        needed: 1,
+        met: false,
+        approvals: [],
+      };
+      byKey.set(key, requirement);
+      out.push(requirement);
+    }
+    return out;
+  };
+
+  /**
+   * Rev 16: the decision of a call that a published `tool_invocation` policy carrying `rules`, `approvers` or
+   * `exclude` matches (by target and by a subject the caller holds), or undefined when none does and the fixture
+   * decides. Every matching policy is evaluated over the facts of the call (its arguments, read through the tool's
+   * bindings; none for a digest) and the results compose tightest-wins: the first policy of the tightest result
+   * names the decision. A composed ask (`ask`, `escalate`) carries a requirement per policy that asked, where
+   * `approvals.requirements` is served, and the facts that stopped the walk of a policy that asked
+   * (`Decision.missing_facts`), when any did.
+   */
+  const ruledDecision = (
+    c: Ctx,
+    body: Obj,
+    tool: ToolRow
+  ):
+    | {
+        mode: string;
+        policy: { id: string; version: number };
+        requirements?: Requirement[];
+        missing_facts?: string[];
+      }
+    | undefined => {
+    if (!rulesServed()) return undefined;
+    const p = principalOf(c);
+    const action = isObj(body.action) ? body.action : {};
+    const holder = callerHolder(p, isObj(body.actor) ? body.actor : {}, false);
+    const matched: { id: string; version: PolicyVersion }[] = [];
+    for (const row of state.policies.values()) {
+      if (row.org !== p.org) continue;
+      const version = inForce(String(row.id));
+      if (version?.kind !== 'tool_invocation' || !targetsCover(version.targets, tool.tool_ref))
+        continue;
+      if (version.subjects.some((subject) => holder(subject)))
+        matched.push({ id: String(row.id), version });
+    }
+    if (!matched.some((m) => RULE_BEARING.some((member) => m.version.config[member] !== undefined)))
+      return undefined;
+    const facts = readFacts(isObj(action.arguments) ? action.arguments : undefined, tool.facts);
+    const evaluated = matched.map((m) => ({ ...m, walk: evaluatePolicy(m.version.config, facts) }));
+    const tightest = Math.min(...evaluated.map((e) => tightnessOf(e.walk.result)));
+    const contributing = evaluated.filter((e) => tightnessOf(e.walk.result) === tightest);
+    const deciding = contributing[0];
+    if (deciding === undefined) return undefined;
+    const mode = deciding.walk.result;
+    const asks = mode === 'ask' || mode === 'escalate';
+    // A stopped walk asks, so only a composed ask can have contributing walks that missed a fact.
+    const missing = [...new Set(contributing.flatMap((e) => e.walk.missing_facts ?? []))];
+    return {
+      mode,
+      policy: { id: deciding.id, version: deciding.version.version },
+      ...(missing.length > 0 ? { missing_facts: missing } : {}),
+      ...(asks && requirementsServed()
+        ? { requirements: requirementsOf(contributing, facts) }
+        : {}),
+    };
+  };
 
   /**
    * A dry run of the decision for `body`, with `simulated` standing in for the stored version of policy
@@ -3606,20 +4003,24 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       callableToolOf(c, String(action.tool_ref)) ??
       pendingTools.find((t) => t.tool_ref === action.tool_ref);
     const entries: Considered[] = [];
+    // Rev 16: the facts of the call, read through the tool's bindings; a digest supplies none.
+    const facts = readFacts(isObj(action.arguments) ? action.arguments : undefined, tool?.facts);
     if (tool !== undefined) {
       for (const row of state.policies.values()) {
         if (row.org !== p.org) continue;
         const version = row.id === policyId ? simulated : inForce(String(row.id));
         if (version?.kind !== 'tool_invocation' || !targetsCover(version.targets, tool.tool_ref))
           continue;
+        const walk = evaluatePolicy(version.config, facts);
         for (const subject of version.subjects) {
           if (!holder(subject)) continue;
           entries.push({
             kind: 'tool_invocation',
             id: String(row.id),
             version: version.version,
-            result: String(version.config.mode),
+            result: walk.result,
             subject,
+            ...walkMembers(walk),
           });
         }
       }
@@ -3628,6 +4029,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       proposed.forEach((version, proposedIndex) => {
         if (version.kind !== 'tool_invocation' || !targetsCover(version.targets, tool.tool_ref))
           return;
+        const walk = evaluatePolicy(version.config, facts);
         for (const subject of version.subjects) {
           if (!holder(subject)) continue;
           if (broken('simulate_set_replaces_stored')) {
@@ -3639,8 +4041,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
             kind: 'tool_invocation',
             id: null,
             version: null,
-            result: String(version.config.mode),
+            result: walk.result,
             subject,
+            ...walkMembers(walk),
             proposed_index: proposedIndex,
             // The defect marks a proposed entry as a default of the deployment too.
             ...(broken('proposed_entry_has_source') ? { source: 'default' } : {}),
@@ -3654,6 +4057,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     // simulated policy when it contributed, else the first contributing entry it listed.
     const deciding =
       contributing.find((e) => e.id !== null && e.id === policyId) ?? contributing[0];
+    const missingFacts = [...new Set(contributing.flatMap((e) => e.missing_facts ?? []))];
     const contributedMember = (yes: boolean): Obj =>
       broken('considered_contributed_missing') ? {} : { contributed: yes };
     const listed: Considered[] = entries.map((entry) => ({
@@ -3783,6 +4187,10 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       enforced: false,
       would_be: outcome.decision,
       ...(rejectedApprovalId === undefined ? {} : { rejected_approval_id: rejectedApprovalId }),
+      // Rev 16: as `Decision.missing_facts`, from the contributing entries whose walk a missing fact stopped.
+      ...(outcome.decision === 'step_up' && missingFacts.length > 0
+        ? { missing_facts: missingFacts }
+        : {}),
       ...(broken('simulate_considered_missing')
         ? {}
         : {
@@ -4705,9 +5113,31 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     // No explicit policy matches a tool registered through the API: the default applies to it.
     default_policy: true,
     show_arguments_to_approvers: b.show_arguments_to_approvers === true,
+    // Rev 16: the facts it declares.
+    ...(isObj(b.facts) ? { facts: b.facts as unknown as FactBindings } : {}),
   });
+  /**
+   * Rev 16: 400 `invalid_request` naming the binding in `member` for a fact binding whose path is outside the
+   * deterministic subset (`[*]`, `..key`), read before the schema so the refusal names the fact. A binding the schema
+   * refuses for another reason, or under a name that is no fact name, is left to the schema.
+   */
+  const factPathRefused = (c: Ctx, body: Obj): Response | undefined => {
+    if (!isObj(body.facts)) return undefined;
+    for (const [name, binding] of Object.entries(body.facts)) {
+      if (!/^[a-z][a-z0-9_]{0,62}$/.test(name) || !isObj(binding)) continue;
+      if (typeof binding.path === 'string' && pathSegments(binding.path) === undefined)
+        return problem(
+          c,
+          400,
+          'invalid_request',
+          `facts.${name}.path: ${binding.path} is not a path of members and indexes; a wildcard or a recursive descent selects a set, not one value.`,
+          { member: `facts.${name}.path` }
+        );
+    }
+    return undefined;
+  };
   app.post('/v1/tools', async (c) => {
-    const parsed = await validatedBody(c);
+    const parsed = await validatedBody(c, (body) => factPathRefused(c, body));
     if ('response' in parsed) return parsed.response;
     const refusedRegistration = registrationRefused(c);
     if (refusedRegistration !== undefined) return refusedRegistration;
@@ -4794,7 +5224,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     return row === undefined ? problem(c, 404, 'not_found') : ok(c, toolView(row));
   });
   app.patch('/v1/tools/:id', async (c) => {
-    const parsed = await validatedBody(c);
+    const parsed = await validatedBody(c, (body) => factPathRefused(c, body));
     if ('response' in parsed) return parsed.response;
     const refusedChange = registrationRefused(c);
     if (refusedChange !== undefined) return refusedChange;
@@ -4812,6 +5242,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         `${row.tool_ref} is registered at ${row.side_effect_level}; a level never falls.`
       );
     Object.assign(row, parsed.body);
+    // Rev 16: `facts` replaces the whole map, and `null` removes every fact.
+    if (parsed.body.facts === null) delete row.facts;
     // Turning the setting off clears what is held; turning it on later restores nothing.
     if (
       parsed.body.show_arguments_to_approvers === false &&
@@ -5070,6 +5502,11 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       ...(advertised.has('approvals') ? [AVAILABLE_ACTIONS_FEATURE] : []),
       // Rev 11: its simulation composes tightest-wins wherever it serves policies, on either deployment.
       ...(advertised.has('policies') ? [TIGHTEST_WINS_FEATURE] : []),
+      // Rev 16: it reads facts wherever it registers tools (the floor), evaluates rules where it authors policies,
+      // and keeps requirements where it does both that and approvals.
+      TOOLS_FACTS_FEATURE,
+      ...(rulesServed() ? [POLICY_RULES_FEATURE] : []),
+      ...(requirementsServed() ? [APPROVAL_REQUIREMENTS_FEATURE] : []),
     ];
     return ok(c, {
       deployment: config.deployment,
@@ -5117,14 +5554,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         ? { connection_transports: [...(options.connectionTransports ?? ['mcp', 'a2a'])] }
         : {}),
       // Rev 11: the forms it enforces, where it authors policies (hosted).
-      ...(hostedFeatures && advertised.has('policies')
-        ? {
-            policy_forms:
-              options.restrictPolicyTargets === true
-                ? { tool_invocation: { ...POLICY_FORMS.tool_invocation, targets_all: false } }
-                : POLICY_FORMS,
-          }
-        : {}),
+      ...(hostedFeatures && advertised.has('policies') ? { policy_forms: policyForms() } : {}),
       // Rev 14: the references it applies on approval, where it authors and publishes policies of its own.
       ...(deploymentApplies()
         ? {

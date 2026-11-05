@@ -2,6 +2,7 @@
 import type { Break } from './breaks.js';
 import type { Principal } from './auth.js';
 import type { Proposal } from './proposal.js';
+import type { ApproverRef, FactBindings } from './rules.js';
 
 /** A JSON object whose members are checked where they are read. */
 export type Obj = Record<string, unknown>;
@@ -22,6 +23,20 @@ export interface HistoryEntry {
   by: { id: string; kind: string };
   at: string;
   reason?: string;
+}
+
+/**
+ * Rev 16: one requirement of an approval (`ApprovalRequirement`), as the mock keeps it: the approvals that count
+ * toward it name their approver by id and kind, and are named when they are read.
+ */
+export interface Requirement {
+  id: string;
+  policies: { id: string; version: number }[];
+  approvers: ApproverRef[];
+  exclude: string[];
+  needed: number;
+  met: boolean;
+  approvals: { by: { id: string; kind: string }; at: string; basis: 'listed' | 'break_glass' }[];
 }
 
 /** An obligation: what a step-up decision or `POST /v1/approvals` opens. */
@@ -82,6 +97,11 @@ export interface Obligation {
    * withdrawal that arrives meanwhile is answered 409 `already_resolved` instead of passing the `pending` check.
    */
   applying: boolean;
+  /**
+   * Rev 16: the requirements of an approval a decision of rule-bearing policies opened (see `decide` in `app.ts`);
+   * undefined on every other approval, which has one requirement, satisfied as before rev 16.
+   */
+  requirements?: Requirement[];
 }
 
 /** A resolver's rejection of an identity (rev 10): the rejected approval and when it was resolved. */
@@ -131,6 +151,8 @@ export interface ToolRow {
   policy_id?: string;
   /** Whether approvers of this tool see the call's arguments (`show_arguments_to_approvers`). */
   show_arguments_to_approvers: boolean;
+  /** Rev 16: the facts a call carries, read from its arguments (`Tool.facts`). */
+  facts?: FactBindings;
   /**
    * Mock-only: the deployment already dispatches a tool under this reference through another identity, so
    * `POST /v1/tools` for it is 422 `tool_ref_in_use`.

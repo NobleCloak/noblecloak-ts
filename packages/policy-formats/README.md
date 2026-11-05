@@ -82,8 +82,10 @@ AGT, `tools`) are what `exportCedar`/`exportAgt` need to write the same file aga
 
 A statement this package wrote imports exactly: its `@noblecloak_*` annotations carry what Cedar cannot.
 **The body is authoritative**: when the effect, principal or tools disagree with the annotations, the
-statement is a `conflict` and nothing of its policy is imported. The one sanctioned difference is
-`@noblecloak_encoding("fail_closed")`, which marks an `ask` or `escalate` policy written as a `forbid`.
+statement is a `conflict` and nothing of its policy is imported. Two differences are sanctioned, both in
+the one `@noblecloak_encoding` annotation: `fail_closed` marks an `ask` or `escalate` policy written as a
+`forbid`, and `rules_tightest` marks a policy with `@noblecloak_rules` (see below), whose statement is the
+tightest outcome of its mode and rules. The import recomputes that outcome and requires the body to equal it.
 A statement written elsewhere imports by its body: `permit` → `always_allow`, `forbid` → `deny`, a `permit`
 with `@advice` escalate → `ask`.
 
@@ -101,7 +103,8 @@ or `cedar_unavailable` (the peer could not be loaded; pass `opts.cedar`, for exa
 - **Model round trip:** for every policy a format supports, importing its export gives a policy whose
   `canonicalPolicy` equals the original's. `canonicalPolicy` is RFC 8785 JSON of the `PolicyWrite`
   members, with `targets` explicit, `subjects` sorted by type then id, `targets.tools` sorted with
-  duplicates kept, and `approver_groups` in its own order.
+  duplicates kept, and `approver_groups`, `rules`, `approvers` and `exclude` in their own order (the order of
+  `rules` is significant).
 - **File round trip:** for a file this package wrote, exporting what was imported (with the returned
   `options`, and `tools` for AGT) writes the same bytes, when the export reported nothing about policies
   the file does not hold: a `Not exported` line, unenforced targets or a member the export did not read
@@ -118,24 +121,43 @@ and tools as sets), for showing what an import would change.
 
 Each exported statement carries `@noblecloak_policy` (the policy id), `@noblecloak_kind`,
 `@noblecloak_mode` and, when present, `@noblecloak_name`, `@noblecloak_description`,
-`@noblecloak_on_deny`, `@noblecloak_expires_after` and `@noblecloak_approver_groups`, then `@id` set to
-`noblecloak.<mode>:<policy id>`. On AGT main that `@id` is the deny reason, and an `@advice` escalate
+`@noblecloak_on_deny`, `@noblecloak_expires_after`, `@noblecloak_approver_groups` and, from contract rev 16,
+`@noblecloak_approvers`, `@noblecloak_exclude` and `@noblecloak_rules` (each the canonical JSON of the member),
+then `@id` set to `noblecloak.<outcome>:<policy id>`, where the outcome is the mode, or for a policy with rules
+the tightest outcome. On AGT main that `@id` is the deny reason, and an `@advice` escalate
 carries the same string as its `reason`, the one per-policy string that reaches an AGT approval resolver.
+
+### Rules, approvers and exclude (contract rev 16)
+
+Neither dialect's schema declares a request context, and a per-tool fact map cannot be typed by a static schema,
+so a rule is never a Cedar condition. A policy with `rules` is written as one statement whose outcome is the
+tightest the policy can reach for any call: the strictly tightest of `mode`, every rule's `then`, and `ask` when
+any rule has a condition whose op is not `exists` (a fact with no value stops the walk with `ask`; `exists` is
+never unevaluable). Ranking is as policies compose: `deny` and `not_granted` over `ask` and `escalate` over
+`always_allow`; among equally tight outcomes the earliest wins, the mode first. A policy whose mode is `always_allow` and whose rules test a fact other than by `exists` therefore exports as `ask` (fail closed), by design; rules never loosen the export, which is at least as tight as the mode. The statement is marked `@noblecloak_encoding("rules_tightest")`
+(which takes the place of `fail_closed` when the outcome is `ask` or `escalate`), keeps `config.mode` in
+`@noblecloak_mode`, and carries `rules`, `approvers` and `exclude` verbatim, rule order included, so an import
+restores the exact policy. Each such member is reported `lossy`, with the member path: another Cedar or AGT
+evaluator applies only the statement's outcome, not the per-call rules, and, when a rule tests a fact other
+than by `exists`, NobleCloak asks where a fact has no value (the report says so only then). Fact bindings (`Tool.facts`) are not exported: the export carries no tool metadata. `approval_routing`
+is unsupported: it is an organisation setting for who may satisfy approvals, not a policy on a call.
 
 ### Cedar (NobleCloak dialect)
 
-| NobleCloak                                    | Cedar                                                                                         | Class                                                       |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `user`, `agent`, `service` subject            | `principal == NobleCloak::User::"<id>"` (`Agent`, `Service`)                                  | exact                                                       |
-| `role`, `group` subject                       | `principal in NobleCloak::Role::"<key>"` (`Group`)                                            | exact (the evaluator needs membership entities)             |
-| `organization` subject                        | unconstrained `principal`                                                                     | exact                                                       |
-| one tool / several / all                      | `resource == NobleCloak::Tool::"<ref>"` / `when { [...].contains(resource) }` / unconstrained | exact                                                       |
-| `always_allow`, `deny`                        | `permit`, `forbid`                                                                            | exact                                                       |
-| `ask`, `escalate`                             | `forbid` + `@noblecloak_encoding("fail_closed")`                                              | lossy: a Cedar engine has no approval outcome, so it denies |
-| `not_granted`                                 | `forbid`                                                                                      | lossy: denied without the reason `not_granted`              |
-| `on_deny`, `expires_after`, `approver_groups` | annotations                                                                                   | lossy: not enforced                                         |
-| `name`, `description`                         | annotations                                                                                   | exact                                                       |
-| `duplicate_requests`, `spending`              | none                                                                                          | unsupported                                                 |
+| NobleCloak                                           | Cedar                                                                                         | Class                                                       |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `user`, `agent`, `service` subject                   | `principal == NobleCloak::User::"<id>"` (`Agent`, `Service`)                                  | exact                                                       |
+| `role`, `group` subject                              | `principal in NobleCloak::Role::"<key>"` (`Group`)                                            | exact (the evaluator needs membership entities)             |
+| `organization` subject                               | unconstrained `principal`                                                                     | exact                                                       |
+| one tool / several / all                             | `resource == NobleCloak::Tool::"<ref>"` / `when { [...].contains(resource) }` / unconstrained | exact                                                       |
+| `always_allow`, `deny`                               | `permit`, `forbid`                                                                            | exact                                                       |
+| `ask`, `escalate`                                    | `forbid` + `@noblecloak_encoding("fail_closed")`                                              | lossy: a Cedar engine has no approval outcome, so it denies |
+| `not_granted`                                        | `forbid`                                                                                      | lossy: denied without the reason `not_granted`              |
+| `on_deny`, `expires_after`, `approver_groups`        | annotations                                                                                   | lossy: not enforced                                         |
+| `name`, `description`                                | annotations                                                                                   | exact                                                       |
+| `rules` (with `approvers`, `exclude`)                | tightest outcome as the body + `@noblecloak_rules`, `@noblecloak_encoding("rules_tightest")`  | lossy: the per-call rules are not evaluated                 |
+| `approvers`, `exclude` without `rules`               | annotations                                                                                   | lossy: not enforced                                         |
+| `approval_routing`, `duplicate_requests`, `spending` | none                                                                                          | unsupported                                                 |
 
 ### AGT
 
@@ -150,7 +172,9 @@ carries the same string as its `reason`, the one per-policy string that reaches 
 | `ask`, `escalate` otherwise (AGT 5.0's bundled dispatcher) | `forbid` + `@noblecloak_encoding("fail_closed")`                                                                      | lossy: denied                                                              |
 | `not_granted`                                              | `forbid`                                                                                                              | lossy: the reason                                                          |
 | `on_deny`, `expires_after`, `approver_groups`              | annotations                                                                                                           | lossy: not enforced                                                        |
-| `duplicate_requests`, `spending`                           | none                                                                                                                  | unsupported                                                                |
+| `rules` (with `approvers`, `exclude`)                      | tightest outcome as the body (`permit` + `@advice` or `forbid`) + `@noblecloak_rules`, `rules_tightest`               | lossy: the per-call rules are not evaluated                                |
+| `approvers`, `exclude` without `rules`                     | annotations                                                                                                           | lossy: not enforced                                                        |
+| `approval_routing`, `duplicate_requests`, `spending`       | none                                                                                                                  | unsupported                                                                |
 
 On import, AGT `rego`, `custom` and `test` policies, intervention points other than `pre_tool_call`,
 `extends`, `annotators`, `policy_path`, conditions on `context`, and `@advice` `warn` or `transform` are

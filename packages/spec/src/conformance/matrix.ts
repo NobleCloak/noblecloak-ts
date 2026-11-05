@@ -1266,6 +1266,36 @@ export const MATRIX: readonly Flip[] = [
     deployment: 'hosted',
     fails: ['available-actions-hidden-from-others'],
   },
+  {
+    // Rev 16: a decision ignores the rules and answers the policy's mode.
+    flip: 'rules_ignored',
+    deployment: 'hosted',
+    fails: ['rev16-rules-decide-by-the-facts-of-the-call'],
+  },
+  {
+    // Rev 16: a rule that cannot be evaluated is skipped, as if false, instead of making the policy ask.
+    flip: 'missing_fact_falls_to_mode',
+    deployment: 'hosted',
+    fails: ['rev16-rules-decide-by-the-facts-of-the-call'],
+  },
+  {
+    // Rev 16: the first approve approves the whole approval, with a requirement still unmet.
+    flip: 'partial_approve_resolves',
+    deployment: 'hosted',
+    fails: ['rev16-requirements-met-one-by-one'],
+  },
+  {
+    // Rev 16: `exclude: [requester]` is ignored, so the requester meets the requirement from the approver surface.
+    flip: 'exclude_requester_ignored',
+    deployment: 'hosted',
+    fails: ['rev16-exclude-requester-refuses-the-requester'],
+  },
+  {
+    // Rev 16: an administrator meets every requirement by break-glass with the organisation's setting off.
+    flip: 'break_glass_ignores_setting',
+    deployment: 'hosted',
+    fails: ['rev16-break-glass-follows-the-organisation-setting'],
+  },
 ];
 
 export interface FlipResult {
