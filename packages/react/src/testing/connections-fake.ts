@@ -143,6 +143,22 @@ export function fakeConnectionsController(
           emptyUpstreamSuppressed: false,
         },
       }),
+    updateToolFacts: (toolId, facts) => {
+      const found = Object.values(FAKE_TOOLS)
+        .flat()
+        .find((held) => held.id === toolId);
+      if (found === undefined) throw new Error('no fixture tool');
+      const tool = connectionToolOf({
+        id: found.id,
+        tool_ref: found.toolRef,
+        connection_id: found.connectionId,
+        transport: found.transport,
+        side_effect_level: found.sideEffectLevel,
+        ...(facts === null ? {} : { facts }),
+      });
+      if (tool === undefined) throw new Error('fixture tool does not parse');
+      return Promise.resolve({ ok: true as const, tool });
+    },
     rotateOrgCredential: (id) => unchanged(id),
     link: (id) => unchanged(id),
     unlink: ok,

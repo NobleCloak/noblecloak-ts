@@ -4,6 +4,7 @@
  * as an error, never as an empty list. An open value the module does not know is kept as sent. No reader keeps a
  * member the contract does not name, so a credential a service sent by mistake is never held or shown.
  */
+import { toolFactsOf } from './connections-facts.js';
 import { pageOf } from './permissions-parse.js';
 import type {
   ConnectionInfo,
@@ -77,6 +78,7 @@ export function connectionToolOf(value: unknown): ConnectionToolInfo | undefined
   const connection = value.connection_id;
   if (connection !== undefined && connection !== null && typeof connection !== 'string')
     return undefined;
+  const facts = toolFactsOf(value.facts);
   return {
     id: value.id,
     toolRef: value.tool_ref,
@@ -92,7 +94,17 @@ export function connectionToolOf(value: unknown): ConnectionToolInfo | undefined
         : isText(value.status)
           ? value.status
           : JSON.stringify(value.status),
+    ...(facts === undefined
+      ? {}
+      : facts === 'unreadable'
+        ? { factsUnreadable: true as const }
+        : { facts }),
   };
+}
+
+/** A `{ data: Tool }` envelope as one tool. */
+export function toolEnvelopeOf(value: unknown): ConnectionToolInfo | undefined {
+  return connectionToolOf(dataOf(value));
 }
 
 /** A `{ data: ConnectionRefreshResult }` envelope. */
@@ -157,6 +169,7 @@ export function connectionsCapabilitiesOf(value: unknown): ConnectionsCapability
         }
       : {}),
     transports: Array.isArray(transports) ? transports.filter(isText) : [...TRANSPORTS],
+    ...(features.has('tools.facts') ? { toolFacts: true as const } : {}),
   };
 }
 

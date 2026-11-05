@@ -80,6 +80,8 @@ describe('on the default service', () => {
       oauth: true,
       userLinks: true,
       transports: ['mcp', 'a2a'],
+      // The mock advertises rev 16's `tools.facts` on every deployment.
+      toolFacts: true,
     });
     expect(s.administration).toEqual({ readOnly: false });
   });

@@ -9,6 +9,8 @@
  * request and is not kept.
  */
 
+import type { ToolFacts } from './connections-facts.js';
+
 /** Who owns a registration: the organisation, or one principal (by id; never a name). */
 export interface ConnectionOwner {
   /** `org` or `principal`; another value is kept as sent. */
@@ -62,6 +64,10 @@ export interface ConnectionToolInfo {
   readonly sideEffectLevel: string;
   /** `active` or `withdrawn`; absent on the wire means `active`; another value is kept (a tool that cannot be called). */
   readonly status: string;
+  /** Rev 16: the facts the tool declares, by name. Absent: the tool declares none, or the service did not send any. */
+  readonly facts?: ToolFacts;
+  /** True when the tool carries a `facts` member this module cannot read; it is then never edited, since a write would replace it. */
+  readonly factsUnreadable?: true;
 }
 
 /** The members of `GET /v1/capabilities` this module reads. Never the deployment: only what is advertised. */
@@ -79,6 +85,8 @@ export interface ConnectionsCapabilityFacts {
   readonly registration?: { readonly ownerKinds: readonly string[]; readonly who: string };
   /** `connection_transports`: the transports served (absent on the wire means both). */
   readonly transports: readonly string[];
+  /** `tools.facts` (rev 16): the service accepts fact bindings on a tool. Absent: it does not say so. */
+  readonly toolFacts?: true;
 }
 
 /** The codes of a refusal the store gives without a request. */
@@ -103,7 +111,9 @@ export type ConnectionsPreconditionCode =
   /** A change to the same registration is already being sent. */
   | 'write_in_flight'
   /** There is no page to return to or no way to leave it (no browser and no `onNavigate`). */
-  | 'cannot_navigate';
+  | 'cannot_navigate'
+  /** The service does not advertise `tools.facts`, or the tool's facts could not be read, so they are not replaced. */
+  | 'facts_not_offered';
 
 /**
  * What went wrong, derived from the status and the problem code and never from prose. API problems are returned, never
@@ -120,6 +130,8 @@ export type ConnectionsError = {
   readonly type?: string;
   /** The problem's `detail`, verbatim: for a 400 it names the member that was refused. */
   readonly detail?: string;
+  /** The problem's `member` (rev 13), verbatim: a path into the request body, for example `facts.amount.path`. */
+  readonly member?: string;
   /** The wait the server asked for, in milliseconds. */
   readonly retryAfterMs?: number;
   /** The problem's `reason` token, kept only on a 503. */
@@ -263,6 +275,11 @@ export type ConnectionWriteResult =
 export type ConnectionActionResult =
   { readonly ok: true } | { readonly ok: false; readonly error: ConnectionsError };
 
+/** The outcome of replacing a tool's facts: the tool as the service now holds it. */
+export type ToolFactsWriteResult =
+  | { readonly ok: true; readonly tool: ConnectionToolInfo }
+  | { readonly ok: false; readonly error: ConnectionsError };
+
 /** What a refresh registered. */
 export interface ConnectionRefreshCounts {
   readonly toolCount: number;
@@ -345,6 +362,13 @@ export interface ConnectionsStore {
   remove(id: string): Promise<ConnectionActionResult>;
   /** Registers what the server offers now (tools no longer offered become withdrawn). */
   refresh(id: string): Promise<ConnectionRefreshResult>;
+  /**
+   * Replaces the whole map of facts of a registered tool (`PATCH /v1/tools/{id}` with `{ facts }` alone); `null`
+   * removes every fact. Refused without a request unless the service advertises `tools.facts`, the tool is in a list
+   * the store holds and its facts were read, and the caller may change its registration. A refused fact comes back
+   * as a `ConnectionsError` with its `member`.
+   */
+  updateToolFacts(toolId: string, facts: ToolFacts | null): Promise<ToolFactsWriteResult>;
   /** Rotates the organisation credential of an `org_shared` bearer registration. */
   rotateOrgCredential(id: string, token: string): Promise<ConnectionWriteResult>;
   /** Links the caller's own credential, with consent. */
@@ -374,6 +398,7 @@ export interface ConnectionsController extends ConnectionsSnapshot {
   rename: ConnectionsStore['rename'];
   remove: ConnectionsStore['remove'];
   refresh: ConnectionsStore['refresh'];
+  updateToolFacts: ConnectionsStore['updateToolFacts'];
   rotateOrgCredential: ConnectionsStore['rotateOrgCredential'];
   link: ConnectionsStore['link'];
   unlink: ConnectionsStore['unlink'];

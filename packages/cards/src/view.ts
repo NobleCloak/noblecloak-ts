@@ -67,6 +67,35 @@ export function factRows(card: ApprovalCard): FactRow[] {
   return rows;
 }
 
+/**
+ * The requirements of the approval on one line, "1 of 2 met — finance: met by Dana (u-dana); legal: pending",
+ * or `undefined` when the card has only the synthetic requirement (the read carried no `requirements`). A
+ * requirement is labelled by its approver entries, or "Administrators" when it has none. A requirement that is
+ * not met reads "pending" while the approval is pending and "not met" once it is not.
+ */
+export function requirementsLine(card: ApprovalCard): string | undefined {
+  const { requirements } = card.status;
+  if (!requirements.some((requirement) => requirement.approvers !== undefined)) return undefined;
+  const pending = !(card.facts.call.kind === 'link' && card.facts.call.why === 'final');
+  const parts = requirements.map((requirement) => {
+    const label =
+      requirement.approvers === undefined || requirement.approvers.length === 0
+        ? CARD_TEXT.requirementAdmins
+        : requirement.approvers.join(', ');
+    if (requirement.state === 'approved') {
+      const by = requirement.decidedBy?.text;
+      return by === undefined ? label : fill(CARD_TEXT.requirementMetBy, { label, by });
+    }
+    return fill(pending ? CARD_TEXT.requirementPending : CARD_TEXT.requirementNotMet, { label });
+  });
+  const met = requirements.filter((requirement) => requirement.state === 'approved').length;
+  const head = fill(CARD_TEXT.requirementsMet, {
+    met: String(met),
+    total: String(requirements.length),
+  });
+  return head + CARD_TEXT.requirementsSeparator + parts.join(CARD_TEXT.requirementsJoin);
+}
+
 /** The latest history entries, oldest first, one line each. */
 export function historyLines(card: ApprovalCard, entries: number): string[] {
   return card.details.history.slice(-entries).map((entry) => {

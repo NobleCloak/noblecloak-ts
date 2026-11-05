@@ -31,6 +31,7 @@ import {
   pageOf,
   refreshCountsOf,
   returnOf,
+  toolEnvelopeOf,
   withState,
   withoutReturn,
 } from './connections-parse.js';
@@ -48,9 +49,16 @@ import type {
   ConnectionsError,
   ConnectionsSnapshot,
   ConnectionsStore,
+  ToolFactsWriteResult,
   UseConnectionsOptions,
 } from './connections-types.js';
 import { reportFault as reportUnhandled } from './fault.js';
+
+/** The prefix of the `pending` key of a change to a tool, so it never equals a registration's id. */
+const TOOL_KEY = 'tool:';
+
+/** The `pending` key of a change to the facts of the tool `toolId`. */
+export const toolPendingKey = (toolId: string): string => `${TOOL_KEY}${toolId}`;
 
 /** Rows per page: the most the contract's `limit` allows. */
 export const PAGE_LIMIT = 200;
@@ -154,6 +162,10 @@ const SERVER_SNAPSHOT: ConnectionsSnapshot = Object.freeze({
 
 interface DetailInternal extends ConnectionDetailStore {
   dispose(): void;
+  /** The registered tool with this id, when this registration's list holds it. */
+  toolOf(toolId: string): ConnectionToolInfo | undefined;
+  /** Puts `tool` in place of the registered tool with its id. */
+  replaceTool(tool: ConnectionToolInfo): void;
 }
 
 /** The browser's window, when there is one (never during a server render). */
@@ -208,7 +220,7 @@ export function createConnectionsStore(options: UseConnectionsOptions): Connecti
   const life = new AbortController();
   let expiredFired = false;
   let forbidden = false;
-  /** Changes in flight by registration id (`new` for a create). */
+  /** Changes in flight by registration id (`new` for a create), or `tool:` and a tool id (a change to its facts). */
   const pending = new Set<string>();
   const details = new Map<string, DetailInternal>();
 
@@ -667,6 +679,44 @@ export function createConnectionsStore(options: UseConnectionsOptions): Connecti
       return { ok: true, counts: result.value };
     },
 
+    async updateToolFacts(toolId, facts) {
+      if (data.facts?.toolFacts !== true)
+        return { ok: false, error: precondition('facts_not_offered') };
+      let holder: DetailInternal | undefined;
+      let tool: ConnectionToolInfo | undefined;
+      for (const candidate of details.values()) {
+        tool = candidate.toolOf(toolId);
+        if (tool !== undefined) {
+          holder = candidate;
+          break;
+        }
+      }
+      if (tool === undefined || holder === undefined)
+        return { ok: false, error: precondition('not_loaded') };
+      // A `facts` member this module could not read is never replaced: the write would drop what it could not show.
+      if (tool.factsUnreadable === true)
+        return { ok: false, error: precondition('facts_not_offered') };
+      const connection = tool.connectionId === null ? undefined : find(tool.connectionId);
+      const refused = administrativeRefusal(connection);
+      if (refused !== undefined) return { ok: false, error: refused };
+      const result = await change(
+        toolPendingKey(toolId),
+        connection !== undefined && ownedByOrganisation(connection),
+        (signal) => (c) =>
+          c.PATCH('/v1/tools/{id}', {
+            params: { path: { id: toolId } },
+            body: { facts },
+            parseAs: 'text',
+            signal,
+          }),
+        toolEnvelopeOf,
+        'a tool'
+      );
+      if (!result.ok) return { ok: false, error: errorOf(result) };
+      holder.replaceTool(result.value);
+      return { ok: true, tool: result.value } satisfies ToolFactsWriteResult;
+    },
+
     async link(id, input: ConnectionLinkInput) {
       const connection = find(id);
       if (connection === undefined) return { ok: false, error: precondition('not_loaded') };
@@ -911,6 +961,10 @@ export function createConnectionsStore(options: UseConnectionsOptions): Connecti
       discover: () => (disposed ? Promise.resolve() : discover()),
       dispose() {
         own.clear();
+      },
+      toolOf: (toolId) => state.tools.find((tool) => tool.id === toolId),
+      replaceTool(tool) {
+        set({ ...state, tools: state.tools.map((held) => (held.id === tool.id ? tool : held)) });
       },
     };
   }

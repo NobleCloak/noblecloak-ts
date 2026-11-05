@@ -84,6 +84,10 @@ export function useConnections(options: UseConnectionsOptions): ConnectionsContr
       rename: (id: string, name: string) => store.rename(id, name),
       remove: (id: string) => store.remove(id),
       refresh: (id: string) => store.refresh(id),
+      updateToolFacts: (
+        toolId: string,
+        facts: Parameters<ConnectionsStore['updateToolFacts']>[1]
+      ) => store.updateToolFacts(toolId, facts),
       rotateOrgCredential: (id: string, token: string) => store.rotateOrgCredential(id, token),
       link: (id: string, input: Parameters<ConnectionsStore['link']>[1]) => store.link(id, input),
       unlink: (id: string) => store.unlink(id),

@@ -42,15 +42,17 @@ export function connectionsErrorFromResponse(
   const mapped = fromApprovals(errorFromResponse(status, body, retryAfter, now));
   const problem = isRecord(body) ? body : undefined;
   const detail = typeof problem?.detail === 'string' ? { detail: problem.detail } : {};
+  const member = typeof problem?.member === 'string' ? { member: problem.member } : {};
   if (mapped.kind === 'conflict' && mapped.code === 'connection_exists') {
     const existing = problem?.connection_id;
     return {
       ...mapped,
       ...detail,
+      ...member,
       ...(typeof existing === 'string' && existing !== '' ? { connectionId: existing } : {}),
     };
   }
-  return { ...mapped, ...detail };
+  return { ...mapped, ...detail, ...member };
 }
 
 /** The request layer's error mapping for the connections store. */
@@ -71,6 +73,7 @@ const PRECONDITION_TITLES: Readonly<Record<ConnectionsPreconditionCode, string>>
   not_loaded: 'The registration is not loaded.',
   write_in_flight: 'A change to this registration is already being sent.',
   cannot_navigate: 'There is no page to leave for the authorization and come back to.',
+  facts_not_offered: 'Fact bindings are not offered here.',
 };
 
 /** A refusal the store gives without a request. The title is for a log; a component shows its own words. */

@@ -33,9 +33,28 @@ export type {
   ConnectionsSnapshot,
   ConnectionsStatus,
   ConnectionsStore,
+  ToolFactsWriteResult,
   UseConnectionsOptions,
 } from './connections-types.js';
 
+export {
+  FACT_TYPES,
+  MAX_FACTS,
+  MAX_FACT_DESCRIPTION,
+  checkFactRows,
+  factRowOfMember,
+  factRowsOf,
+} from './connections-facts.js';
+export type {
+  FactField,
+  FactProblem,
+  FactRow,
+  FactRowError,
+  FactType,
+  FactsCheck,
+  ToolFactBinding,
+  ToolFacts,
+} from './connections-facts.js';
 export { createConnectionsStore } from './connections-store.js';
 export { useConnections } from './use-connections.js';
 export { useConnection } from './use-connection.js';

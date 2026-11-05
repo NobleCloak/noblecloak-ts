@@ -125,6 +125,9 @@ function editorStore(snapshot: PolicyEditorSnapshot): PolicyEditorStore {
     edit: () => undefined,
     setMode: () => undefined,
     setCondition: () => undefined,
+    setRules: () => undefined,
+    setApprovers: () => undefined,
+    setExclude: () => undefined,
     save: () => failed,
     publish: () => failed,
   };
@@ -251,6 +254,11 @@ export function fakePoliciesController(options: FakePoliciesOptions = {}): Polic
     ...base,
     ...(matrix === undefined ? {} : { matrix }),
     refresh: () => Promise.resolve(),
+    setApprovalRouting: () =>
+      Promise.resolve({
+        ok: false,
+        error: { kind: 'precondition', code: 'read_only', title: 'fixture', local: true },
+      }),
     setCell: () =>
       Promise.resolve({
         kind: 'error',

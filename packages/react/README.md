@@ -149,6 +149,11 @@ To read the request yourself (for example to act on its status), pass the hook's
 - Once read, `request.approval` carries the tool (`tool_ref`), `action_digest`, the requester, the agent and its
   parent, the run, the policy id and version, `continuation_kind`, `created_at`, `expires_at`, `waiting_on` and
   `resolution_history`. A field the service does not send is absent, and the component leaves it out.
+- On a service that lists `approvals.requirements`, `request.approval.requirements` says what must be met before the
+  request is approved. The detail lists each requirement ("1 of 2 met"): who may satisfy it (a role by its key, a user
+  by id, or the organisation's administrators when none is named), whether it is met, and who met it, an
+  administrator's override marked as such. Without the member, or with one the module cannot read, the detail shows no
+  requirements block. `requirementsOf(approval)` is the same reading without React.
 - `request.arguments` is present only when the service sends the call to this person
   (`approval.arguments_state`); otherwise the component shows the digest and says the call is not shown.
 - `<ApprovalRequest />` takes either `id` with the `useApprovalRequest` options, or `request` (a hook result), plus `className`, `labels` and `onSignIn`, as `<Approvals />` does. It is
@@ -499,6 +504,25 @@ export function PolicyTable({ getToken }: { getToken: () => Promise<string> }) {
   React. `useEffectivePolicies(policies)` binds the effective view. The components are `Permissions`,
   `PolicyEditor`, `PolicySimulation`, `EffectiveAccess`, `PolicyRoundTrip` and `ModeLegend`; every word is in their `labels`, and every
   control renders through the slots.
+- **Rules, approvers and exclusion** (revision 16). Where `policy_forms.tool_invocation.config_members` lists them, the
+  editor offers `rules` (ordered; each rule is "when" conditions over the facts the policy's target tools declare, an
+  outcome, and for an asking rule its own approvers; each reads as a sentence such as "If amount is greater than 5000,
+  deny"), `approvers` (a role by key or a user by id, each optionally only when conditions hold) and `exclude`
+  (the requester cannot approve their own call), and, once the policy has rules, labels the mode "When no rule matches". The editor warns, and does
+  not block, when no outcome can ask the approvers, or when a condition names a fact no target tool declares (or a
+  test that does not fit its type) and the policy targets `all` or a tool that is not registered yet, where the
+  contract accepts it. What the contract refuses (a condition with no value, a list over its limit, approvers on a
+  rule that does not ask, and, when every target is a registered tool, a fact a target does not declare or an order
+  test on a fact that is not a number or count) is marked once a save is refused, and nothing is sent until it is
+  fixed. A rules member the editor cannot read is left exactly
+  as it is. `usePolicyEditor` returns `setRules`, `setApprovers` and `setExclude`; `checkRules` and the other helpers
+  of `permissions-rules` are the same reading without React.
+- **Approval routing.** Where `policy_forms` lists `approval_routing`, `Permissions` shows the organisation's break-glass
+  setting (on unless a published `approval_routing` policy says otherwise). Changing it writes the next draft of
+  the published `approval_routing` policy in force and publishes it (or creates and publishes one when none is
+  published): `setApprovalRouting(breakGlass)`.
+- **The dry run** shows, for each considered policy, the rule that decided it or the facts the call did not carry, and
+  the facts missing from the call overall.
 - A cell shows the published policy that governs the pair (mode, name, version, author), or "No policy" and that the
   deployment's default applies. What the five modes mean on the wire is in
   [The ladder](../../docs/the-ladder.md).
@@ -556,6 +580,12 @@ export function ToolServers({ getToken }: { getToken: () => Promise<string> }) {
   `discover()`, what its server offers now beside them. `createConnectionsStore` is the store without React. The
   components are `Connections` (the list, the form and the open registration), `ConnectionDetail` and
   `AddConnection`; every word is in their `labels`, and every control renders through the slots.
+- **Tool facts** (revision 16). Where the service lists `tools.facts` and the caller may change the registration, the
+  tools table has a Facts column and Edit facts on each registered tool: a table of name, path and type
+  (`number`, `string`, `boolean` or `count`, the length of a list) with an optional description. Saving replaces the
+  tool's whole map of facts (`updateToolFacts(toolId, facts | null)`, which sends `{ facts }` alone; none removes
+  them), and a refusal that names a fact is shown at its row. A tool whose `facts` the module cannot read is not edited,
+  since a save would replace what it could not show.
 - **Reconnect.** The list offers Reconnect where the caller's credential is not in use (an OAuth authorization starts
   at once; a token or consent opens the registration), and an open registration offers authorizing again, replacing a
   token, linking again and giving consent again. `catalog` takes the host's presets (`ConnectionPreset`), each a tile

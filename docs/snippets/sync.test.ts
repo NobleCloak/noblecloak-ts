@@ -8,10 +8,11 @@ import { checkGuides, extractBlocks, snippetNames } from './sync-check.js';
 
 const SNIPPETS = import.meta.dirname;
 const GUIDES = resolve(SNIPPETS, '../how-to');
+const EXTRA_GUIDES = [resolve(SNIPPETS, '../conditions-and-approvers.md')];
 
-describe('the guides under docs/how-to', () => {
+describe('the guides under docs/how-to and the conditions page', () => {
   it('show exactly the text of the snippet files, and every snippet file is shown', () => {
-    expect(checkGuides(GUIDES, SNIPPETS)).toEqual([]);
+    expect(checkGuides(GUIDES, SNIPPETS, EXTRA_GUIDES)).toEqual([]);
   });
 
   it('show at least one snippet', () => {
@@ -123,6 +124,27 @@ describe('checkGuides', () => {
       'sync-check.ts': '',
     });
     expect(checkGuides(guides, snippets)).toEqual(['two.ts: no guide shows it']);
+  });
+
+  it('holds a further page to the same rule, and reports one that is missing', () => {
+    const { guides, snippets } = tree(GUIDE, { 'one.ts': 'export const one = 1;\n' });
+    const extra = join(guides, '..', 'extra.md');
+    writeFileSync(extra, '<!-- snippet: one -->\n\n```ts\nexport const one = 2;\n```\n');
+    expect(checkGuides(guides, snippets, [extra])).toEqual(['extra.md:1: differs from one.ts']);
+    expect(checkGuides(guides, snippets, [join(guides, '..', 'gone.md')])).toEqual([
+      'gone.md: no such guide',
+    ]);
+  });
+
+  it('counts a snippet shown only by a further page as shown', () => {
+    const { guides, snippets } = tree(GUIDE, {
+      'one.ts': 'export const one = 1;\n',
+      'two.ts': 'export const two = 2;\n',
+    });
+    const extra = join(guides, '..', 'extra.md');
+    writeFileSync(extra, '<!-- snippet: two -->\n\n```ts\nexport const two = 2;\n```\n');
+    expect(checkGuides(guides, snippets)).toEqual(['two.ts: no guide shows it']);
+    expect(checkGuides(guides, snippets, [extra])).toEqual([]);
   });
 
   it('names an unmarked ts fence', () => {

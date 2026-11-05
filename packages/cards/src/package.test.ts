@@ -61,7 +61,7 @@ describe('package', () => {
     expect(api.SLACK_LIMITS.maxActions).toBe(10);
     expect(api.TEAMS_LIMITS.maxActions).toBe(5);
     expect(api.SLACK_LIMITS.messageBytes).toBe(40_000);
-    expect(api.CARD_MODEL_VERSION).toBe(2);
+    expect(api.CARD_MODEL_VERSION).toBe(3);
     expect(api.CHAT_RESOLUTIONS).toEqual(['approved', 'rejected']);
   });
 });

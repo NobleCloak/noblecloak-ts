@@ -191,6 +191,14 @@ function SimulationOutput({
   readonly t: PermissionsTranslate;
   readonly subjectText: (subject: PolicySubject) => string;
 }) {
+  // The Rule column appears where the service lists `rules` among the members it enforces, or says in this answer that
+  // a rule decided or a fact was missing: on a deployment with neither the table is the one it always was.
+  const showRule =
+    controller.facts?.policyForms?.toolInvocation?.configMembers.includes('rules') === true ||
+    (result.considered?.policies.some(
+      (entry) => entry.rule !== undefined || entry.missingFacts !== undefined
+    ) ??
+      false);
   const deciding =
     result.policy === undefined
       ? undefined
@@ -219,6 +227,13 @@ function SimulationOutput({
         <p>{t('simPolicy', { name: policyName(deciding, t), version: result.policy.version })}</p>
       )}
       {result.appliesToCaller === false ? <p>{t('simNotApplies')}</p> : null}
+      {result.missingFacts === undefined || result.missingFacts.length === 0 ? null : (
+        <p>
+          {t('simMissingTop', {
+            facts: result.missingFacts.map((fact) => escapeInvisible(fact)).join(', '),
+          })}
+        </p>
+      )}
       <h4>{t('simConsideredHeading')}</h4>
       {result.considered === undefined ? (
         <p className="nc-muted">{t('simConsideredNone')}</p>
@@ -232,11 +247,18 @@ function SimulationOutput({
                 <th scope="col">{t('simColVersion')}</th>
                 <th scope="col">{t('simColSubject')}</th>
                 <th scope="col">{t('simColResult')}</th>
+                {showRule ? <th scope="col">{t('simColRule')}</th> : null}
               </tr>
             </thead>
             <tbody>
               {result.considered.policies.map((entry, index) => (
-                <ConsideredRow key={index} entry={entry} t={t} subjectText={subjectText} />
+                <ConsideredRow
+                  key={index}
+                  entry={entry}
+                  t={t}
+                  subjectText={subjectText}
+                  showRule={showRule}
+                />
               ))}
             </tbody>
           </table>
@@ -254,14 +276,34 @@ function SimulationOutput({
   );
 }
 
+/** What decided a considered policy: the rule, the facts a rule needed, or (for a policy with a rule column) its mode. */
+function ruleCell(entry: ConsideredEntry, t: PermissionsTranslate): string {
+  if (entry.rule !== undefined) {
+    const known = Object.hasOwn({ always_allow: true, ask: true, deny: true }, entry.rule.then);
+    return t('simRuleDecided', {
+      n: entry.rule.index + 1,
+      outcome: known
+        ? t(`ruleOutcome_${entry.rule.then as 'always_allow' | 'ask' | 'deny'}`)
+        : escapeInvisible(entry.rule.then),
+    });
+  }
+  if (entry.missingFacts !== undefined && entry.missingFacts.length > 0)
+    return t('simMissingFacts', {
+      facts: entry.missingFacts.map((fact) => escapeInvisible(fact)).join(', '),
+    });
+  return entry.id !== null && entry.kind === 'tool_invocation' ? t('simRuleNone') : '';
+}
+
 function ConsideredRow({
   entry,
   t,
   subjectText,
+  showRule,
 }: {
   readonly entry: ConsideredEntry;
   readonly t: PermissionsTranslate;
   readonly subjectText: (subject: PolicySubject) => string;
+  readonly showRule: boolean;
 }) {
   return (
     <tr>
@@ -274,6 +316,7 @@ function ConsideredRow({
       <td>{entry.version === null ? '' : `v${String(entry.version)}`}</td>
       <td>{entry.subject === undefined ? '' : subjectText(entry.subject)}</td>
       <td>{escapeInvisible(entry.result)}</td>
+      {showRule ? <td>{ruleCell(entry, t)}</td> : null}
     </tr>
   );
 }

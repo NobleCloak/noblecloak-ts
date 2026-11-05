@@ -1,7 +1,8 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { cellsGovernedBy, isSoleCell } from '../permissions-matrix.js';
+import { breakGlassOf } from '../permissions-parse.js';
 import type {
   CellPolicy,
   DraftEntry,
@@ -415,6 +416,7 @@ function PermissionsView({
           });
         }}
       />
+      <ApprovalRouting controller={controller} t={t} onSignIn={onSignIn} />
       <OtherPolicies controller={controller} t={t} />
       <Suggested controller={controller} t={t} subjectText={subjectText} />
       {openId === undefined ? null : (
@@ -948,6 +950,83 @@ function Drafts({
   );
 }
 
+/**
+ * The organisation's break-glass setting (rev 16 `approval_routing`), shown only where the service lists the form. The
+ * checkbox writes the next draft of the policy of that kind in force (or a new one when none is published) and
+ * publishes it as soon as it is changed; the setting shown is the most
+ * recently published one, or the contract's default (on) when none is.
+ */
+function ApprovalRouting({
+  controller,
+  t,
+  onSignIn,
+}: {
+  readonly controller: PoliciesController;
+  readonly t: PermissionsTranslate;
+  readonly onSignIn?: (() => void) | undefined;
+}) {
+  const { Checkbox, Label } = useNc();
+  // `pending` is the value the person chose. It is kept after a successful write until the policy lists show it, so
+  // the checkbox never goes back to the old value while the lists are read again.
+  const [pending, setPending] = useState<boolean | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<PermissionsError | undefined>(undefined);
+  const [saved, setSaved] = useState('');
+  const listed =
+    controller.others.status === 'ready' ? breakGlassOf(controller.others.policies).on : undefined;
+  useEffect(() => {
+    if (!saving && pending !== undefined && listed === pending) setPending(undefined);
+  }, [saving, pending, listed]);
+  if (controller.facts?.policyForms?.approvalRouting !== true) return null;
+  if (controller.others.status !== 'ready')
+    return (
+      <section className="nc-perm-panel">
+        <h3>{t('routingHeading')}</h3>
+        <p aria-busy="true">
+          {controller.others.status === 'error' ? t('otherPoliciesError') : t('loading')}
+        </p>
+      </section>
+    );
+  const current = breakGlassOf(controller.others.policies);
+  const on = pending ?? current.on;
+  const writable = !controller.authoring.readOnly && controller.authoring.canPublish;
+  const change = async (next: boolean): Promise<void> => {
+    setPending(next);
+    setSaving(true);
+    setFailure(undefined);
+    setSaved('');
+    const result = await controller.setApprovalRouting(next);
+    setSaving(false);
+    if (!result.ok) setPending(undefined);
+    if (result.ok) setSaved(t('routingSaved', { state: next ? t('routingOn') : t('routingOff') }));
+    else setFailure(result.error);
+  };
+  return (
+    <section className="nc-perm-panel">
+      <h3>{t('routingHeading')}</h3>
+      <Label>
+        <Checkbox
+          checked={on}
+          disabled={!writable || saving}
+          onChange={(event) => {
+            void change(event.currentTarget.checked);
+          }}
+        />{' '}
+        {t('routingBreakGlass')}
+      </Label>
+      <p className="nc-muted">{t('routingExplain')}</p>
+      {current.fromPolicy ? null : <p className="nc-muted">{t('routingDefault')}</p>}
+      {saving ? <p aria-busy="true">{t('routingSaving')}</p> : null}
+      {saved === '' ? null : <p role="status">{saved}</p>}
+      {failure === undefined ? null : (
+        <PermissionsErrorAlert error={failure} t={t} context="write" onSignIn={onSignIn}>
+          <p>{t('routingErrorContext')}</p>
+        </PermissionsErrorAlert>
+      )}
+    </section>
+  );
+}
+
 function OtherPolicies({
   controller,
   t,
@@ -973,7 +1052,9 @@ function OtherPolicies({
           {others.policies.map(({ policy, view }) => (
             <li key={policy.id}>
               <strong>{policyName(policy, t)}</strong> ·{' '}
-              {view.kind === 'duplicate_requests' ? (
+              {view.kind === 'approval_routing' ? (
+                t(view.breakGlass ? 'routingSummaryOn' : 'routingSummaryOff')
+              ) : view.kind === 'duplicate_requests' ? (
                 <>
                   {view.afterRejection === 'ask_again'
                     ? t('duplicateAskAgain')

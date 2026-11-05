@@ -42,17 +42,19 @@ export function permissionsErrorFromResponse(
   const mapped = fromApprovals(errorFromResponse(status, body, retryAfter, now));
   const problem = isRecord(body) ? body : undefined;
   const detail = typeof problem?.detail === 'string' ? { detail: problem.detail } : {};
+  const member = typeof problem?.member === 'string' ? { member: problem.member } : {};
   if (mapped.code === 'unsupported_policy_form')
-    return { ...mapped, ...detail, kind: 'unprocessable', code: mapped.code };
+    return { ...mapped, ...detail, ...member, kind: 'unprocessable', code: mapped.code };
   if (mapped.kind === 'conflict' && mapped.code === 'policy_conflict') {
     const policyId = problem?.policy_id;
     return {
       ...mapped,
       ...detail,
+      ...member,
       ...(typeof policyId === 'string' && policyId !== '' ? { policyId } : {}),
     };
   }
-  return { ...mapped, ...detail };
+  return { ...mapped, ...detail, ...member };
 }
 
 /** The request layer's error mapping for the permissions stores. */
@@ -78,6 +80,8 @@ const PRECONDITION_TITLES: Readonly<Record<PermissionsPreconditionCode, string>>
   write_in_flight: 'A change to this policy is already being sent.',
   tool_not_callable:
     'The tool is not callable (withdrawn, or of an unknown status); its cells are read-only.',
+  rules_invalid: 'The rules or approvers hold something the service would refuse.',
+  approval_routing_not_offered: 'The break-glass setting is not offered here.',
 };
 
 /** A refusal the store gives without a request. The title is for a log; a component shows its own words. */
