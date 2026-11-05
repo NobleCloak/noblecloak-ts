@@ -70,7 +70,7 @@
     },
     "packages/cards": {
       "name": "@noblecloak/cards",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "dependencies": {
         "@noblecloak/client": "workspace:*",
       },
@@ -118,7 +118,7 @@
     },
     "packages/react": {
       "name": "@noblecloak/react",
-      "version": "0.8.5",
+      "version": "0.9.0",
       "dependencies": {
         "@noblecloak/client": "workspace:*",
         "@noblecloak/theme": "workspace:*",
