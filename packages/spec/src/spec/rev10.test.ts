@@ -40,13 +40,15 @@ const problemTypesOf = (operation: JsonObject, status: string): string[] => {
 };
 
 describe('policy kinds', () => {
-  it('PolicyKind is an open string of the three documented kinds, and both Policy and PolicyWrite use it', () => {
+  it('PolicyKind is an open string of the documented kinds, and both Policy and PolicyWrite use it', () => {
     const kind = obj(schemas.PolicyKind, 'PolicyKind');
     expect(kind.type).toBe('string');
+    // Rev 16 adds approval_routing to rev 10's three.
     expect(kind['x-noblecloak-known-values']).toEqual([
       'tool_invocation',
       'spending',
       'duplicate_requests',
+      'approval_routing',
     ]);
     expect(flat(kind.description)).toContain('never as a decision');
     const ref = '#/components/schemas/PolicyKind';
@@ -62,23 +64,30 @@ describe('policy kinds', () => {
     const kind = obj(schemas.PolicyKind, 'PolicyKind');
     expect(kind.enum).toBeUndefined();
     expect(flat(kind.description)).toContain(
-      'Known values: tool_invocation | spending | duplicate_requests.'
+      'Known values: tool_invocation | spending | duplicate_requests | approval_routing.'
     );
     expect(closed.schema('PolicyKind')('a_kind_from_the_future')).toBe(true);
   });
 
-  it('PolicyConfig is a named anyOf of the three closed configurations, which createPolicy cites', () => {
+  it('PolicyConfig is a named anyOf of the closed configurations, which createPolicy cites', () => {
     const config = obj(schemas.PolicyConfig, 'PolicyConfig');
+    // Rev 16 adds ApprovalRoutingConfig to rev 10's three.
     expect(config.anyOf).toEqual([
       { $ref: '#/components/schemas/ToolInvocationConfig' },
       { $ref: '#/components/schemas/SpendingConfig' },
       { $ref: '#/components/schemas/DuplicateRequestsConfig' },
+      { $ref: '#/components/schemas/ApprovalRoutingConfig' },
     ]);
     // No if/then on the policy: closeSchema would stop checking undeclared fields under it.
     expect(obj(schemas.Policy, 'Policy').if).toBeUndefined();
     expect(props('Policy').config).toEqual({ $ref: '#/components/schemas/PolicyConfig' });
     expect(props('PolicyWrite').config).toEqual({ $ref: '#/components/schemas/PolicyConfig' });
-    for (const name of ['ToolInvocationConfig', 'SpendingConfig', 'DuplicateRequestsConfig'])
+    for (const name of [
+      'ToolInvocationConfig',
+      'SpendingConfig',
+      'DuplicateRequestsConfig',
+      'ApprovalRoutingConfig',
+    ])
       expect(obj(schemas[name], name).additionalProperties, name).toBe(false);
     expect(flat(op('/v1/policies', 'post').description)).toContain('(`PolicyConfig`)');
     expect(flat(config.description)).toContain('400 `invalid_request`');
@@ -362,6 +371,8 @@ describe('the rejected-duplicate rule', () => {
       'would_be',
       'condition',
       'rejected_approval_id',
+      // Rev 16 adds an optional missing_facts (see rev16.test.ts).
+      'missing_facts',
     ]);
     const prior = obj(props('Approval').prior_rejections, 'prior_rejections');
     expect(prior.required).toEqual(['count', 'last_at']);

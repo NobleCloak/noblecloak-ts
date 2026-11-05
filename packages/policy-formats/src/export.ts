@@ -1,10 +1,11 @@
 import { compareCodeUnits } from './canonical.js';
 import type { Dialect } from './cedar/ast.js';
 import { NOBLECLOAK } from './cedar/ast.js';
-import { baselineStatement, encodePolicy } from './cedar/encode.js';
+import { baselineStatement, encodedOutcome, encodePolicy } from './cedar/encode.js';
 import { printStatements } from './cedar/print.js';
 import { PolicyFormatError } from './errors.js';
 import { pointer, quote } from './pointer.js';
+import { canAskOnMissingFact } from './rules.js';
 import { commentBlock, headerLines } from './report.js';
 import type {
   CedarExportOptions,
@@ -144,7 +145,36 @@ export function approvalSettingsLossy(
         policy: policy.id,
       });
   }
+  // Rev 16: the members kept verbatim in annotations. With rules, the statement carries only the policy's
+  // tightest outcome, so another engine never sees the per-call rules, and NobleCloak asks where a fact of
+  // the call has no value (only when some condition is not `exists`). Approvers and exclusions alone are plain approval settings no engine enforces.
+  const outcome = encodedOutcome(config);
+  for (const [member, annotation] of [
+    ['rules', 'noblecloak_rules'],
+    ['approvers', 'noblecloak_approvers'],
+    ['exclude', 'noblecloak_exclude'],
+  ] as const) {
+    if (config[member] !== undefined)
+      entries.push({
+        path: pointer(index, 'config', member),
+        reason:
+          config.rules === undefined
+            ? `kept in @${annotation} only; ${engine} does not enforce it`
+            : `kept in @${annotation} only; ${engine} applies only the statement's outcome (${outcome}, the tightest the policy can reach), not the per-call rules${canAskOnMissingFact(config.rules) ? ', and NobleCloak asks where a fact of the call has no value' : ''}`,
+        policy: policy.id,
+      });
+  }
   return entries;
+}
+
+/**
+ * The clause that says a statement encodes the tightest outcome of a policy's rules rather than its
+ * configured mode: empty when the two are the same.
+ */
+export function outcomeNote(outcome: string, mode: string): string {
+  return outcome === mode
+    ? ''
+    : `; the statement encodes the tightest outcome of the rules, not the configured mode`;
 }
 
 /** Refuses a `baseline` other than absent or `allow` (a typo would silently mean no baseline). */
@@ -177,11 +207,12 @@ export function exportCedar(
   const { exported, unsupported, lossy } = prepare(policies, NOBLECLOAK);
   let membership = false;
   for (const { index, policy } of exported) {
-    const mode = (policy.config as ToolInvocationConfig).mode;
+    const config = policy.config as ToolInvocationConfig;
+    const mode = encodedOutcome(config);
     if (mode === 'ask' || mode === 'escalate')
       lossy.push({
         path: pointer(index, 'config', 'mode'),
-        reason: `${mode} is exported as a forbid (fail closed): a Cedar engine has no approval outcome, so it denies the call; @noblecloak_mode keeps ${mode} for an import`,
+        reason: `${mode} is exported as a forbid (fail closed): a Cedar engine has no approval outcome, so it denies the call; @noblecloak_mode keeps ${config.mode} for an import${outcomeNote(mode, config.mode)}`,
         policy: policy.id,
       });
     else if (mode === 'not_granted')

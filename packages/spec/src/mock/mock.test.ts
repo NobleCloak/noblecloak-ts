@@ -2494,13 +2494,22 @@ describe('rev 11 behaviours of the mock: policies', () => {
     expect(caps.features).toEqual(
       expect.arrayContaining(['policies.retire', 'policies.tightest_wins'])
     );
+    // Rev 16 adds rules, approvers and exclude to rev 11's three members, and the approval_routing kind.
     expect(caps.policy_forms).toEqual({
       tool_invocation: {
         modes: ['always_allow', 'ask', 'escalate', 'deny'],
         subject_types: ['user', 'agent', 'service', 'group', 'role', 'organization'],
         targets_all: true,
-        config_members: ['on_deny', 'expires_after', 'approver_groups'],
+        config_members: [
+          'on_deny',
+          'expires_after',
+          'approver_groups',
+          'rules',
+          'approvers',
+          'exclude',
+        ],
       },
+      approval_routing: { config_members: ['org_admin_break_glass'] },
     });
     // Every advertised mode is accepted: not_granted, which it refuses, is not advertised.
     for (const mode of (caps.policy_forms as { tool_invocation: { modes: string[] } })

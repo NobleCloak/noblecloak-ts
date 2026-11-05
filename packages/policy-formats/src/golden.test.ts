@@ -110,6 +110,84 @@ export const AGT_POLICIES: ExportablePolicy[] = [
   },
 ];
 
+/** Rev 16 forms: rules over facts, rule and policy approvers, exclude, and a rule-free policy with approvers. */
+export const RULES_POLICIES: ExportablePolicy[] = [
+  {
+    id: 'pol_payments_by_amount',
+    kind: 'tool_invocation',
+    name: 'Large payments need finance',
+    subjects: [{ type: 'agent', id: 'agt_support' }],
+    targets: { tools: ['mcp:stripe:main:create_refund'] },
+    config: {
+      mode: 'always_allow',
+      rules: [
+        {
+          when: [
+            { fact: 'amount', op: 'gt', value: 500 },
+            { fact: 'currency', op: 'in', value: ['eur', 'usd'] },
+          ],
+          then: 'ask',
+          approvers: [
+            { role: 'finance' },
+            { user: 'usr_cfo', when: [{ fact: 'amount', op: 'gte', value: 5000 }] },
+          ],
+        },
+        { when: [{ fact: 'reason', op: 'exists' }], then: 'always_allow' },
+        { when: [{ fact: 'amount', op: 'lte', value: 1 }], then: 'deny' },
+      ],
+      approvers: [{ role: 'finance' }],
+      exclude: ['requester'],
+    },
+  },
+  {
+    id: 'pol_deploy_by_env',
+    kind: 'tool_invocation',
+    name: 'Production deploys escalate',
+    subjects: [{ type: 'agent', id: 'agt_release_bot' }],
+    targets: { tools: ['external:deploy'] },
+    config: {
+      mode: 'escalate',
+      expires_after: 'PT30M',
+      rules: [
+        { when: [{ fact: 'env', op: 'eq', value: 'staging' }], then: 'always_allow' },
+        { when: [{ fact: 'env', op: 'not_in', value: ['staging', 'dev'] }], then: 'ask' },
+      ],
+    },
+  },
+  {
+    id: 'pol_mail_exclude',
+    kind: 'tool_invocation',
+    name: 'Mail needs a second person',
+    subjects: [{ type: 'agent', id: 'agt_support' }],
+    targets: { tools: ['mcp:gmail:main:send_email'] },
+    config: {
+      mode: 'ask',
+      approvers: [{ role: 'manager' }],
+      exclude: ['requester'],
+    },
+  },
+  {
+    id: 'pol_open_read',
+    kind: 'tool_invocation',
+    name: 'Reads with a declared scope stay open',
+    subjects: [{ type: 'organization' }],
+    config: {
+      mode: 'always_allow',
+      rules: [{ when: [{ fact: 'scope', op: 'exists' }], then: 'always_allow' }],
+    },
+  },
+  {
+    id: 'pol_never_wire',
+    kind: 'tool_invocation',
+    name: 'Wires over the limit are denied',
+    subjects: [{ type: 'agent', id: 'agt_support' }],
+    config: {
+      mode: 'ask',
+      rules: [{ when: [{ fact: 'lines', op: 'lt', value: 0 }], then: 'deny' }],
+    },
+  },
+];
+
 const INVENTORY: InventoryTool[] = [
   { tool_ref: 'mcp:stripe:main:create_refund' },
   { tool_ref: 'mcp:gmail:main:send_email' },
@@ -129,6 +207,7 @@ const CASES = [
     file: 'noblecloak-baseline.cedar',
     text: () => exportCedar(CEDAR_POLICIES, { baseline: 'allow' }).text,
   },
+  { file: 'noblecloak-rules.cedar', text: () => exportCedar(RULES_POLICIES).text },
   { file: 'agt-5.0.yaml', text: () => exportAgt(AGT_POLICIES, INVENTORY).text },
   {
     file: 'agt-5.0-tool-names.yaml',
@@ -147,6 +226,11 @@ const CASES = [
           timeout_seconds: 3600,
         },
       }).text,
+  },
+  {
+    file: 'agt-main-rules.yaml',
+    text: () =>
+      exportAgt(RULES_POLICIES, INVENTORY, { agtVersion: 'main', toolNames: TOOL_NAMES }).text,
   },
 ] as const;
 

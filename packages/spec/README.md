@@ -575,9 +575,70 @@ pending. Four breaks drop those gates: `available_actions_shown_to_all` (eligibi
 is resolved; the first, second and fourth breaks fail it) and `available-actions-hidden-without-resolve-scope` (the approver's token
 without the scope, on a deployment that advertises `user_resolve_scope`; the third break fails it).
 
+## Fact-conditioned policies and approval requirements (rev 16)
+
+Rev 16 lets a `tool_invocation` policy decide a call by what the call carries, and say who may answer the approval it
+raises. Every addition is optional on the wire, so a rev 15 server's responses still validate, and a deployment that
+does not list a rev 16 feature refuses its members with 422 `unsupported_policy_form` and behaves as rev 15.
+
+**Facts on a tool (`tools.facts`).** `Tool.facts` (and `ToolWrite.facts`; `ToolPatch.facts` replaces the whole map, and
+`null` clears it) maps a fact name (`FactName`, `^[a-z][a-z0-9_]{0,62}$`, at most 32 per tool) to a `FactBinding`
+`{ path, type, description? }`. `path` is one or more `.key` / `[N]` segments read from the root of the call's arguments;
+a wildcard (`[*]`) or a recursive descent (`..key`) selects a set and is refused with 400 `invalid_request` naming the
+binding in `member` (`facts.<name>.path`). `type` is `number`, `string`, `boolean` or `count` (an array, whose length is
+the value). Nothing is coerced: a path that selects nothing, or a value of another type, leaves the fact with no value.
+The deployment reads facts from `action.arguments` of the call it decides; a call that sends only `arg_digest` has none.
+
+**Rules (`policies.rules`).** `ToolInvocationConfig.rules` is a list of up to 32 `PolicyRule`s, `{ when, then,
+approvers? }`: `when` is 1 to 8 `PolicyCondition`s, all of which must hold; `then` is `always_allow`, `ask` or `deny`.
+A condition is `{ fact, op, value? }`: `eq`/`ne` take a scalar, `in`/`not_in` a list of 1 to 100 scalars, `gt`, `gte`,
+`lt`, `lte` a number (and need a `number` or `count` fact), `exists` no value. One policy is evaluated by walking its
+rules in order: a rule with a false condition is skipped whatever its other conditions; otherwise a rule with an
+unevaluable condition (the fact has no value) stops the walk and the policy asks; otherwise the rule matches and its
+`then` is the result. No rule matches: `mode`. `exists` is never unevaluable. The policies that match a call still
+compose tightest-wins. A condition that names a fact one of the targeted tools does not declare, or compares a fact
+that is neither a `number` nor a `count`, is 400 `invalid_request` naming the condition's `fact` in `member` when every
+target is a registered tool. In what a simulation considered, an entry gains `rule` (`{ index, then }`, the rule that
+gave its result) and `missing_facts` (the facts the rule that stopped the walk needed), and a `step_up` that such a walk
+contributed to names them in `Decision.missing_facts` (as does a simulation's result).
+
+**Approvers and requirements (`approvals.requirements`).** `ToolInvocationConfig.approvers` lists who may satisfy the
+requirement the policy contributes when it asks: `PolicyApprover` is `{ role }` or `{ user }`, each with an optional
+`when`, and an `ask` rule may carry its own `approvers`, which then replace the policy's. A walk a missing fact stopped
+never uses the policy's `approvers`: the stopping rule's when it is an `ask` rule that has them, else the
+organisation's administrators. `exclude: [requester]` keeps
+the person who opened the approval out of the requirement, from every surface. `approver_groups` is unchanged.
+`Approval.requirements` lists one `ApprovalRequirement` per policy that asked: `{ id, policies, approvers, exclude,
+needed, met, approvals }`, with `approvers` the entries in force when it opened (`ApproverRef`; empty means the
+organisation's administrators) and `needed` always 1. Two policies whose entries in force and `exclude` are the same
+contribute one requirement listing both. An approve satisfies every unmet requirement the approver is eligible for;
+while one stays unmet the answer is 200 with the approval still `pending`, and the change is an `approval.updated`.
+Anyone eligible for an unmet requirement may reject the approval. `waiting_on` counts those eligible for an unmet
+requirement, never the creator.
+
+**The organisation's setting.** A policy of the new kind `approval_routing` (organisation subject, every tool; the most
+recently published one is in force) carries `ApprovalRoutingConfig`, `{ org_admin_break_glass }`. On (the default when
+none is published), an administrator of the organisation may meet every requirement in one approve (`basis:
+break_glass`), except one that excludes them. `Capabilities.policy_forms` lists it as `approval_routing`, and
+`tool_invocation.config_members` gains `rules`, `approvers` and `exclude`.
+
+**The mock and the scenarios.** The mock advertises `tools.facts` on either deployment, `policies.rules` where it
+authors policies (hosted), and `approvals.requirements` where it also serves approvals. Its decision is still a fixture
+lookup, except for a call that a published policy carrying `rules`, `approvers` or `exclude` matches: then it composes
+every policy that matches the call, and an approval it opens carries requirements. `POST /v1/approvals` sets the same
+requirements as a decision of the call, and a call that matches an open approval lacking some of its requirements adds
+them while it is pending, and opens a separate approval when it is approved. Roles are read from the `role:<key>`
+scopes of the approver's token. Five breaks drop one rule each: `rules_ignored`, `missing_fact_falls_to_mode`,
+`partial_approve_resolves`, `exclude_requester_ignored` and `break_glass_ignores_setting`.
+`33-rev16-facts-rules-requirements.yaml` has four scenarios: `rev16-rules-decide-by-the-facts-of-the-call` (deny,
+allow and ask by the facts, a digest-only call that asks and names the missing fact, and a simulation's `rule` and `missing_facts`; the first two
+breaks fail it), `rev16-requirements-met-one-by-one` (two requirements met by two approvers, and an approval opened through `POST /v1/approvals` that carries the same two and that a decision of the same call joins; the third break fails it),
+and the negatives `rev16-exclude-requester-refuses-the-requester` (the fourth) and
+`rev16-break-glass-follows-the-organisation-setting` (the fifth).
+
 ## Versioning
 
-This version implements **contract revision 15**, released as `contract-v1-rev15`; the CHANGELOG head names it. Rev 15 adds optional members only (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
+This version implements **contract revision 16**, released as `contract-v1-rev16`; the CHANGELOG head names it. Rev 16 adds optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
 revision is the contract's. `info.version` in the document (1.0.0) is **not** the revision. A revision only adds optional members unless its CHANGELOG entry names a narrowing, as rev 6 does
 for the listing of a tool owned by a principal.
 

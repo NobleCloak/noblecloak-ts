@@ -1,10 +1,16 @@
 import { compareCodeUnits } from '../canonical.js';
 import { AGT } from '../cedar/ast.js';
-import { baselineStatement, encodePolicy } from '../cedar/encode.js';
+import { baselineStatement, encodedOutcome, encodePolicy } from '../cedar/encode.js';
 import type { ApprovalEncoding } from '../cedar/encode.js';
 import { printStatements } from '../cedar/print.js';
 import { PolicyFormatError } from '../errors.js';
-import { approvalSettingsLossy, checkBaseline, prepare, unmatchedNote } from '../export.js';
+import {
+  approvalSettingsLossy,
+  checkBaseline,
+  outcomeNote,
+  prepare,
+  unmatchedNote,
+} from '../export.js';
 import { pointer } from '../pointer.js';
 import { commentBlock, HEADER_MARK, headerLines } from '../report.js';
 import type {
@@ -91,7 +97,8 @@ export function exportAgt(
   const { exported, unsupported, lossy } = prepare(policies, AGT);
   let advised = false;
   for (const { index, policy } of exported) {
-    const mode = (policy.config as ToolInvocationConfig).mode;
+    const config = policy.config as ToolInvocationConfig;
+    const mode = encodedOutcome(config);
     const at = pointer(index, 'config', 'mode');
     if (mode === 'ask' || mode === 'escalate') {
       advised ||= adviceAware;
@@ -102,7 +109,7 @@ export function exportAgt(
               mode === 'ask'
                 ? 'ask is exported as a permit with @advice escalate: AGT has one approval path, so ask and escalate are not told apart'
                 : 'escalate is exported as a permit with @advice escalate: AGT sends every escalation to its default resolver, and the routing of escalate is not carried'
-            }${
+            }${outcomeNote(mode, config.mode)}${
               version === '5.0'
                 ? "; on AGT 5.0 this relies on the host's dispatcher reading @advice (adviceAwareDispatcher: true): the bundled Cedar dispatcher would allow the call"
                 : ''
@@ -111,7 +118,7 @@ export function exportAgt(
               version === '5.0'
                 ? "AGT 5.0's bundled Cedar dispatcher reads no @advice, so a permit would allow the call"
                 : 'the host dispatcher does not read @advice (adviceAwareDispatcher: false)'
-            }; @noblecloak_mode keeps ${mode} for an import`,
+            }; @noblecloak_mode keeps ${config.mode} for an import${outcomeNote(mode, config.mode)}`,
         policy: policy.id,
       });
     } else if (mode === 'not_granted') {

@@ -180,11 +180,18 @@ function notAvailableOnEdgeScenario(operations: readonly OperationInfo[]): Scena
  */
 export const PLACEHOLDER_PRINCIPAL_ID = '00000000-0000-4000-8000-00000000c0f0';
 
-/** A value for each `ToolInvocationConfig` member the scenario below knows how to set. */
+/**
+ * A value for each `ToolInvocationConfig` member the scenario below knows how to set. Rev 16's `rules` has none: a
+ * rule's condition names a fact, and the registered tool declares none, so a rule would be refused for that (400),
+ * not for its form.
+ */
 const CONFIG_MEMBER_VALUES: Readonly<Record<string, unknown>> = {
   on_deny: 'halt',
   expires_after: 'PT1H',
   approver_groups: [PLACEHOLDER_PRINCIPAL_ID],
+  // Rev 16.
+  approvers: [{ user: PLACEHOLDER_PRINCIPAL_ID }],
+  exclude: ['requester'],
 };
 
 /**

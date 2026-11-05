@@ -207,6 +207,12 @@ export const BREAKS = [
   'available_actions_shown_when_resolved',
   'available_actions_shown_without_resolve_scope',
   'available_actions_shown_to_members',
+  // Rev 16: fact-conditioned policies, approvers and requirements.
+  'rules_ignored',
+  'missing_fact_falls_to_mode',
+  'partial_approve_resolves',
+  'exclude_requester_ignored',
+  'break_glass_ignores_setting',
 ] as const;
 
 export type Break = (typeof BREAKS)[number];

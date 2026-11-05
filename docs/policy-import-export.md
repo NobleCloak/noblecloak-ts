@@ -45,8 +45,28 @@ file cannot carry:
   written so the engine denies the call (fail closed), and an import reads them back as `ask` and `escalate`.
 - `on_deny`, `expires_after` and approver groups travel as annotations, which a Cedar engine does not enforce.
 - AGT names no end user, so a policy for a user, role, group or service is not exported to AGT.
-- Policies of other kinds (duplicate requests, spending) are never exported.
+- Policies of other kinds (approval routing, duplicate requests, spending) are never exported. Approval routing is
+  an organisation setting for who may satisfy approvals, not a policy on a call.
 - A policy whose tools the service did not state cannot be written; the report and the file name it.
+
+## Rules and approvers
+
+A policy can carry rules over the facts of a call, approvers and an exclusion (contract rev 16). A Cedar or AGT
+engine sees none of a call's facts, so a rule is never turned into a condition. Instead the policy is written as
+one statement with the **tightest outcome it can reach**: the tightest of its mode and every rule's result, and
+`ask` whenever a rule tests a fact other than by `exists`, since NobleCloak asks when that fact is missing. A
+policy whose mode is `always_allow` and whose rules test a fact other than by `exists` therefore exports as `ask`,
+and an engine that cannot ask denies the call (fail closed). Rules never loosen the export: it is at least as
+tight as the mode, and a policy whose rules test facts only by `exists` exports as the tightest of its mode and its rules' results, with no added `ask`. Never looser than NobleCloak's own evaluation is the rule.
+
+- **What maps.** The statement's outcome, as for any mode. The rules (in order), the policy's approvers and the
+  exclusion ride in annotations, so importing the file back restores the exact policy. The import checks that the
+  statement still equals the tightest outcome of those rules; a file edited so that it no longer does is a
+  conflict and is not imported.
+- **What is reported.** Each of `rules`, `approvers` and `exclude` is listed as lossy, by member: another engine
+  applies only the statement's outcome, not the per-call rules, and, when a rule tests a fact other than by `exists`, in NobleCloak a missing fact asks (the report says so only then).
+- **What is not exported.** The facts a tool declares (their bindings): the export carries no tool metadata.
+  Approval routing, the organisation's setting for who may satisfy approvals, is listed as not exported.
 
 ## Import
 

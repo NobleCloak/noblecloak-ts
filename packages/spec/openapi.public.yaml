@@ -782,7 +782,10 @@ paths:
         The door for callers whose own engine decided: a governance toolkit's escalation backend or a
         hand-rolled check. Creates an obligation from `action` and `continuation`. The server computes the
         identity and dedupes on the open obligation shared with `/decisions`: a match returns 200 with
-        `created: false` and the same id. An approval id supplied in the body is an identity assertion and
+        `created: false` and the same id. Rev 16: on a deployment that lists `approvals.requirements`, the
+        approval carries the requirements a decision of the same call would set, and a match is joined only as
+        `Approval.requirements` states (an `approved` match that lacks a requirement the call sets is not joined:
+        a separate approval opens, 201). An approval id supplied in the body is an identity assertion and
         is refused with 400 `identity_not_accepted`. `run_id` is an `external` scope from `POST /v1/runs`;
         absent, the principal scope applies. The creating principal can never resolve what it created.
 
@@ -970,6 +973,8 @@ paths:
         (`Capabilities.resolutions` says which it can produce). A deployment that cannot determine whether
         the caller is eligible answers 503 `service_unavailable` with `reason` `eligibility_lookup`.
 
+        Rev 16: on an approval that carries `requirements`, `approved` satisfies every unmet requirement the caller is eligible for, and answers 200 with the approval still `pending` while any requirement is unmet (see `Approval.requirements`); `rejected` rejects the approval. A caller eligible for no unmet requirement is 403 `not_eligible` while the approval is `pending`.
+
         Where the deployment advertises `Capabilities.user_resolve_scope`, a user's token must carry that scope: without it the call is 403
         `insufficient_scope`, answered before the body is validated, before the approval is looked up and before eligibility is considered: an approval id that does not exist is still 403 `insufficient_scope`, and a missing scope is never reported as `not_found`, `invalid_request` or `not_eligible`.
 
@@ -1022,7 +1027,11 @@ paths:
         (the same `type` and `status` the single route would answer), so one `approval_conflict` or
         `not_found` does not fail the rest; the elements are resolved one at a time and independently, in
         order. An approval named twice is resolved by its first element and the repeat answers the conflict
-        the single route gives for an approval that is no longer pending (`already_resolved`). The body is
+        the single route gives for an approval that is no longer pending (`already_resolved`). Rev 16: on an
+        approval that carries `requirements`, each element is applied as `/resolve` applies it (see
+        `Approval.requirements`), so a first element that leaves a requirement unmet leaves the approval
+        `pending`, and a repeat by an approver eligible for no unmet requirement left answers 403
+        `not_eligible`; once the approval is no longer pending, a repeat answers `already_resolved` as above. The body is
         validated whole before any element is applied: one malformed element, or an empty list, is 400
         `invalid_request` and nothing in the batch is resolved. A service principal never resolves: the call is 403 `not_eligible` as a whole. A
         deployment that cannot determine whether the caller is eligible answers 503 `service_unavailable`
@@ -1074,6 +1083,8 @@ paths:
       description: |
         The server rewrites this to `/resolve` with `resolution: approved`.
 
+        Rev 16: on an approval that carries `requirements`, an approve that leaves a requirement unmet answers 200 with the approval still `pending` (see `Approval.requirements`).
+
         Where the deployment advertises `Capabilities.user_resolve_scope`, a user's token must carry that scope: without it the call is 403
         `insufficient_scope`, answered before the body is validated, before the approval is looked up and before eligibility is considered: an approval id that does not exist is still 403 `insufficient_scope`, and a missing scope is never reported as `not_found`, `invalid_request` or `not_eligible`.
 
@@ -1124,6 +1135,8 @@ paths:
       summary: Alias for resolve with resolution rejected.
       description: |
         The server rewrites this to `/resolve` with `resolution: rejected`.
+
+        Rev 16: on an approval that carries `requirements`, a caller eligible for at least one unmet requirement rejects the approval (see `Approval.requirements`).
 
         Where the deployment advertises `Capabilities.user_resolve_scope`, a user's token must carry that scope: without it the call is 403
         `insufficient_scope`, answered before the body is validated, before the approval is looked up and before eligibility is considered: an approval id that does not exist is still 403 `insufficient_scope`, and a missing scope is never reported as `not_found`, `invalid_request` or `not_eligible`.
@@ -4308,7 +4321,7 @@ components:
           minLength: 1
           pattern: ^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*$
           description: |
-            Only on `unsupported_policy_form` (rev 13) and on `proposal_refused` (rev 14, where it is present when the refusal has a part of the body to name): the member of the request body the deployment cannot enforce, as a dotted and bracketed path into the body as sent, for example `subjects[0].type`, `config.mode`, `subject`, on `POST /v1/policies/simulate` `policies[2].subjects[0].type`, or on `proposal_refused` `action.arguments.policies[1].policy.targets.tools[0]`. Keys are the member names as sent; an index is a decimal integer; the first segment is a top-level member of the request body. `detail` stays human prose. A client reads `member`, and falls back to `detail` when a rev 12 deployment omits it.
+            Only on `unsupported_policy_form` (rev 13) and on `proposal_refused` (rev 14, where it is present when the refusal has a part of the body to name), and (rev 16) on an `invalid_request` that refuses a fact binding or a condition, for example `facts.amount.path` or `config.rules[0].when[1].fact`: the member of the request body the deployment cannot enforce, as a dotted and bracketed path into the body as sent, for example `subjects[0].type`, `config.mode`, `subject`, on `POST /v1/policies/simulate` `policies[2].subjects[0].type`, or on `proposal_refused` `action.arguments.policies[1].policy.targets.tools[0]`. Keys are the member names as sent; an index is a decimal integer; the first segment is a top-level member of the request body. `detail` stays human prose. A client reads `member`, and falls back to `detail` when a rev 12 deployment omits it.
         code:
           type: string
           pattern: ^[a-z][a-z0-9_]{0,63}$
@@ -4470,7 +4483,7 @@ components:
     Action:
       type: object
       description: |
-        What is about to run. Exactly one of `arg_digest` (the digest of the arguments as sent) or `arguments` (the arguments themselves, which the server digests).
+        What is about to run. Exactly one of `arg_digest` (the digest of the arguments as sent) or `arguments` (the arguments themselves, which the server digests). Rev 16: the facts a policy's rules test are read from `arguments` through the tool's fact bindings (`Tool.facts`); a call that sends only `arg_digest` has no facts, so a rule that needs one is unevaluable and its policy asks.
       required:
         - tool_ref
       additionalProperties: false
@@ -4686,6 +4699,14 @@ components:
           minLength: 1
           description: |
             Only on a `deny` with reason `rejected_duplicate` (rev 10): the most recent rejected approval, within the window, whose identity this call repeats, readable under the rules of Who sees an approval. Absent on every other decision.
+        missing_facts:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/FactName"
+          description: |
+            Rev 16: on a `step_up`, the facts with no value that stopped the rule walk of a policy that contributed to it (see the evaluation in `ToolInvocationConfig`), each once, in the order the policies and their rules name them. Absent when every contributing policy's result came from a rule that matched or from its `mode`, and on every other decision. Set only by a deployment that lists the feature `policies.rules`.
     CreateApprovalRequest:
       type: object
       required:
@@ -4779,7 +4800,7 @@ components:
           required:
             - count
           description: |
-            Who a pending approval waits on, to the principal that created it and to no one else, on `GET /v1/approvals/{id}` only: never a row of `GET /v1/approvals` or an event of the stream. `count` is the number of principals eligible to resolve the approval that the deployment knows of at the time of the read; it may be zero, may change between reads, and is not a promise that any of them has been notified. `principals` is at most five of them. Absent on an approval that is not pending and for every other reader, and absent when the deployment cannot determine who is eligible (the read is still 200, never an error on that account). For a service-principal creator `principals` is omitted and only the count is given.
+            Who a pending approval waits on, to the principal that created it and to no one else, on `GET /v1/approvals/{id}` only: never a row of `GET /v1/approvals` or an event of the stream. `count` is the number of principals eligible to resolve the approval that the deployment knows of at the time of the read; it may be zero, may change between reads, and is not a promise that any of them has been notified. `principals` is at most five of them. Rev 16: on an approval that carries `requirements`, the principals counted are those eligible for at least one unmet requirement, never the creator. Absent on an approval that is not pending and for every other reader, and absent when the deployment cannot determine who is eligible (the read is still 200, never an error on that account). For a service-principal creator `principals` is omitted and only the count is given.
           properties:
             count:
               type: integer
@@ -4897,6 +4918,85 @@ components:
             $ref: "#/components/schemas/ApprovalAction"
           description: |
             Rev 15: what the reader may do on this approval, with the deployment's wording and the inputs each action takes. Present only on `GET /v1/approvals/{id}`, only while the approval is `pending`, and only to a reader who may resolve it, and only on a deployment that lists the feature `approvals.available_actions`; absent on every other representation (a list row, a stream event) and for every other reader. The `resolution` of each `resolve` action is one of `Capabilities.resolutions`. On a deployment that does not list `approvals.available_actions`, absent means the deployment does not say, and a client derives approve and deny from `Capabilities.resolutions`. On a deployment that lists it, absent means no action for this reader, and a client derives none. Being listed is not authorisation: resolving still decides eligibility when it is called. A rev 14 reader never needs it.
+        requirements:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalRequirement"
+          description: |
+            Rev 16: what must be met before the approval is approved, one entry per requirement. Each policy whose result asked and that contributed to the step-up that opened the approval (for one opened through `POST /v1/approvals`, the step-up a decision of the same call would give) contributes one requirement, and two policies whose approver entries in force and `exclude` are the same (an entry listed twice counts once) contribute one requirement between them, which lists both. Present on every representation of the approval to every reader who can see it, on a deployment that lists the feature `approvals.requirements`, and only there: a deployment that does not list it never sets the member. Where the feature is listed, an approval without the member has one requirement, satisfied as before rev 16.
+
+            Joining: a decision or `POST /v1/approvals` whose call matches an open approval joins it only with every requirement the call sets (two are the same when their approver entries and `exclude` are). A `pending` approval that lacks some gains them, unmet, and emits `approval.updated`; an `approved` one that lacks some is not joined, and a separate approval opens with the call's requirements, which the next identical call joins. So a joined approval never carries fewer requirements than the call that joined it sets.
+
+            Approve: the approver satisfies every unmet requirement they are eligible for, so one person may satisfy several, and the approval is `approved` once every requirement is met. An approve that leaves a requirement unmet answers 200 with the approval still `pending`, no `resolution`, and the requirements it satisfied recording the approver; it emits `approval.updated`. Reject: any principal eligible for at least one unmet requirement rejects the approval, whatever has been met. An approve or reject by a principal eligible for no unmet requirement is 403 `not_eligible` while the approval is `pending`; once it is not, a principal eligible for any of its requirements is answered as before rev 16 (409 `already_resolved` for an approval already resolved). The rules on the creator (see Who may resolve, and `Capabilities.self_approval_from_approver_surface`) apply on top: a requirement whose `exclude` holds `requester` is never satisfied by the creator, from any surface. A rev 15 reader never needs it.
+    ApprovalRequirement:
+      type: object
+      description: |
+        Rev 16: one requirement of an approval. Who is eligible for it: a holder of one of its `approvers` (a role the principal holds when it acts, or the user named); with `approvers` empty, an administrator of the organisation. When the organisation's `approval_routing` setting has `org_admin_break_glass` on (the default), an administrator of the organisation is eligible for every requirement too, and satisfies it with `basis: break_glass`. A principal `exclude` names is eligible for none of it, whatever else holds.
+      required:
+        - id
+        - policies
+        - approvers
+        - exclude
+        - needed
+        - met
+        - approvals
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: |
+            Stable within the approval.
+        policies:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PolicyRef"
+          description: |
+            The policies that contributed the requirement, at the versions that decided.
+        approvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApproverRef"
+          description: |
+            The approver entries in force when the approval was opened (the matching rule's `approvers` when it had them, else the policy's, keeping only the entries whose `when` held). Empty: the organisation's administrators.
+        exclude:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - requester
+        needed:
+          type: integer
+          minimum: 1
+          description: |
+            How many eligible principals must approve to meet it. Always 1 in rev 16.
+        met:
+          type: boolean
+        approvals:
+          type: array
+          items:
+            type: object
+            required:
+              - by
+              - at
+              - basis
+            additionalProperties: false
+            properties:
+              by:
+                $ref: "#/components/schemas/NamedPrincipalRef"
+              at:
+                $ref: "#/components/schemas/Timestamp"
+              basis:
+                type: string
+                enum:
+                  - listed
+                  - break_glass
+                description: |
+                  `listed`: the approver was eligible for the requirement itself. `break_glass`: an administrator of the organisation under the `approval_routing` setting.
+          description: |
+            The approvals that count toward it, oldest first.
     ApprovalPreview:
       type: object
       description: |
@@ -5611,11 +5711,12 @@ components:
         - cedar
     PolicyKind:
       type: string
-      description: "What a policy governs (rev 10). Open-ended: the documented kinds are `tool_invocation` (whether a call to a tool is allowed, asked or denied), `spending` (provisional) and `duplicate_requests` (what happens to an identical call after a resolver rejected it). A client treats a kind it does not know as a policy it cannot evaluate, never as a decision, and treats that policy's `config` as opaque. Known values: tool_invocation | spending | duplicate_requests."
+      description: "What a policy governs (rev 10). Open-ended: the documented kinds are `tool_invocation` (whether a call to a tool is allowed, asked or denied), `spending` (provisional) and `duplicate_requests` (what happens to an identical call after a resolver rejected it) and, since rev 16, `approval_routing` (the organisation's setting for who may satisfy an approval's requirements, see `ApprovalRoutingConfig`). A client treats a kind it does not know as a policy it cannot evaluate, never as a decision, and treats that policy's `config` as opaque. Known values: tool_invocation | spending | duplicate_requests | approval_routing."
       x-noblecloak-known-values:
         - tool_invocation
         - spending
         - duplicate_requests
+        - approval_routing
     PolicyState:
       type: string
       description: |
@@ -5636,13 +5737,25 @@ components:
     ToolInvocationConfig:
       type: object
       description: |
-        The configuration of a `tool_invocation` policy. Legality matrix: `on_deny`, `expires_after` and `approver_groups` apply only to `ask` and `escalate`; they are illegal with `always_allow`, `deny` and `not_granted`.
+        The configuration of a `tool_invocation` policy. Legality matrix: `on_deny`, `expires_after` and `approver_groups` apply only to `ask` and `escalate`; they are illegal with `always_allow`, `deny` and `not_granted`. Rev 16: `rules`, `approvers` and `exclude` are legal with every mode (a `deny` policy may carry an `always_allow` rule, which is still composed tightest-wins with every other policy that matched). `approvers` and `exclude` on a policy none of whose outcomes asks are legal and do nothing.
+
+        Evaluation of one policy for one call (rev 16). The facts of the call are read from its `action.arguments` through the fact bindings of the tool (`Tool.facts`); a call that sends only `arg_digest` has no facts. Walk `rules` in order:
+
+        - A condition is true, false or unevaluable. It is unevaluable when the fact it names has no value: the tool declares no such fact, the call carries no arguments, the binding's path selects nothing, or the value there does not have the binding's type. `exists` is never unevaluable: a fact with no value does not exist.
+        - A rule with a false condition is skipped, whatever its other conditions.
+        - Otherwise a rule with an unevaluable condition stops the walk: the policy's result is `ask`, and the facts with no value are its `missing_facts`. The requirement it contributes takes that rule's `approvers` when the rule's `then` is `ask` and it has them, and otherwise has no approver entries (the organisation's administrators): never the policy's `approvers`, since the facts that would have chosen them are missing.
+        - Otherwise every condition is true and the rule matches: its `then` is the policy's result, and the walk stops (the first matching rule wins).
+        - When no rule matches, the result is `mode`.
+
+        The results of every policy that matched the call compose tightest-wins, as the feature `policies.tightest_wins` states. Each policy whose result asks and that contributed to a composed step-up contributes one requirement to the approval (see `ApprovalRequirement`). A deployment that does not list the feature `policies.rules` refuses `rules`, and one that does not list `approvals.requirements` refuses `approvers`, `exclude` and the `approvers` of a rule, each with 422 `unsupported_policy_form` naming the member, as it refuses any member its `policy_forms` does not list. A condition (of a rule or of an approver) that names a fact one of the targeted tools does not declare, or compares (`gt`, `gte`, `lt`, `lte`) a fact that one of them declares as neither `number` nor `count`, is 400 `invalid_request` naming the condition's `fact` in `member` (for example `config.rules[0].when[1].fact`) when every target names a tool the organisation has registered; with `targets: all`, or a target that names no tool yet, it is accepted and is unevaluable where it does not fit.
       required:
         - mode
       additionalProperties: false
       properties:
         mode:
           $ref: "#/components/schemas/PolicyMode"
+          description: |
+            The outcome when no rule matches; with no `rules`, the outcome. Required.
         on_deny:
           type: string
           enum:
@@ -5658,6 +5771,32 @@ components:
             type: string
           description: |
             Together these groups form one approval requirement, satisfied by any eligible member of any listed group (rev 11, D-A90): each approval-requiring policy that matches a call contributes one requirement, and every requirement must be met. The schema may grow per ADR-0049 §6c.4.
+        rules:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/PolicyRule"
+          description: |
+            Rev 16: rules over the facts of the call, evaluated in order; the first that matches gives the policy's result, and `mode` applies when none does (see the evaluation above). Served under the feature `policies.rules`.
+        approvers:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/PolicyApprover"
+          description: |
+            Rev 16: who may satisfy the requirement this policy contributes when its result asks: `mode` asks and no rule matched, or a rule whose `then` is `ask` matched and carries no `approvers` of its own. Not when a fact with no value stopped the walk (see the evaluation above). Each entry is a role or a user, and is in force for a call only while its own `when` holds. The deployment enforces it, unlike `approver_groups`, which it leaves as it was. Served under the feature `approvals.requirements`.
+        exclude:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - requester
+          description: |
+            Rev 16: who may never satisfy this policy's requirement, whatever else makes them eligible. `requester`: the principal that opened the approval, including from the approver surface and as an organisation administrator under break-glass. Served under the feature `approvals.requirements`.
       if:
         properties:
           mode:
@@ -5674,6 +5813,227 @@ components:
                 - expires_after
             - required:
                 - approver_groups
+    FactName:
+      type: string
+      pattern: ^[a-z][a-z0-9_]{0,62}$
+      description: |
+        Rev 16: the name of a fact a tool declares (`Tool.facts`) and a condition names (`PolicyCondition.fact`).
+    FactBinding:
+      type: object
+      description: |
+        Rev 16: how one fact of a call is read from the call's arguments. The value at `path` must have the JSON type `type` names: `number` a JSON number, `string` a string, `boolean` true or false, `count` an array, whose length is the fact's value. Nothing is coerced (`"42"` is not a number). A path that selects nothing, or a value of another type, leaves the fact with no value, and a condition that needs it is unevaluable (see `ToolInvocationConfig`). Facts are read by the deployment from the arguments of the call it decides; a client never asserts a fact.
+      required:
+        - path
+        - type
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+          maxLength: 512
+          pattern: ^(\.[A-Za-z_][A-Za-z0-9_-]*|\[[0-9]+\])+$
+          description: |
+            Where the value is, from the root of the arguments: one or more segments, each `.key` (a member; `key` starts with a letter or `_` and holds letters, digits, `_` and `-`) or `[N]` (the element at the non-negative index `N` of an array). For example `.amount`, `.target.env`, `.lines[0].price`. A wildcard (`[*]`) or a recursive descent (`..key`) selects a set, not one value, and is refused with 400 `invalid_request` naming the binding in `member`.
+        type:
+          type: string
+          enum:
+            - number
+            - string
+            - boolean
+            - count
+        description:
+          type: string
+          maxLength: 500
+    ToolFacts:
+      type: object
+      description: |
+        Rev 16: the facts a tool declares, by name: at most 32. A policy's conditions name them (see `ToolInvocationConfig`). Served under the feature `tools.facts`; a deployment that does not list it refuses a write that carries `facts` with 422 `unsupported_policy_form` naming `facts`.
+      maxProperties: 32
+      propertyNames:
+        $ref: "#/components/schemas/FactName"
+      additionalProperties:
+        $ref: "#/components/schemas/FactBinding"
+    PolicyCondition:
+      type: object
+      description: |
+        Rev 16: one test of a fact of the call. `eq`, `ne`: `value` is a JSON scalar, compared for equality with the fact's value (a value of another JSON type is not equal). `in`, `not_in`: `value` is a list of 1 to 100 scalars, and the test is whether the fact's value equals one of them. `gt`, `gte`, `lt`, `lte`: `value` is a number, and the fact must be a `number` or a `count`. `exists`: no `value`; true when the fact has a value. A condition whose fact has no value is unevaluable, except under `exists`, where it is false.
+      required:
+        - fact
+        - op
+      additionalProperties: false
+      properties:
+        fact:
+          $ref: "#/components/schemas/FactName"
+        op:
+          type: string
+          enum:
+            - eq
+            - ne
+            - in
+            - not_in
+            - gt
+            - gte
+            - lt
+            - lte
+            - exists
+        value:
+          description: |
+            What the fact is tested against; its form depends on `op` (see above).
+      allOf:
+        - if:
+            properties:
+              op:
+                enum:
+                  - eq
+                  - ne
+          then:
+            required:
+              - value
+            properties:
+              value:
+                type:
+                  - string
+                  - number
+                  - boolean
+                  - "null"
+        - if:
+            properties:
+              op:
+                enum:
+                  - in
+                  - not_in
+          then:
+            required:
+              - value
+            properties:
+              value:
+                type: array
+                minItems: 1
+                maxItems: 100
+                items:
+                  type:
+                    - string
+                    - number
+                    - boolean
+                    - "null"
+        - if:
+            properties:
+              op:
+                enum:
+                  - gt
+                  - gte
+                  - lt
+                  - lte
+          then:
+            required:
+              - value
+            properties:
+              value:
+                type: number
+        - if:
+            properties:
+              op:
+                const: exists
+          then:
+            not:
+              required:
+                - value
+    PolicyConditions:
+      type: array
+      description: |
+        Rev 16: one to eight conditions, all of which must hold (they are ANDed). An alternative is a separate rule.
+      minItems: 1
+      maxItems: 8
+      items:
+        $ref: "#/components/schemas/PolicyCondition"
+    PolicyRule:
+      type: object
+      description: |
+        Rev 16: when every condition of `when` holds, the policy's result is `then` (see the evaluation in `ToolInvocationConfig`). `approvers` is legal only with `then: ask`, and then replaces the policy's `approvers` for the requirement this rule's outcome contributes, and for the one the policy contributes when a fact with no value stops the walk at this rule.
+      required:
+        - when
+        - then
+      additionalProperties: false
+      properties:
+        when:
+          $ref: "#/components/schemas/PolicyConditions"
+        then:
+          type: string
+          enum:
+            - always_allow
+            - ask
+            - deny
+        approvers:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            $ref: "#/components/schemas/PolicyApprover"
+      if:
+        properties:
+          then:
+            enum:
+              - always_allow
+              - deny
+      then:
+        not:
+          required:
+            - approvers
+    PolicyApprover:
+      description: |
+        Rev 16: one entry of who may satisfy a requirement: every holder of a role (`role`, its bare key, as a role subject's id) or one user (`user`, the principal id). With `when`, the entry is in force for a call only when every condition holds; a condition that is false or unevaluable leaves it out.
+      oneOf:
+        - type: object
+          required:
+            - role
+          additionalProperties: false
+          properties:
+            role:
+              type: string
+              minLength: 1
+            when:
+              $ref: "#/components/schemas/PolicyConditions"
+        - type: object
+          required:
+            - user
+          additionalProperties: false
+          properties:
+            user:
+              type: string
+              minLength: 1
+            when:
+              $ref: "#/components/schemas/PolicyConditions"
+    ApproverRef:
+      description: |
+        Rev 16: an approver entry of a requirement, as it was in force when the approval was opened: a role by its bare key, or a user by principal id.
+      oneOf:
+        - type: object
+          required:
+            - role
+          additionalProperties: false
+          properties:
+            role:
+              type: string
+              minLength: 1
+        - type: object
+          required:
+            - user
+          additionalProperties: false
+          properties:
+            user:
+              type: string
+              minLength: 1
+    ApprovalRoutingConfig:
+      type: object
+      description: |
+        The configuration of an `approval_routing` policy (rev 16): the organisation's setting for who may satisfy the requirements of its approvals. A policy of this kind takes the organisation subject only and targets every tool; any other subject or target form is 422 `unsupported_policy_form`. The organisation's setting is its most recently published `approval_routing` policy, in force from the answer of its publish; with none, `org_admin_break_glass` is `true`. Served under the feature `approvals.requirements`, and listed in `policy_forms` as `approval_routing`.
+      required:
+        - org_admin_break_glass
+      additionalProperties: false
+      properties:
+        org_admin_break_glass:
+          type: boolean
+          description: |
+            `true`: an administrator of the organisation may satisfy every unmet requirement of an approval in one approve (`basis: break_glass`), except a requirement whose `exclude` excludes them. `false`: an administrator satisfies only the requirements that list them, and those with no approver entries in force.
     SpendingConfig:
       type: object
       x-noblecloak-status: provisional
@@ -5728,11 +6088,12 @@ components:
             - max_reasks
     PolicyConfig:
       description: |
-        The configuration of a policy, by its kind (rev 10): `ToolInvocationConfig` for `tool_invocation`, `SpendingConfig` for `spending`, `DuplicateRequestsConfig` for `duplicate_requests`. The schema accepts any of the three; that a configuration fits its policy's `kind` is checked by the server, which answers a write whose `config` does not fit 400 `invalid_request`. A client treats the `config` of a kind it does not know as opaque.
+        The configuration of a policy, by its kind (rev 10): `ToolInvocationConfig` for `tool_invocation`, `SpendingConfig` for `spending`, `DuplicateRequestsConfig` for `duplicate_requests` and (rev 16) `ApprovalRoutingConfig` for `approval_routing`. The schema accepts any of them; that a configuration fits its policy's `kind` is checked by the server, which answers a write whose `config` does not fit 400 `invalid_request`. A client treats the `config` of a kind it does not know as opaque.
       anyOf:
         - $ref: "#/components/schemas/ToolInvocationConfig"
         - $ref: "#/components/schemas/SpendingConfig"
         - $ref: "#/components/schemas/DuplicateRequestsConfig"
+        - $ref: "#/components/schemas/ApprovalRoutingConfig"
     PolicySubjectType:
       type: string
       description: |
@@ -6017,6 +6378,32 @@ components:
                 type: boolean
                 description: |
                   Rev 11: true on every entry the deployment used to reach `composed`, and false or absent on one it did not. Under `policies.tightest_wins` it is every entry whose result gives the composed decision: when that is a step-up, every approval-requiring entry, each of which contributes a requirement that must be met. An entry a tighter one overruled (an `always_allow` beside a `deny`) did not contribute. It says which entries determined the outcome, not an order among them. A deployment that does not implement rev 11 omits it.
+              rule:
+                type: object
+                description: |
+                  Rev 16: on a `tool_invocation` entry whose result a rule of the policy gave, that rule: its index in the policy's `rules` and its `then`. Absent when no rule matched (the result is the policy's `mode`), when a missing fact stopped the walk (see `missing_facts`), and on a deployment that does not list `policies.rules`.
+                required:
+                  - index
+                  - then
+                additionalProperties: false
+                properties:
+                  index:
+                    type: integer
+                    minimum: 0
+                  then:
+                    type: string
+                    enum:
+                      - always_allow
+                      - ask
+                      - deny
+              missing_facts:
+                type: array
+                minItems: 1
+                uniqueItems: true
+                items:
+                  $ref: "#/components/schemas/FactName"
+                description: |
+                  Rev 16: on a `tool_invocation` entry whose rules could not be evaluated, the facts the rule that stopped the walk needed and the call did not supply; the entry's `result` is then `ask`. A simulation whose `action` carries only `arg_digest` supplies no fact. Absent otherwise.
         composed:
           type: object
           required:
@@ -6062,6 +6449,14 @@ components:
           minLength: 1
           description: |
             Only on a `deny` with reason `rejected_duplicate`, as on `Decision`.
+        missing_facts:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/FactName"
+          description: |
+            Rev 16: only on a `step_up`, as on `Decision`: the facts whose absence stopped the walk of a contributing policy.
         considered:
           $ref: "#/components/schemas/ConsideredPolicies"
     PolicyImportReport:
@@ -6434,6 +6829,10 @@ components:
           type: boolean
           description: |
             Whether the people who decide an approval of this tool see the call's arguments (see Who sees the arguments of an approval). Absent means `false`.
+        facts:
+          $ref: "#/components/schemas/ToolFacts"
+          description: |
+            Rev 16: the facts a call to this tool carries, each read from its arguments. Absent: the tool declares none. Set only by a deployment that lists the feature `tools.facts`.
     ToolWrite:
       type: object
       required:
@@ -6467,6 +6866,10 @@ components:
           default: false
           description: |
             Show the call's arguments to the people who decide an approval of this tool. A deployment that does not serve approvals accepts the field and ignores it.
+        facts:
+          $ref: "#/components/schemas/ToolFacts"
+          description: |
+            Rev 16: the facts the tool declares (see `Tool.facts`).
     ToolPatch:
       type: object
       additionalProperties: false
@@ -6480,6 +6883,12 @@ components:
           additionalProperties: true
         show_arguments_to_approvers:
           type: boolean
+        facts:
+          description: |
+            Rev 16: replaces the tool's whole map of facts; `null` removes every fact. A fact a published policy's condition names may be removed: that fact then has no value, so a condition naming it is unevaluable (false under `exists`), with the consequences the evaluation in `ToolInvocationConfig` gives.
+          oneOf:
+            - $ref: "#/components/schemas/ToolFacts"
+            - type: "null"
     Principal:
       type: object
       required:
@@ -6844,7 +7253,7 @@ components:
           items:
             type: string
           description: |
-            The route families served here (every family except `approvals`, which `resolutions` advertises: `runs`, `webhooks`, `origins`, `policies`, `agents`, `principals`, `connections`, `records.checkpoints`, `records.chain`, `evidence`), the hosted-only features (`policies.author`, `policies.publish`, `policies.import_export`, `policies.retire` (rev 11: retiring a policy and discarding its draft), `connections.oauth` (rev 11: the OAuth authorize step of a connection), `connections.user_links` (rev 11: each user's own credential link to a `per_user` registration, with consent), `records.verify` and `evidence.export`) and the features a deployment of either kind may have. `approvals.rejected_duplicate` (rev 10) says the deployment applies the rejected-duplicate rule (see Terminal states free the identity), and a deployment that does not list it keeps the rev 9 behaviour, where a rejection frees the identity. `approvals.available_actions` (rev 15) says the deployment sets `Approval.available_actions` on the single read of a pending approval, and a deployment that does not list it never sets the member. `policies.tightest_wins` (rev 11) states how the deployment composes `tool_invocation` policies: across every entry that matched a call the tightest mode wins, `deny` over needs approval (`ask`, `escalate`) over `always_allow`, and `not_granted` composes as `deny` (provisional, as `not_granted` is); a mode is loosened only through an exemption the deployment defines. Its default is a fallback, listed in `considered` only when no policy of its kind matched. A decision's `policy` names one of the entries that contributed, the deployment's choice, and the `considered` of a simulation gives the set (`contributed`). A deployment that does not list `policies.tightest_wins` states no rule. An edge deployment omits the hosted-only features and the families that are hosted-only.
+            The route families served here (every family except `approvals`, which `resolutions` advertises: `runs`, `webhooks`, `origins`, `policies`, `agents`, `principals`, `connections`, `records.checkpoints`, `records.chain`, `evidence`), the hosted-only features (`policies.author`, `policies.publish`, `policies.import_export`, `policies.retire` (rev 11: retiring a policy and discarding its draft), `connections.oauth` (rev 11: the OAuth authorize step of a connection), `connections.user_links` (rev 11: each user's own credential link to a `per_user` registration, with consent), `records.verify` and `evidence.export`) and the features a deployment of either kind may have. `approvals.rejected_duplicate` (rev 10) says the deployment applies the rejected-duplicate rule (see Terminal states free the identity), and a deployment that does not list it keeps the rev 9 behaviour, where a rejection frees the identity. `approvals.available_actions` (rev 15) says the deployment sets `Approval.available_actions` on the single read of a pending approval, and a deployment that does not list it never sets the member. `policies.tightest_wins` (rev 11) states how the deployment composes `tool_invocation` policies: across every entry that matched a call the tightest mode wins, `deny` over needs approval (`ask`, `escalate`) over `always_allow`, and `not_granted` composes as `deny` (provisional, as `not_granted` is); a mode is loosened only through an exemption the deployment defines. Its default is a fallback, listed in `considered` only when no policy of its kind matched. A decision's `policy` names one of the entries that contributed, the deployment's choice, and the `considered` of a simulation gives the set (`contributed`). A deployment that does not list `policies.tightest_wins` states no rule. Rev 16: `tools.facts` says the deployment reads the facts of a call through `Tool.facts`; `policies.rules` says it evaluates `ToolInvocationConfig.rules`, lists `rule` and `missing_facts` in `considered`, and sets `Decision.missing_facts`; `approvals.requirements` says it enforces `ToolInvocationConfig.approvers` and `exclude`, serves `approval_routing` policies, and sets `Approval.requirements`. A deployment that does not list one of them refuses its members (422 `unsupported_policy_form`) and never sets the members it serves, so it behaves as rev 15. An edge deployment omits the hosted-only features and the families that are hosted-only.
         authzen_configuration:
           type: string
           format: uri
@@ -6930,7 +7339,7 @@ components:
         policy_forms:
           type: object
           description: |
-            The policy forms this deployment enforces (rev 11), by kind. For `tool_invocation`: the modes, the subject types, whether a policy may target every tool (`targets_all`), and the members of `ToolInvocationConfig` besides `mode` it implements (`config_members`). An advertised form is never refused with 422 `unsupported_policy_form`; a form it does not list may be. Absent means the deployment does not say, and a refused form is learnt from the 422.
+            The policy forms this deployment enforces (rev 11), by kind. For `tool_invocation`: the modes, the subject types, whether a policy may target every tool (`targets_all`), and the members of `ToolInvocationConfig` besides `mode` it implements (`config_members`; rev 16 adds `rules` under `policies.rules`, and `approvers` and `exclude` under `approvals.requirements`). For `approval_routing` (rev 16, under `approvals.requirements`): the members of `ApprovalRoutingConfig` it implements; the kind is not served where the entry is absent. An advertised form is never refused with 422 `unsupported_policy_form`; a form it does not list may be. Absent means the deployment does not say, and a refused form is learnt from the 422.
           properties:
             tool_invocation:
               type: object
@@ -6960,6 +7369,21 @@ components:
                     minLength: 1
                   description: |
                     The members of `ToolInvocationConfig` besides `mode` this deployment implements, for example `on_deny`, `expires_after` and `approver_groups`.
+            approval_routing:
+              type: object
+              description: |
+                Rev 16: the deployment serves policies of kind `approval_routing` (organisation subject, every tool).
+              required:
+                - config_members
+              properties:
+                config_members:
+                  type: array
+                  uniqueItems: true
+                  items:
+                    type: string
+                    minLength: 1
+                  description: |
+                    The members of `ApprovalRoutingConfig` this deployment implements, for example `org_admin_break_glass`.
         deployment_applied:
           type: array
           description: |

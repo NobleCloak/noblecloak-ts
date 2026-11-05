@@ -48,6 +48,7 @@ export const KNOWN_POLICY_KINDS = Object.freeze([
   'tool_invocation',
   'spending',
   'duplicate_requests',
+  'approval_routing',
 ] as const);
 
 /** Whether `value` is one of the five documented modes. */

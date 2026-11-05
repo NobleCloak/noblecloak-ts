@@ -48,6 +48,11 @@ export const FEATURES = [
   'policies.tightest_wins',
   // Rev 15: the single read of a pending approval lists what the reader may do (either kind).
   'approvals.available_actions',
+  // Rev 16: the facts of a call read through a tool's fact bindings, policy rules over them, and the
+  // requirements of an approval with the approvers who may meet each.
+  'tools.facts',
+  'policies.rules',
+  'approvals.requirements',
 ] as const;
 
 export type Feature = (typeof FEATURES)[number];

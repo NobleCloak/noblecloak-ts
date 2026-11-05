@@ -7,7 +7,22 @@ export type Mode = (typeof MODES)[number];
 /** The modes that need an approval, the only ones `on_deny`, `expires_after` and `approver_groups` apply to. */
 export const APPROVAL_MODES: readonly Mode[] = ['ask', 'escalate'];
 export const PRINCIPAL_KINDS = ['user', 'agent', 'service', 'group', 'role'] as const;
-const CONFIG_MEMBERS = ['mode', 'on_deny', 'expires_after', 'approver_groups'];
+const CONFIG_MEMBERS = [
+  'mode',
+  'on_deny',
+  'expires_after',
+  'approver_groups',
+  'rules',
+  'approvers',
+  'exclude',
+];
+const MAX_RULES = 32;
+const MAX_APPROVERS = 32;
+const MAX_CONDITIONS = 8;
+const MAX_IN_VALUES = 100;
+const FACT_NAME = /^[a-z][a-z0-9_]{0,62}$/;
+const CONDITION_OPS = ['eq', 'ne', 'in', 'not_in', 'gt', 'gte', 'lt', 'lte', 'exists'];
+const RULE_OUTCOMES = ['always_allow', 'ask', 'deny'];
 const MAX_TOOLS = 100;
 const MAX_NAME = 200;
 const MAX_DESCRIPTION = 2000;
@@ -47,17 +62,21 @@ function stringProblem(path: string, value: string): Problem[] {
 }
 
 /**
- * What makes a policy something other than a valid rev 10 `tool_invocation` policy: its kind, the
+ * What makes a policy something other than a valid `tool_invocation` policy (contract rev 16): its kind, the
  * `PolicyWrite` schema (subjects, targets, name and description limits), the `ToolInvocationConfig`
  * schema and its legality matrix (`on_deny`, `expires_after` and `approver_groups` only with `ask` or
- * `escalate`), and strings Cedar cannot represent. Empty when it is one.
+ * `escalate`; rev 16 `rules`, `approvers` and `exclude` with every mode, as the contract's schemas shape
+ * them), and strings Cedar cannot represent. Empty when it is one.
  */
 export function toolInvocationProblems(policy: PolicyWrite): Problem[] {
   if (policy.kind !== 'tool_invocation') {
     return [
       {
         path: '/kind',
-        reason: `kind ${show(policy.kind)} has no Cedar form; only tool_invocation policies convert`,
+        reason:
+          policy.kind === 'approval_routing'
+            ? 'kind "approval_routing" has no Cedar or AGT form: it is an organisation setting for who may satisfy approvals, not a policy on a call; only tool_invocation policies convert'
+            : `kind ${show(policy.kind)} has no Cedar form; only tool_invocation policies convert`,
       },
     ];
   }
@@ -207,5 +226,155 @@ function configProblems(policy: PolicyWrite): Problem[] {
         problems.push(...stringProblem(pointer('config', 'approver_groups', index), group));
       });
   }
+  if (members.rules !== undefined) problems.push(...rulesProblems(members.rules, '/config/rules'));
+  if (members.approvers !== undefined)
+    problems.push(...approversProblems(members.approvers, '/config/approvers'));
+  if (members.exclude !== undefined) problems.push(...excludeProblems(members.exclude));
   return problems;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Members of an object outside `allowed`, as problems (a file cannot carry what this version does not read). */
+function extraMembers(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string
+): Problem[] {
+  return Object.keys(value)
+    .filter((key) => value[key] !== undefined && !allowed.includes(key))
+    .map((key) => ({
+      path: `${path}${pointer(key)}`,
+      reason: `${quote(key)} is not a member here`,
+    }));
+}
+
+/** Every string below a JSON value that holds an unpaired surrogate, as problems. */
+function surrogateProblems(value: unknown, path: string): Problem[] {
+  if (typeof value === 'string') return stringProblem(path, value);
+  if (Array.isArray(value))
+    return (value as unknown[]).flatMap((element, index) =>
+      surrogateProblems(element, `${path}${pointer(index)}`)
+    );
+  if (isObject(value))
+    return Object.entries(value).flatMap(([key, member]) => [
+      ...stringProblem(`${path}${pointer(key)}`, key),
+      ...surrogateProblems(member, `${path}${pointer(key)}`),
+    ]);
+  return [];
+}
+
+function isScalar(value: unknown): boolean {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  );
+}
+
+function conditionProblems(condition: unknown, path: string): Problem[] {
+  if (!isObject(condition)) return [{ path, reason: 'a condition is an object' }];
+  const problems = extraMembers(condition, ['fact', 'op', 'value'], path);
+  const { fact, op, value } = condition;
+  if (typeof fact !== 'string' || !FACT_NAME.test(fact))
+    problems.push({
+      path: `${path}/fact`,
+      reason:
+        'fact is a fact name: a lowercase letter, then up to 62 lowercase letters, digits or _',
+    });
+  if (typeof op !== 'string' || !CONDITION_OPS.includes(op)) {
+    problems.push({ path: `${path}/op`, reason: `op is one of ${CONDITION_OPS.join(', ')}` });
+    return problems;
+  }
+  if (op === 'exists') {
+    if (value !== undefined)
+      problems.push({ path: `${path}/value`, reason: 'exists takes no value' });
+  } else if (op === 'in' || op === 'not_in') {
+    if (
+      !Array.isArray(value) ||
+      value.length < 1 ||
+      value.length > MAX_IN_VALUES ||
+      !(value as unknown[]).every(isScalar)
+    )
+      problems.push({
+        path: `${path}/value`,
+        reason: `${op} takes a list of 1 to ${String(MAX_IN_VALUES)} scalars (string, number, boolean or null)`,
+      });
+    else problems.push(...surrogateProblems(value, `${path}/value`));
+  } else if (op === 'eq' || op === 'ne') {
+    if (!isScalar(value))
+      problems.push({
+        path: `${path}/value`,
+        reason: `${op} takes a scalar value (string, number, boolean or null)`,
+      });
+    else problems.push(...surrogateProblems(value, `${path}/value`));
+  } else if (typeof value !== 'number' || !Number.isFinite(value)) {
+    problems.push({ path: `${path}/value`, reason: `${op} takes a number` });
+  }
+  return problems;
+}
+
+function conditionsProblems(conditions: unknown, path: string): Problem[] {
+  if (!Array.isArray(conditions) || conditions.length < 1 || conditions.length > MAX_CONDITIONS)
+    return [{ path, reason: `when is an array of 1 to ${String(MAX_CONDITIONS)} conditions` }];
+  return (conditions as unknown[]).flatMap((condition, index) =>
+    conditionProblems(condition, `${path}${pointer(index)}`)
+  );
+}
+
+export function approversProblems(approvers: unknown, path: string): Problem[] {
+  if (!Array.isArray(approvers) || approvers.length < 1 || approvers.length > MAX_APPROVERS)
+    return [{ path, reason: `approvers is an array of 1 to ${String(MAX_APPROVERS)} entries` }];
+  return (approvers as unknown[]).flatMap((entry, index) => {
+    const at = `${path}${pointer(index)}`;
+    if (!isObject(entry)) return [{ path: at, reason: 'an approver is { role } or { user }' }];
+    const problems = extraMembers(entry, ['role', 'user', 'when'], at);
+    const named = ['role', 'user'].filter((key) => entry[key] !== undefined);
+    const [only] = named;
+    if (named.length !== 1 || only === undefined)
+      problems.push({
+        path: at,
+        reason: 'an approver is { role } or { user }, not both or neither',
+      });
+    else {
+      const id = entry[only];
+      if (typeof id !== 'string' || id.length === 0)
+        problems.push({ path: `${at}/${only}`, reason: `${only} is a non-empty string` });
+      else problems.push(...stringProblem(`${at}/${only}`, id));
+    }
+    if (entry.when !== undefined) problems.push(...conditionsProblems(entry.when, `${at}/when`));
+    return problems;
+  });
+}
+
+export function rulesProblems(rules: unknown, path: string): Problem[] {
+  if (!Array.isArray(rules) || rules.length < 1 || rules.length > MAX_RULES)
+    return [{ path, reason: `rules is an array of 1 to ${String(MAX_RULES)} rules` }];
+  return (rules as unknown[]).flatMap((rule, index) => {
+    const at = `${path}${pointer(index)}`;
+    if (!isObject(rule)) return [{ path: at, reason: 'a rule is { when, then, approvers? }' }];
+    const problems = extraMembers(rule, ['when', 'then', 'approvers'], at);
+    problems.push(...conditionsProblems(rule.when, `${at}/when`));
+    if (typeof rule.then !== 'string' || !RULE_OUTCOMES.includes(rule.then))
+      problems.push({ path: `${at}/then`, reason: `then is one of ${RULE_OUTCOMES.join(', ')}` });
+    if (rule.approvers !== undefined) {
+      if (rule.then !== 'ask')
+        problems.push({
+          path: `${at}/approvers`,
+          reason: 'approvers applies only to a rule whose then is ask',
+        });
+      else problems.push(...approversProblems(rule.approvers, `${at}/approvers`));
+    }
+    return problems;
+  });
+}
+
+/** `exclude` is the one-entry list `["requester"]`: the schema's enum has one value and the list is unique. */
+export function excludeProblems(exclude: unknown, path = '/config/exclude'): Problem[] {
+  return Array.isArray(exclude) && exclude.length === 1 && exclude[0] === 'requester'
+    ? []
+    : [{ path, reason: 'exclude is ["requester"]' }];
 }

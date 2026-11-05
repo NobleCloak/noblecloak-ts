@@ -85,6 +85,10 @@ export interface PolicyForms {
     readonly targets_all: boolean;
     readonly config_members: readonly string[];
   };
+  /** Rev 16: the deployment serves `approval_routing` policies, with these members of `ApprovalRoutingConfig`. */
+  readonly approval_routing?: {
+    readonly config_members: readonly string[];
+  };
 }
 
 /** The limits a deployment advertised, by name. */
