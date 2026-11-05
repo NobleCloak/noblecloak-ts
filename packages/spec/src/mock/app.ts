@@ -1592,8 +1592,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
    * Opens an obligation, or returns the open one. A Response is a refusal; `rejectedDuplicate` is the
    * rejected-duplicate rule's refusal, which a decision answers `deny` and `POST /v1/approvals` 409.
    * `split` is the `batch_duplicates_split` defect: an identical open obligation is not joined. Rev 16: an open
-   * obligation that lacks a requirement of `requirements` is joined only while pending, and gains it (see
-   * `lackingRequirements`).
+   * obligation that lacks a requirement of `requirements` gains it while pending (see `lackingRequirements`);
+   * an approved one is joined as it is.
    */
   const openObligation = (
     c: Ctx,
@@ -1621,19 +1621,19 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     const tooLarge = argumentsTooLarge(c, args.tool, args.arguments);
     if (tooLarge !== undefined) return tooLarge;
     const identity = identityOf(p.org, args.scope.key, args.tool.tool_ref, args.digest, args.door);
-    let existing = args.split === true ? undefined : findOpen(identity);
-    // Rev 16: an open approval is joined only with every requirement this call sets. A pending one that lacks some
-    // gains them, unmet; an approved one that lacks some is not joined, and a separate approval opens.
-    const lacking = existing === undefined ? [] : lackingRequirements(existing, args.requirements);
-    if (existing !== undefined && lacking.length > 0) {
-      if (existing.state === 'pending') {
+    const existing = args.split === true ? undefined : findOpen(identity);
+    // Rev 16: a pending approval that lacks requirements this call sets gains them, unmet. An approved one is
+    // joined as it is: it keeps the requirements it was approved under.
+    if (existing?.state === 'pending') {
+      const lacking = lackingRequirements(existing, args.requirements);
+      if (lacking.length > 0) {
         const held = existing.requirements ?? [];
         existing.requirements = [
           ...held,
           ...lacking.map((r, i) => ({ ...r, id: `r${String(held.length + i + 1)}` })),
         ];
         notify(existing);
-      } else existing = undefined;
+      }
     }
     if (existing !== undefined) {
       const had = existing.continuation;

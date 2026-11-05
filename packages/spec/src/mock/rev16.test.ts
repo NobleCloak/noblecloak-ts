@@ -782,7 +782,7 @@ describe('the mock, rev 16: requirements', () => {
     expect(m.data(await m.approve(cfo, approval)).state).toBe('approved');
   });
 
-  it('adds what a joining decision requires to a pending approval, and opens another beside an approved one', async () => {
+  it('adds what a joining decision requires to a pending approval, and joins an approved one as it is', async () => {
     const m = await make();
     const finance = await m.userWith('user_finance', ['finance']);
     const { ref } = await m.tool();
@@ -805,18 +805,28 @@ describe('the mock, rev 16: requirements', () => {
     const approval = { id, digest: String(joined.action_digest) };
     expect((await m.approve(m.tokens.approver, approval)).status).toBe(403);
     expect(m.data(await m.approve(finance, approval)).state).toBe('approved');
-    // Approved under that requirement, it is not joined by a call that requires another: a separate one opens.
+    // Approved under that requirement, it is joined as it is by a call that requires another: same id, the
+    // requirements it was approved under, and no second approval.
     await m.publish(
       m.policy(ref, { mode: 'ask', approvers: [{ role: 'cfo' }] }, { type: 'role', id: 'everyone' })
     );
-    const separate = m.data(await m.decide(ref, { arguments: { amount: 300 } }));
-    const other = (separate.approval as Json).id;
-    expect(other).not.toBe(id);
-    expect((await m.read(m.tokens.creator_user, String(other))).state).toBe('pending');
-    expect((await m.read(m.tokens.creator_user, id)).state).toBe('approved');
-    // The same call with nothing new to require joins the approval that is open now.
-    const again = m.data(await m.decide(ref, { arguments: { amount: 300 } }));
-    expect((again.approval as Json).id).toBe(other);
+    updates.length = 0;
+    const later = m.data(await m.decide(ref, { arguments: { amount: 300 } }));
+    expect((later.approval as Json).id).toBe(id);
+    const kept = await m.read(m.tokens.creator_user, id);
+    expect(kept.state).toBe('approved');
+    expect(kept.requirements).toMatchObject([
+      { id: 'r1', approvers: [{ role: 'finance' }], met: true },
+    ]);
+    expect(kept.requirements).toHaveLength(1);
+    expect(updates).toEqual([]);
+    // POST /v1/approvals on the approved match is a join like any other: 200, created: false, the same id.
+    const post = await m.call(m.tokens.creator_user, 'POST', '/v1/approvals', {
+      action: { tool_ref: ref, arguments: { amount: 300 } },
+      continuation: { kind: 'langgraph', delivery: 'pull' },
+    });
+    expect(post.status).toBe(200);
+    expect(m.data(post)).toMatchObject({ id, created: false });
   });
 
   it('keeps the requester out of a requirement that excludes it, from the approver surface and as an administrator', async () => {

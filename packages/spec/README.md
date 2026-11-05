@@ -627,7 +627,7 @@ authors policies (hosted), and `approvals.requirements` where it also serves app
 lookup, except for a call that a published policy carrying `rules`, `approvers` or `exclude` matches: then it composes
 every policy that matches the call, and an approval it opens carries requirements. `POST /v1/approvals` sets the same
 requirements as a decision of the call, and a call that matches an open approval lacking some of its requirements adds
-them while it is pending, and opens a separate approval when it is approved. Roles are read from the `role:<key>`
+them while it is pending, and joins an approved one as it is, with the requirements it was approved under. Roles are read from the `role:<key>`
 scopes of the approver's token. Five breaks drop one rule each: `rules_ignored`, `missing_fact_falls_to_mode`,
 `partial_approve_resolves`, `exclude_requester_ignored` and `break_glass_ignores_setting`.
 `33-rev16-facts-rules-requirements.yaml` has four scenarios: `rev16-rules-decide-by-the-facts-of-the-call` (deny,
