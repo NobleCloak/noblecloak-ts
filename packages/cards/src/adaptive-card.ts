@@ -12,6 +12,7 @@ import {
   distinctInputs,
   factRows,
   historyLines,
+  requirementsLine,
   resolveActions,
   safeUrl,
   whyText,
@@ -202,6 +203,8 @@ function build(
   }
 
   if (card.notice === 'already_handled') body.push(block(md(CARD_TEXT.alreadyHandled)));
+  const requirements = requirementsLine(card);
+  if (requirements !== undefined) body.push(block(md(requirements), { isSubtle: true }));
   body.push(block(md(card.status.line), { isSubtle: true }));
 
   const payload =

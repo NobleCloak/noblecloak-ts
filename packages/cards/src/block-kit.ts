@@ -10,6 +10,7 @@ import {
   distinctInputs,
   factRows,
   historyLines,
+  requirementsLine,
   resolveActions,
   safeUrl,
   whyText,
@@ -204,10 +205,12 @@ function buildFull(
     });
   }
 
+  const requirements = requirementsLine(card);
   const statusElements = [
     ...(card.notice === 'already_handled'
       ? [plain(CARD_TEXT.alreadyHandled, SLACK_LIMITS.sectionText)]
       : []),
+    ...(requirements === undefined ? [] : [plain(requirements, SLACK_LIMITS.sectionText)]),
     plain(card.status.line, SLACK_LIMITS.sectionText),
   ];
   blocks.push({ type: 'context', elements: statusElements });

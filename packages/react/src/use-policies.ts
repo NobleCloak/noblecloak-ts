@@ -100,6 +100,11 @@ export function usePolicies(options: UsePoliciesOptions): PoliciesController {
     [store]
   );
 
+  const setApprovalRouting = useCallback<PoliciesStore['setApprovalRouting']>(
+    (breakGlass) => store.setApprovalRouting(breakGlass),
+    [store]
+  );
+
   return useMemo(
     () => ({
       ...snapshot,
@@ -115,6 +120,7 @@ export function usePolicies(options: UsePoliciesOptions): PoliciesController {
       effective,
       latest: latestOf,
       saveImported,
+      setApprovalRouting,
     }),
     [
       snapshot,
@@ -130,6 +136,7 @@ export function usePolicies(options: UsePoliciesOptions): PoliciesController {
       effective,
       latestOf,
       saveImported,
+      setApprovalRouting,
     ]
   );
 }

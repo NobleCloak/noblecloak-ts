@@ -10,6 +10,7 @@ import type {
 } from '../permissions-types.js';
 import { POLICY_MODES, PROVISIONAL_MODES, takesConditions } from '../permissions-vocabulary.js';
 import { MAY_BE_REFUSED } from './ModeLegend.js';
+import { readRules } from '../permissions-rules.js';
 import { usePolicyEditor } from '../use-policy-editor.js';
 import { escapeInvisible } from './format-json.js';
 import { createPermissionsTranslate, modeKey } from './permissions-labels.js';
@@ -24,6 +25,7 @@ import {
   subjectTextWith,
 } from './permissions-parts.js';
 import type { SubjectLabel } from './permissions-parts.js';
+import { RulesSections, refusalOf, ruleSectionsOf } from './RulesEditor.js';
 import { useNc, WithComponents } from './slots.js';
 import type { ModuleComponents } from './slots.js';
 
@@ -84,7 +86,8 @@ const SUBJECT_TYPES = ['role', 'organization', 'user', 'agent', 'service', 'grou
 /**
  * The editor of one policy: its versions (draft or published, and who wrote each), and a working copy of the pending
  * draft (or of the published version) with its name, description, subjects, tools and mode; `on_deny`, approver groups
- * and expiry only for a mode that takes them. Save writes the draft; Publish publishes the draft it loaded or saved,
+ * and expiry only for a mode that takes them, and, where the service lists the members in
+ * `policy_forms.tool_invocation.config_members`, Rules, Approvers and Exclusions (see `RulesSections`). Save writes the draft; Publish publishes the draft it loaded or saved,
  * where publishing is offered. A refusal from the service is shown next to the member it names, verbatim, and the
  * draft is kept.
  */
@@ -174,6 +177,14 @@ function EditorView({
       ? (['on_deny', 'approver_groups', 'expires_after'] as const)
       : []),
   ];
+  // The rev 16 sections, each only where the service lists its member. A refusal that names one of their rows is
+  // shown at that row, so it is not repeated at the top.
+  const sections = ruleSectionsOf(controller);
+  const ruleRefusal =
+    sections.rules || sections.approvers || sections.exclude ? refusalOf(editor.error) : undefined;
+  const rulesPresent = sections.rules && readRules(config).state !== 'absent';
+  const showProblems =
+    editor.error?.kind === 'precondition' && editor.error.code === 'rules_invalid';
   const named = refusedField(editor.error);
   const refused = named !== undefined && shownFields.includes(named) ? named : undefined;
   const fieldError = (field: Field): ReactNode =>
@@ -269,7 +280,7 @@ function EditorView({
           <p>{t('stale')}</p>
         </div>
       ) : null}
-      {editor.error !== undefined && refused === undefined ? (
+      {editor.error !== undefined && refused === undefined && ruleRefusal === undefined ? (
         <PermissionsErrorAlert
           error={editor.error}
           t={t}
@@ -440,7 +451,7 @@ function EditorView({
           {fieldError('targets')}
         </fieldset>
 
-        <Label htmlFor={ids.mode}>{t('fieldMode')}</Label>
+        <Label htmlFor={ids.mode}>{rulesPresent ? t('fieldModeFallback') : t('fieldMode')}</Label>
         <Select
           id={ids.mode}
           value={mode ?? ''}
@@ -521,6 +532,19 @@ function EditorView({
             {fieldError('expires_after')}
           </fieldset>
         ) : null}
+
+        {working === undefined ||
+        !(sections.rules || sections.approvers || sections.exclude) ? null : (
+          <RulesSections
+            controller={controller}
+            editor={editor}
+            sections={sections}
+            t={t}
+            readOnly={readOnly}
+            showProblems={showProblems}
+            refusal={ruleRefusal}
+          />
+        )}
 
         {editor.authoring.readOnly || canRetire ? null : (
           <p className="nc-muted">{t('noRemove')}</p>

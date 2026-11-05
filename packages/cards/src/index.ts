@@ -25,6 +25,7 @@ export type {
   CardOtherAction,
   CardPrincipal,
   CardRequirement,
+  CardRequirementApproval,
   CardResolveAction,
   CardStatus,
   CardViewer,

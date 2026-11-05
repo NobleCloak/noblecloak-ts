@@ -15,6 +15,7 @@ import type {
   SimulationResult,
   ToolInfo,
 } from './permissions-types.js';
+import { toolFactsOf } from './connections-facts.js';
 import { KNOWN_POLICY_KINDS, isKnownMode } from './permissions-vocabulary.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -145,6 +146,7 @@ export function toolOf(value: unknown): ToolInfo | undefined {
     return undefined;
   // Absent is `active` (a server of an earlier revision). Present, it is kept as sent; a value that is not text is kept
   // as its JSON and flagged unknown, so the row and its policies stay on the grid.
+  const facts = toolFactsOf(value.facts);
   const sent = value.status;
   const status = sent === undefined ? 'active' : isText(sent) ? sent : JSON.stringify(sent);
   return {
@@ -157,6 +159,12 @@ export function toolOf(value: unknown): ToolInfo | undefined {
       ? { sideEffectLevel: value.side_effect_level }
       : {}),
     ...(typeof value.description === 'string' ? { description: value.description } : {}),
+    // A `facts` member that cannot be read in full is left out (and flagged), so the picker offers no half-read fact.
+    ...(facts === undefined
+      ? {}
+      : facts === 'unreadable'
+        ? { factsUnreadable: true as const }
+        : { facts }),
   };
 }
 
@@ -184,6 +192,14 @@ function policyFormsOf(value: unknown): { policyForms?: PolicyFormsFacts } {
   const form = value.tool_invocation;
   const list = (v: unknown): v is string[] =>
     Array.isArray(v) && v.every((x) => typeof x === 'string');
+  // Rev 16: the break-glass setting is served when `approval_routing` names its one member.
+  const routing = value.approval_routing;
+  const approvalRouting =
+    isRecord(routing) &&
+    list(routing.config_members) &&
+    routing.config_members.includes('org_admin_break_glass')
+      ? { approvalRouting: true as const }
+      : {};
   if (
     !isRecord(form) ||
     !list(form.modes) ||
@@ -191,9 +207,10 @@ function policyFormsOf(value: unknown): { policyForms?: PolicyFormsFacts } {
     typeof form.targets_all !== 'boolean' ||
     !list(form.config_members)
   )
-    return { policyForms: {} };
+    return { policyForms: { ...approvalRouting } };
   return {
     policyForms: {
+      ...approvalRouting,
       toolInvocation: {
         modes: [...form.modes],
         subjectTypes: [...form.subject_types],
@@ -226,9 +243,55 @@ export function policyCapabilitiesOf(value: unknown): PolicyCapabilityFacts | un
   };
 }
 
+/** A `publishedAt` as a time: an instant when it parses, else the earliest, so a value this module cannot read loses. */
+const publishedTime = (at: string | null | undefined): number => {
+  const time = at == null ? Number.NaN : Date.parse(at);
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+};
+
+/**
+ * The published `approval_routing` policy in force: the most recently published one (compared as instants, the later
+ * in the list on a tie) whose configuration this module can read. `undefined` when there is none.
+ */
+export function currentRoutingPolicy(
+  policies: readonly { readonly policy: PolicyInfo; readonly view: OtherPolicyView }[]
+): { readonly policy: PolicyInfo; readonly breakGlass: boolean } | undefined {
+  let best: { readonly policy: PolicyInfo; readonly breakGlass: boolean } | undefined;
+  for (const { policy, view } of policies) {
+    if (policy.kind !== 'approval_routing' || policy.state !== 'published') continue;
+    if (view.kind !== 'approval_routing') continue;
+    if (
+      best === undefined ||
+      publishedTime(policy.publishedAt) >= publishedTime(best.policy.publishedAt)
+    )
+      best = { policy, breakGlass: view.breakGlass };
+  }
+  return best;
+}
+
+/**
+ * The organisation's break-glass setting from the policies of other kinds: that of `currentRoutingPolicy`. With none,
+ * the setting is the contract's default, on, and `fromPolicy` is false.
+ */
+export function breakGlassOf(
+  policies: readonly { readonly policy: PolicyInfo; readonly view: OtherPolicyView }[]
+): {
+  readonly on: boolean;
+  readonly fromPolicy: boolean;
+} {
+  const current = currentRoutingPolicy(policies);
+  return current === undefined
+    ? { on: true, fromPolicy: false }
+    : { on: current.breakGlass, fromPolicy: true };
+}
+
 /** How a policy of another kind is shown: only a well-formed `duplicate_requests` configuration is summarized. */
 export function otherViewOf(policy: PolicyInfo): OtherPolicyView {
   const config = policy.config;
+  if (policy.kind === 'approval_routing')
+    return typeof config.org_admin_break_glass === 'boolean'
+      ? { kind: 'approval_routing', breakGlass: config.org_admin_break_glass }
+      : { kind: 'opaque' };
   if (policy.kind !== 'duplicate_requests' || !isText(config.after_rejection))
     return { kind: 'opaque' };
   return {
@@ -252,6 +315,19 @@ function consideredEntryOf(
   if (value.subject !== undefined && subject === undefined) return undefined;
   if (value.source !== undefined && !isText(value.source)) return undefined;
   if (value.contributed !== undefined && typeof value.contributed !== 'boolean') return undefined;
+  // Rev 16: a `rule` or `missing_facts` that is present and not the contract's shape makes the entry unreadable, as
+  // `contributed` does: dropping it would show a rule's result as the mode's.
+  let rule: ConsideredEntry['rule'];
+  if (value.rule !== undefined) {
+    if (!isRecord(value.rule) || !isCount(value.rule.index) || !isText(value.rule.then))
+      return undefined;
+    rule = { index: value.rule.index, then: value.rule.then };
+  }
+  let missing: string[] | undefined;
+  if (value.missing_facts !== undefined) {
+    if (!Array.isArray(value.missing_facts) || !value.missing_facts.every(isText)) return undefined;
+    missing = [...value.missing_facts];
+  }
   const name = id === null ? undefined : names.get(id);
   return {
     kind: value.kind,
@@ -262,6 +338,8 @@ function consideredEntryOf(
     ...(isText(value.source) ? { source: value.source } : {}),
     ...(name === undefined ? {} : { name }),
     ...(typeof value.contributed === 'boolean' ? { contributed: value.contributed } : {}),
+    ...(rule === undefined ? {} : { rule }),
+    ...(missing === undefined ? {} : { missingFacts: missing }),
   };
 }
 
@@ -281,6 +359,11 @@ export function simulationOf(
   // into "the default decided", and a missing `would_be` or `rejected_approval_id` into a fact the service never sent.
   for (const member of ['reason', 'would_be', 'rejected_approval_id'] as const)
     if (body[member] !== undefined && !isText(body[member])) return undefined;
+  if (
+    body.missing_facts !== undefined &&
+    !(Array.isArray(body.missing_facts) && body.missing_facts.every(isText))
+  )
+    return undefined;
   if (
     body.policy !== undefined &&
     !(
@@ -332,6 +415,7 @@ export function simulationOf(
     ...(isText(body.would_be) ? { wouldBe: body.would_be } : {}),
     ...(policy === undefined ? {} : { policy }),
     ...(isText(body.rejected_approval_id) ? { rejectedApprovalId: body.rejected_approval_id } : {}),
+    ...(Array.isArray(body.missing_facts) ? { missingFacts: [...body.missing_facts] } : {}),
     ...(considered === undefined ? {} : { considered }),
     ...(appliesToCaller === undefined ? {} : { appliesToCaller }),
   };

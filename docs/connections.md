@@ -98,6 +98,13 @@ open registration.
   server offers nothing at all, a deployment may keep the registered tools rather than withdraw every one, and says
   so.
 
+A registered tool may declare **facts** (revision 16): named values the deployment reads from the arguments of a call
+(`amount` at `.amount`, a number; `recipients` at `.to`, a count, the length of a list). The `rules` of a tool
+invocation policy test them (`ToolInvocationConfig` in the contract); a client never states one. A fact has a name that starts with a lower-case letter and holds lower-case letters, digits and
+underscores, a path of `.key` and `[N]` segments from the root of the arguments (no wildcard), a type, and an optional
+description; a tool declares at most 32. Changing a tool's facts replaces the whole map. A deployment that does not list `tools.facts` refuses facts.
+[Conditions and approvers](./conditions-and-approvers.md) shows a tool declaring a fact and a policy testing it.
+
 A registered tool is addressed by its `tool_ref`, which is what policies name (see
 [The ladder](./the-ladder.md)). A `tool_ref` is a stable reference the deployment assigns: compare it, never parse it.
 It stays the same while the server's URL does, across disconnecting and reconnecting.

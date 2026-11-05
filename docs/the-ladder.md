@@ -78,8 +78,8 @@ or `not_granted` they are refused. The module clears them, with a note, when the
 | `expires_after`   | an ISO 8601 duration (`PT1H`) | How long the approval may wait.                                           |
 | `approver_groups` | group ids                     | Approver groups; the module reads them as a condition on who may approve. |
 
-Approver groups are a condition, not a separate policy. A policy's groups together form one approval requirement,
-met by any eligible member of any listed group; the schema may grow. (`ToolInvocationConfig.approver_groups`.)
+`approver_groups` (`ToolInvocationConfig.approver_groups`) is accepted and stored, but it does not decide who may
+answer an approval. To route an approval, name `approvers`: see [Conditions and approvers](./conditions-and-approvers.md).
 
 ## Drafts, versions and publishing
 
@@ -99,6 +99,15 @@ The module therefore shows, for each role and tool, the published policy that go
 that the deployment's default applies, or, from a service that lists two published policies for one pair, that they
 conflict (that cell cannot be edited). That table is what was authored; what a holder of the role actually gets is
 the effective view (below).
+
+## Rules within a policy
+
+A tool policy may also carry **rules** over the facts of a call (contract revision 16): "over 5000, deny; over 500,
+ask". The policy's `mode` is the outcome when no rule matches. Rules are walked in order and the first that matches
+decides that one policy's result. Across policies nothing changes: the results of every policy that matched still
+compose tightest-wins, as above, so a rule never loosens another policy's `deny`. A call that carries no arguments
+has no facts, and a policy whose rule needs one asks. The policy may also name who answers (`approvers`) and who may
+not (`exclude`). [Conditions and approvers](./conditions-and-approvers.md) has all of it, with an example.
 
 ## Simulate: what matched, and what it composed to
 

@@ -7,7 +7,9 @@
  * what a dry run as that role answers (the effective view), and which entries set it only where the service
  * advertises how policies compose.
  */
+import type { ToolFacts } from './connections-facts.js';
 import type { EffectiveStore } from './permissions-effective.js';
+import type { PolicyApprover, PolicyRule } from './permissions-rules.js';
 
 /** A policy subject: a principal by kind and id, or the organisation itself (no id). Another type is kept as sent. */
 export interface PolicySubject {
@@ -74,6 +76,8 @@ export interface PolicyFormsFacts {
     readonly targetsAll: boolean;
     readonly configMembers: readonly string[];
   };
+  /** `approval_routing` is listed: the organisation's break-glass setting is served (rev 16). */
+  readonly approvalRouting?: true;
 }
 
 /** A tool from `GET /v1/tools`, as the matrix uses it. */
@@ -93,6 +97,10 @@ export interface ToolInfo {
    * as not callable (its cells are read-only, as a withdrawn tool's are).
    */
   readonly statusKnown: boolean;
+  /** Rev 16: the facts the tool declares, by name. Absent: it declares none, or the service sent none. */
+  readonly facts?: ToolFacts;
+  /** Rev 16: true when a `facts` member was sent that this module cannot read in full, so `facts` is left out. */
+  readonly factsUnreadable?: true;
 }
 
 /** The members of `GET /v1/capabilities` this module reads. Never the deployment: only what is advertised. */
@@ -154,7 +162,11 @@ export type PermissionsPreconditionCode =
   /** A write to the same policy is in flight. */
   | 'write_in_flight'
   /** The tool is not callable (withdrawn, or a status the module does not know): a cell on it is read-only. */
-  | 'tool_not_callable';
+  | 'tool_not_callable'
+  /** The working copy holds rules or approvers the contract refuses (`checkRules` names them): nothing is sent. */
+  | 'rules_invalid'
+  /** The organisation's break-glass setting is not served here (`approval_routing` is not in `policy_forms`). */
+  | 'approval_routing_not_offered';
 
 /**
  * What went wrong, derived from the status and the problem code and never from prose. API problems are returned, never
@@ -171,6 +183,8 @@ export type PermissionsError = {
   readonly type?: string;
   /** The problem's `detail`, verbatim: for a 400 or a 422 it names the member that was refused. */
   readonly detail?: string;
+  /** The problem's `member` (rev 13), verbatim: a path into the request body, for example `config.rules[0].when[1].fact`. */
+  readonly member?: string;
   /** The wait the server asked for, in milliseconds. */
   readonly retryAfterMs?: number;
   /** The problem's `reason` token, kept only on a 503. */
@@ -248,6 +262,7 @@ export type PoliciesStatus = 'idle' | 'loading' | 'ready' | 'unavailable' | 'err
 
 /** How a policy of another kind is shown: a `duplicate_requests` setting, or a policy the module cannot evaluate. */
 export type OtherPolicyView =
+  | { readonly kind: 'approval_routing'; readonly breakGlass: boolean }
   | {
       readonly kind: 'duplicate_requests';
       readonly afterRejection: string;
@@ -513,6 +528,10 @@ export interface ConsideredEntry {
   readonly name?: string;
   /** Whether the service used this entry to reach the decision (rev 11), as sent; absent when it did not say. */
   readonly contributed?: boolean;
+  /** Rev 16: the rule of the policy that gave `result` (its index in `rules`, and its outcome); absent when `mode` did. */
+  readonly rule?: { readonly index: number; readonly then: string };
+  /** Rev 16: the facts the call did not supply that a rule needed; `result` is then `ask`. */
+  readonly missingFacts?: readonly string[];
 }
 
 /** What a simulation answered. `considered` lists inputs and the outcome; it says nothing about precedence. */
@@ -530,6 +549,8 @@ export interface SimulationResult {
     readonly sideEffectLevel?: string;
   };
   readonly rejectedApprovalId?: string;
+  /** Rev 16: the facts with no value that made a policy ask (`Decision.missing_facts`), when the service sent any. */
+  readonly missingFacts?: readonly string[];
   /** Absent when the service did not send it (it is optional on the wire). */
   readonly considered?: {
     readonly policies: readonly ConsideredEntry[];
@@ -576,6 +597,12 @@ export interface PolicyEditorStore {
     field: 'on_deny' | 'expires_after' | 'approver_groups',
     value: string | readonly string[] | undefined
   ): void;
+  /** Rev 16: sets the rules, in order; none (or an empty list) removes the member. A member the editor could not read is never replaced. */
+  setRules(rules: readonly PolicyRule[] | undefined): void;
+  /** Rev 16: sets the policy's approver entries; none (or an empty list) removes the member. */
+  setApprovers(approvers: readonly PolicyApprover[] | undefined): void;
+  /** Rev 16: sets `exclude`; none (or an empty list) removes the member. */
+  setExclude(exclude: readonly string[] | undefined): void;
   save(): Promise<PolicyWriteResult>;
   publish(): Promise<PolicyWriteResult>;
 }
@@ -641,6 +668,13 @@ export interface PoliciesStore {
     write: PolicyWorkingCopy,
     options: { readonly origin: PolicyOrigin; readonly id?: string; readonly seen?: PolicyInfo }
   ): Promise<PolicyWriteResult>;
+  /**
+   * Sets the organisation's break-glass setting (rev 16 `approval_routing`): writes the next draft of the
+   * published policy of that kind in force and publishes it, or, when none is published, creates one for the
+   * organisation and publishes it. Refused without a request unless the
+   * service lists the form, authoring is on and publishing is offered.
+   */
+  setApprovalRouting(breakGlass: boolean): Promise<PolicyWriteResult>;
   dispose(): void;
 }
 
@@ -659,6 +693,7 @@ export interface PoliciesController extends PoliciesSnapshot {
   effective: PoliciesStore['effective'];
   latest: PoliciesStore['latest'];
   saveImported: PoliciesStore['saveImported'];
+  setApprovalRouting: PoliciesStore['setApprovalRouting'];
 }
 
 /** What `usePolicyEditor` returns: the editor's state and actions, and whether authoring is on. */
@@ -668,6 +703,9 @@ export interface PolicyEditorController extends PolicyEditorSnapshot {
   edit: PolicyEditorStore['edit'];
   setMode: PolicyEditorStore['setMode'];
   setCondition: PolicyEditorStore['setCondition'];
+  setRules: PolicyEditorStore['setRules'];
+  setApprovers: PolicyEditorStore['setApprovers'];
+  setExclude: PolicyEditorStore['setExclude'];
   save(): Promise<PolicyWriteResult>;
   publish(): Promise<PolicyWriteResult>;
 }

@@ -27,6 +27,7 @@ import {
 import { isSoleCell, subjectKey } from './permissions-matrix.js';
 import {
   connectionNameOf,
+  currentRoutingPolicy,
   otherViewOf,
   pageOf,
   policyCapabilitiesOf,
@@ -63,6 +64,13 @@ import type {
   ToolInfo,
   UsePoliciesOptions,
 } from './permissions-types.js';
+import {
+  checkRules,
+  factCatalogOf,
+  readApprovers,
+  readExclude,
+  readRules,
+} from './permissions-rules.js';
 import { CONDITION_FIELDS, takesConditions } from './permissions-vocabulary.js';
 
 /** Rows per page: the most the contract's `limit` allows. */
@@ -832,6 +840,54 @@ export function createPoliciesStore(options: UsePoliciesOptions): PoliciesStore 
     );
   }
 
+  async function setApprovalRouting(breakGlass: boolean): Promise<PolicyWriteResult> {
+    const refused =
+      writeRefusal() ??
+      (data.facts?.policyForms?.approvalRouting !== true
+        ? precondition('approval_routing_not_offered')
+        : !authoringOf().canPublish
+          ? precondition('publish_not_offered')
+          : undefined);
+    if (refused !== undefined) return { ok: false, error: refused };
+    // The policy in force is written over (its next draft, then published), so the organisation keeps one policy for
+    // the setting; a new one is created only when none is published.
+    const inForce = currentRoutingPolicy(data.others.policies)?.policy;
+    let created: PolicyWriteResult;
+    if (inForce === undefined)
+      created = await withBusy('new', () =>
+        sendWrite('POST', undefined, {
+          kind: 'approval_routing',
+          subjects: [{ type: 'organization' }],
+          targets: 'all',
+          config: { org_admin_break_glass: breakGlass },
+        })
+      );
+    else {
+      // The lists may not show the last write yet, so the newest version is read first and written over.
+      const newest = await latest(inForce.id);
+      if (!newest.ok) return newest;
+      // The setting is written over the published version or a draft this store wrote, never over a pending draft
+      // someone else wrote: that draft's other edits would be published unseen. It is refused, and left as it is.
+      const own = ownWrites.get(inForce.id);
+      if (
+        newest.policy.state !== 'published' &&
+        (own === undefined || !sameDraft(newest.policy, own))
+      )
+        return { ok: false, error: precondition('draft_changed') };
+      const next = await writeNext(inForce.id, newest.policy, (copy) => ({
+        ...copy,
+        config: { ...copy.config, org_admin_break_glass: breakGlass },
+      }));
+      created = next === 'changed' ? { ok: false, error: precondition('draft_changed') } : next;
+    }
+    if (!created.ok) return created;
+    const published = await publish(created.policy.id, created.policy);
+    // A draft that could not be published is not left behind in the Drafts tray, where nothing here can edit it.
+    if (!published.ok && authoringOf().canRetire)
+      await discardDraft(created.policy.id, created.policy);
+    return published;
+  }
+
   /** The draft the store has seen for `id`: its pending draft, or the list row of a policy never published. */
   function knownDraft(id: string): PolicyInfo | undefined {
     const listed = data.policies.find((p) => p.id === id);
@@ -1107,6 +1163,31 @@ export function createPoliciesStore(options: UsePoliciesOptions): PoliciesStore 
       set({ working, dirty: !sameCopy(working, saved), notes });
     }
 
+    /**
+     * Sets, or with none (or an empty list) removes, a rev 16 member of the configuration. A member that is there and
+     * unreadable is never replaced: what the editor could not show must not be what a save drops.
+     */
+    function setRuleMember(
+      member: 'rules' | 'approvers' | 'exclude',
+      read: (config: Readonly<Record<string, unknown>>) => { readonly state: string },
+      value: readonly unknown[] | undefined
+    ): void {
+      if (state.working === undefined) return;
+      if (read(state.working.config).state === 'unreadable') return;
+      const config: Record<string, unknown> = { ...state.working.config };
+      if (value === undefined || value.length === 0) Reflect.deleteProperty(config, member);
+      else config[member] = [...value];
+      change({ ...state.working, config });
+      // A refusal names a row by its index in the copy that was refused; the copy has changed, so the row it named
+      // may now be another one, or gone. Clearing it keeps the message off the wrong row.
+      const refused = state.error;
+      if (
+        (refused?.kind === 'unprocessable' || refused?.kind === 'invalid_request') &&
+        /^config\.(?:rules|approvers|exclude)\b/.test(refused.member ?? '')
+      )
+        set({ error: undefined });
+    }
+
     const editor: EditorInternal = {
       subscribe(listener) {
         own.add(listener);
@@ -1138,6 +1219,15 @@ export function createPoliciesStore(options: UsePoliciesOptions): PoliciesStore 
         else config[field] = typeof value === 'string' ? value : [...value];
         change({ ...state.working, config });
       },
+      setRules: (rules) => {
+        setRuleMember('rules', readRules, rules);
+      },
+      setApprovers: (approvers) => {
+        setRuleMember('approvers', readApprovers, approvers);
+      },
+      setExclude: (exclude) => {
+        setRuleMember('exclude', readExclude, exclude);
+      },
       async save() {
         const refused = writeRefusal();
         const working = state.working;
@@ -1151,7 +1241,10 @@ export function createPoliciesStore(options: UsePoliciesOptions): PoliciesStore 
                 ? precondition('kind_not_editable')
                 : state.stale
                   ? precondition('draft_changed')
-                  : inFlight(id));
+                  : checkRules(working.config, factCatalogOf(data.tools, working.targets)).problems
+                        .length > 0
+                    ? precondition('rules_invalid')
+                    : inFlight(id));
         if (error !== undefined || working === undefined) {
           const e = error ?? precondition('not_loaded');
           set({ error: e });
@@ -1377,6 +1470,7 @@ export function createPoliciesStore(options: UsePoliciesOptions): PoliciesStore 
     publish,
     retire,
     discardDraft,
+    setApprovalRouting,
     editor(id) {
       let found = editors.get(id);
       if (found === undefined) {

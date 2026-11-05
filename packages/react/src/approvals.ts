@@ -30,6 +30,12 @@ export type {
   UseApprovalsOptions,
 } from './approvals-types.js';
 
+export { requirementsOf } from './approvals-requirements.js';
+export type {
+  ApprovalRequirementView,
+  RequirementApproval,
+  RequirementApprover,
+} from './approvals-requirements.js';
 export { createApprovalsStore } from './approvals-store.js';
 export { useApprovals } from './use-approvals.js';
 export { useApprovalRequest } from './use-approval-request.js';

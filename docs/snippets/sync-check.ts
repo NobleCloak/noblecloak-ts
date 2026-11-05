@@ -1,5 +1,5 @@
 /**
- * Keeps the guides under docs/how-to and the typechecked files in this directory the same text.
+ * Keeps the guides (the pages under docs/how-to, and any further page a caller names) and the typechecked files in this directory the same text.
  *
  * A fenced `ts` block in a guide (any of ts, tsx, typescript, mts, cts, with or without attributes) is written as a marker line and the fence, with the one blank line
  * prettier puts after an HTML comment:
@@ -14,7 +14,7 @@
  * guide escapes the typecheck; so is a snippet file that no guide shows.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 export interface Block {
   /** The snippet name from the marker. */
@@ -78,18 +78,33 @@ export function snippetNames(snippetsDir: string): string[] {
     .sort();
 }
 
-/** Every way the guides and the snippets disagree, as `file:line: problem`; empty when they are the same text. */
-export function checkGuides(guidesDir: string, snippetsDir: string): string[] {
+/**
+ * Every way the guides and the snippets disagree, as `file:line: problem`; empty when they are the same text.
+ * `extraGuides` are further pages (paths to `.md` files) held to the same rule as the pages of `guidesDir`.
+ */
+export function checkGuides(
+  guidesDir: string,
+  snippetsDir: string,
+  extraGuides: readonly string[] = []
+): string[] {
   const problems: string[] = [];
   const shown = new Set<string>();
-  const guides = existsSync(guidesDir)
+  const inDir = existsSync(guidesDir)
     ? readdirSync(guidesDir)
         .filter((file) => file.endsWith('.md'))
         .sort()
     : [];
-  if (guides.length === 0) problems.push(`no guide under ${guidesDir}`);
-  for (const guide of guides) {
-    const extracted = extractBlocks(readFileSync(join(guidesDir, guide), 'utf8'));
+  if (inDir.length === 0) problems.push(`no guide under ${guidesDir}`);
+  const guides = [
+    ...inDir.map((file) => ({ name: file, path: join(guidesDir, file) })),
+    ...extraGuides.map((path) => ({ name: basename(path), path })),
+  ];
+  for (const { name: guide, path } of guides) {
+    if (!existsSync(path)) {
+      problems.push(`${guide}: no such guide`);
+      continue;
+    }
+    const extracted = extractBlocks(readFileSync(path, 'utf8'));
     for (const problem of extracted.problems) problems.push(`${guide}: ${problem}`);
     for (const block of extracted.blocks) {
       shown.add(block.name);

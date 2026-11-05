@@ -19,7 +19,7 @@ export type JsonObject = NonNullable<Approval['arguments']>;
  * what a card shows: a field, a fixed string in `CARD_TEXT`, a rule that decides whether the call or an action
  * appears.
  */
-export const CARD_MODEL_VERSION = 2 as const;
+export const CARD_MODEL_VERSION = 3 as const;
 
 /**
  * The resolutions a chat card may offer. An allowlist: every other value (any the contract adds later, and any
@@ -126,12 +126,31 @@ export interface CardOtherAction {
 
 export type CardAction = CardResolveAction | CardOtherAction;
 
+/** One approval that counts toward a requirement, as the read gives it. */
+export interface CardRequirementApproval {
+  readonly by: CardPrincipal;
+  readonly at: string;
+  /** `listed`: the approver was eligible for the requirement itself; `break_glass`: an administrator under the organisation's setting. */
+  readonly basis: string;
+}
+
+/**
+ * A requirement of the approval. A read without `Approval.requirements` gives one synthetic entry, `{ id:
+ * 'approval' }`, with only the first five members. When the read has the member, there is one entry per readable
+ * requirement of the read and `approvers` is set on every one of them, so a renderer tells the two apart by it.
+ */
 export interface CardRequirement {
   readonly id: string;
   readonly state: 'pending' | 'approved' | 'rejected' | 'expired' | 'withdrawn' | 'unknown';
   readonly decidedBy?: CardPrincipal;
   readonly decidedAt?: string;
   readonly note?: string;
+  /** From the read: the approver entries in force, a role by its key or a user by id. Empty: the organisation's administrators. */
+  readonly approvers?: readonly string[];
+  /** From the read: how many eligible principals must approve to meet it. */
+  readonly needed?: number;
+  /** From the read: the approvals that count toward it, oldest first. */
+  readonly approvals?: readonly CardRequirementApproval[];
 }
 
 export interface CardStatus {
@@ -465,6 +484,60 @@ function requirementState(state: string): CardRequirement['state'] {
   }
 }
 
+/**
+ * One `CardRequirement` per requirement of the read, or `undefined` when the read has none that can be read
+ * (the member is absent, not an array, empty, or holds only malformed entries), so the caller keeps the
+ * synthetic entry. An entry with no string `id` is skipped, and so is a later entry with an id already seen. `state` is `approved` when
+ * the requirement is met, else `approvalState`.
+ */
+function wireRequirements(
+  value: unknown,
+  approvalState: CardRequirement['state']
+): CardRequirement[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: CardRequirement[] = [];
+  for (const entry of value as unknown[]) {
+    if (!isRecord(entry)) continue;
+    const id = nonEmptyString(entry.id);
+    if (id === undefined || out.some((seen) => seen.id === id)) continue;
+    const approvals = approvalsOf(entry.approvals);
+    const last = approvals[approvals.length - 1];
+    const needed = typeof entry.needed === 'number' ? entry.needed : undefined;
+    out.push({
+      id,
+      state: entry.met === true ? 'approved' : approvalState,
+      ...(last === undefined ? {} : { decidedBy: last.by, decidedAt: last.at }),
+      approvers: approverKeys(entry.approvers),
+      ...(needed === undefined ? {} : { needed }),
+      approvals,
+    });
+  }
+  return out.length === 0 ? undefined : out;
+}
+
+function approverKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value as unknown[]) {
+    if (!isRecord(entry)) continue;
+    const key = nonEmptyString(entry.role) ?? nonEmptyString(entry.user);
+    if (key !== undefined) out.push(key);
+  }
+  return out;
+}
+
+function approvalsOf(value: unknown): CardRequirementApproval[] {
+  if (!Array.isArray(value)) return [];
+  const out: CardRequirementApproval[] = [];
+  for (const entry of value as unknown[]) {
+    if (!isRecord(entry)) continue;
+    const by = principalOf(entry.by);
+    if (by === undefined) continue;
+    out.push({ by, at: textOf(entry.at), basis: textOf(entry.basis) });
+  }
+  return out;
+}
+
 function headlineOf(
   toolRef: string,
   requester: CardPrincipal | undefined,
@@ -509,6 +582,8 @@ function seal<T extends ApprovalCard>(card: Omit<T, typeof CARD_BRAND>): T {
  *   capabilities (approve and deny for the resolutions listed), unless `capabilities.features` lists
  *   `approvals.available_actions`: then there are none (`actions_withheld`). Only `CHAT_RESOLUTIONS` are ever
  *   offered.
+ * - `status.requirements` has one entry per readable requirement of `approval.requirements` when the read has the
+ *   member, else the one synthetic `{ id: 'approval' }` entry.
  * - The note of a final card is the reason of the deciding entry of the history alone: the latest entry whose
  *   resolution is the final resolution.
  */
@@ -697,7 +772,10 @@ function buildCard(
       headline: headlineOf(toolRef, requester, agent),
     },
     details,
-    status: { requirements: [requirement], line },
+    status: {
+      requirements: wireRequirements(approval.requirements, requirementStateOf) ?? [requirement],
+      line,
+    },
     links: { open: options.approvalsUrl },
     selfApproval,
     ...(options.notice === 'already_handled' ? { notice: 'already_handled' as const } : {}),

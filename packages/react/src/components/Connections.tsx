@@ -24,6 +24,7 @@ import {
 import type { ErrorContext } from './connections-parts.js';
 import { escapeInvisible } from './format-json.js';
 import { useNc, WithComponents } from './slots.js';
+import { ToolFactsEditor } from './ToolFactsEditor.js';
 import type { ModuleComponents } from './slots.js';
 
 interface CommonProps {
@@ -1445,6 +1446,12 @@ function Tools({
   const headingId = useId();
   const view = useConnection(controller, connection.id);
   const name = escapeInvisible(connection.name);
+  // Fact bindings are edited only where the service advertises them and the caller may change this registration.
+  const factsOffered =
+    controller.facts?.toolFacts === true && changeOffered(controller, connection);
+  const [editing, setEditing] = useState<string | undefined>(undefined);
+  const [saved, setSaved] = useState('');
+  const editedTool = view.tools.find((tool) => tool.id === editing);
   let body: ReactNode;
   if (view.status === 'idle' || view.status === 'loading') body = <p>{t('toolsLoading')}</p>;
   else if (view.status === 'error')
@@ -1468,6 +1475,7 @@ function Tools({
               <th scope="col">{t('colDescription')}</th>
               <th scope="col">{t('colLevel')}</th>
               <th scope="col">{t('colStanding')}</th>
+              {factsOffered ? <th scope="col">{t('colFacts')}</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -1489,6 +1497,33 @@ function Tools({
                         : t(`standing_${row.standing}`)}
                     </Badge>
                   </td>
+                  {factsOffered ? (
+                    <td>
+                      {row.registered === undefined ||
+                      row.registered.factsUnreadable === true ? null : (
+                        <>
+                          {Object.keys(row.registered.facts ?? {}).length === 0
+                            ? t('toolFactsNone')
+                            : t('toolFactsCount', {
+                                count: Object.keys(row.registered.facts ?? {}).length,
+                              })}{' '}
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            aria-label={t('toolFactsEdit', {
+                              tool: escapeInvisible(row.toolRef),
+                            })}
+                            onClick={() => {
+                              setSaved('');
+                              setEditing(row.registered?.id);
+                            }}
+                          >
+                            {t('toolFactsEditShort')}
+                          </Button>
+                        </>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}
@@ -1500,6 +1535,24 @@ function Tools({
     <section className="nc-conn-tools" aria-labelledby={headingId}>
       <h4 id={headingId}>{t('toolsHeading')}</h4>
       {body}
+      {factsOffered && editedTool !== undefined ? (
+        <ToolFactsEditor
+          // A different tool starts from its own facts.
+          key={editedTool.id}
+          controller={controller}
+          tool={editedTool}
+          t={t}
+          onSignIn={onSignIn}
+          onSaved={(message) => {
+            setEditing(undefined);
+            setSaved(message);
+          }}
+          onCancel={() => {
+            setEditing(undefined);
+          }}
+        />
+      ) : null}
+      {saved === '' ? null : <p role="status">{saved}</p>}
       <div className="nc-conn-actions">
         <Button
           type="button"

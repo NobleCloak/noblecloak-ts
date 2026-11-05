@@ -39,11 +39,53 @@ export function usePolicyEditor(policies: PoliciesController, id: string): Polic
     },
     [editor]
   );
+  const setRules = useCallback<PolicyEditorStore['setRules']>(
+    (rules) => {
+      editor.setRules(rules);
+    },
+    [editor]
+  );
+  const setApprovers = useCallback<PolicyEditorStore['setApprovers']>(
+    (approvers) => {
+      editor.setApprovers(approvers);
+    },
+    [editor]
+  );
+  const setExclude = useCallback<PolicyEditorStore['setExclude']>(
+    (exclude) => {
+      editor.setExclude(exclude);
+    },
+    [editor]
+  );
   const save = useCallback(() => editor.save(), [editor]);
   const publish = useCallback(() => editor.publish(), [editor]);
 
   return useMemo(
-    () => ({ ...snapshot, authoring, reload, edit, setMode, setCondition, save, publish }),
-    [snapshot, authoring, reload, edit, setMode, setCondition, save, publish]
+    () => ({
+      ...snapshot,
+      authoring,
+      reload,
+      edit,
+      setMode,
+      setCondition,
+      setRules,
+      setApprovers,
+      setExclude,
+      save,
+      publish,
+    }),
+    [
+      snapshot,
+      authoring,
+      reload,
+      edit,
+      setMode,
+      setCondition,
+      setRules,
+      setApprovers,
+      setExclude,
+      save,
+      publish,
+    ]
   );
 }

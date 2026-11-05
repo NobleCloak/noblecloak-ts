@@ -73,7 +73,17 @@ renderers draw no buttons that resolve and no inputs, only the link to Approvals
 - **The note** of a final card is the reason of the deciding entry of the history, the latest entry whose
   resolution is the final resolution. No other entry lends its reason.
 
-`CARD_MODEL_VERSION` is bumped on any change to what a card shows, so a caller can record which version it sent.
+- **Requirements** (revision 16). When the read carries `requirements`, `status.requirements` has one entry per
+  requirement the model can read, with `id`, a `state` (`approved` when it is met, else the approval's state),
+  `decidedBy` and `decidedAt` from the latest approval that counts toward it, and the optional `approvers` (the role
+  keys and user ids that may satisfy it; none means the organisation's administrators), `needed` and `approvals`. Both
+  renderers then add one line before the status line, for example "1 of 2 met — finance: met by A. Lee (u-lee);
+  legal: pending" (a requirement not met reads "not met" once the request is closed). A read without `requirements`,
+  or with none the model can read, keeps the one entry `{ id: 'approval' }` and the renderers' output does not
+  change.
+
+`CARD_MODEL_VERSION` is bumped on any change to what a card shows, so a caller can record which version it sent. It is
+3: the requirements line adds fields and strings to what a card shows.
 
 ## The click payload
 

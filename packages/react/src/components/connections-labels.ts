@@ -195,6 +195,48 @@ export const CONNECTIONS_DEFAULT_LABELS = {
   discoverFailed: 'The server could not be asked what it offers.',
   discoverNote: 'A check registers nothing. Refresh registers what the server offers.',
 
+  // Tool facts (rev 16)
+  colFacts: 'Facts',
+  toolFactsCount: '{count} declared',
+  toolFactsNone: 'None',
+  toolFactsEdit: 'Edit facts of {tool}',
+  toolFactsEditShort: 'Edit facts',
+  toolFactsHeading: 'Facts of {tool}',
+  toolFactsNote:
+    'A fact is a value the service reads from the arguments of a call. A policy can test it. Saving replaces every fact of the tool.',
+  toolFactsCaption: 'Facts of {tool}',
+  factName: 'Name',
+  factPath: 'Path in the arguments',
+  factType: 'Type',
+  factDescription: 'Description (optional)',
+  factNameOf: 'Name of fact {row}',
+  factPathOf: 'Path of fact {row}',
+  factTypeOf: 'Type of fact {row}',
+  factDescriptionOf: 'Description of fact {row}',
+  factTypePlaceholder: 'Choose a type',
+  factType_number: 'Number',
+  factType_string: 'Text',
+  factType_boolean: 'True or false',
+  factType_count: 'Count (the length of a list)',
+  factAdd: 'Add a fact',
+  factRemove: 'Remove fact {row}',
+  factsNone: 'This tool declares no facts.',
+  factsSave: 'Save facts',
+  factsSaving: 'Saving…',
+  factsCancel: 'Cancel',
+  factsSaved: 'The facts of {tool} are saved.',
+  factsCleared: 'The facts of {tool} are removed.',
+  factsFixErrors: 'Fix the marked facts before saving.',
+  factsRefused: 'The service refused this fact: {detail}',
+  factProblem_name_invalid:
+    'A name starts with a lower-case letter and holds up to 63 lower-case letters, digits or underscores.',
+  factProblem_name_duplicate: 'Another fact has this name.',
+  factProblem_path_invalid:
+    'A path is one or more segments, each .key or [0]. A wildcard [*] or .. is not allowed.',
+  factProblem_type_missing: 'Choose a type.',
+  factProblem_description_too_long: 'A description is at most 500 characters.',
+  factProblem_too_many: 'A tool declares at most 32 facts.',
+
   // Errors
   errorUnauthorized: 'Your session has expired.',
   signInAgain: 'Sign in again',
@@ -218,6 +260,7 @@ export const CONNECTIONS_DEFAULT_LABELS = {
   error_not_loaded: 'The registration is not loaded.',
   error_write_in_flight: 'A change to this registration is already being sent.',
   error_cannot_navigate: 'This page cannot open the authorization.',
+  error_facts_not_offered: 'Fact bindings cannot be changed here.',
   requestId: 'Request id: {requestId}',
 } as const;
 

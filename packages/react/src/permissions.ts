@@ -56,7 +56,44 @@ export type {
   UnplacedPolicy,
   UsePoliciesOptions,
 } from './permissions-types.js';
-export type { KnownPolicyMode, ModeOnTheWire } from './permissions-vocabulary.js';
+export type {
+  ConditionOp,
+  KnownPolicyMode,
+  ModeOnTheWire,
+  RuleOutcome,
+} from './permissions-vocabulary.js';
+export {
+  addRule,
+  checkRules,
+  factCatalogOf,
+  moveAt,
+  newCondition,
+  newRule,
+  opsFor,
+  readApprovers,
+  readExclude,
+  readRules,
+  removeAt,
+  replaceAt,
+  setRequesterExcluded,
+  withApprover,
+  withFact,
+  withOp,
+  withOutcome,
+} from './permissions-rules.js';
+export type {
+  FactCatalog,
+  FactRef,
+  MemberRead,
+  PolicyApprover,
+  PolicyRule,
+  RuleChecks,
+  RuleCondition,
+  RuleProblem,
+  RuleWarning,
+  Scalar,
+} from './permissions-rules.js';
+export { breakGlassOf, currentRoutingPolicy } from './permissions-parse.js';
 export type {
   EffectiveBasis,
   EffectiveCell,
@@ -74,9 +111,14 @@ export type { EffectivePoliciesController } from './use-effective-policies.js';
 export {
   CONDITION_FIELDS,
   CONDITION_MODES,
+  CONDITION_OPS,
+  EXCLUDE_VALUES,
   MODE_ON_THE_WIRE,
+  OPS_BY_FACT_TYPE,
   POLICY_MODES,
   PROVISIONAL_MODES,
+  RULE_LIMITS,
+  RULE_OUTCOMES,
 } from './permissions-vocabulary.js';
 export { buildPermissionsMatrix, cellsGovernedBy } from './permissions-matrix.js';
 export type { MatrixInput } from './permissions-matrix.js';

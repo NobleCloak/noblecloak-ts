@@ -129,6 +129,19 @@ export const DEFAULT_LABELS = {
   timeUtc: '{time} UTC',
 
   // History
+  requirementsHeading: 'Requirements',
+  requirementsMet: '{met} of {total} met',
+  requirementWho: 'Who may satisfy it: {approvers}',
+  requirementAdmins: 'Administrators of the organisation',
+  requirementRoleApprover: 'role {id}',
+  requirementUserApprover: 'user {id}',
+  requirementExcludesRequester: "The requester can't satisfy it.",
+  requirementMet: 'Met',
+  requirementPending: 'Pending',
+  requirementNotMet: 'Not met',
+  requirementNeeded: '{count} approvals needed',
+  requirementMetBy: 'Met by {by}',
+  requirementMetByBreakGlass: 'Met by {by} (administrator override)',
   historyHeading: 'History',
   historyEntry: '{resolution} by {by}',
 

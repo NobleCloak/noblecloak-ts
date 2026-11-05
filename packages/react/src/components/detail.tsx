@@ -6,6 +6,8 @@ import type {
   ApprovalSummary,
   ApprovalsController,
 } from '../approvals-types.js';
+import { requirementsOf } from '../approvals-requirements.js';
+import type { ApprovalRequirementView } from '../approvals-requirements.js';
 import { Actions } from './actions.js';
 import { CallView, callIsWhole, formatCall } from './call-view.js';
 import { ErrorMessage } from './error-message.js';
@@ -168,6 +170,82 @@ function Facts({ approval, t }: { readonly approval: ApprovalSummary; readonly t
       )}
     </dl>
   );
+}
+
+/**
+ * The requirements of the approval, one item each. Absent when the read carries none that can be read. A requirement
+ * that is not met reads "Pending" while the approval is open and "Not met" once it is consumed, rejected, expired or
+ * withdrawn.
+ */
+function Requirements({
+  approval,
+  t,
+}: {
+  readonly approval: ApprovalSummary;
+  readonly t: Translate;
+}) {
+  const requirements = requirementsOf(approval);
+  if (requirements === undefined) return null;
+  const met = requirements.filter((requirement) => requirement.met).length;
+  return (
+    <section className="nc-requirements">
+      <h4>{t('requirementsHeading')}</h4>
+      <p>{t('requirementsMet', { met, total: requirements.length })}</p>
+      <ul>
+        {requirements.map((requirement) => (
+          <li key={requirement.id}>
+            <strong>
+              {requirement.met
+                ? t('requirementMet')
+                : FINAL_STATES.has(approval.state)
+                  ? t('requirementNotMet')
+                  : t('requirementPending')}
+            </strong>{' '}
+            <bdi>{approversText(requirement, t)}</bdi>
+            {requirement.needed > 1 ? (
+              <> ({t('requirementNeeded', { count: requirement.needed })})</>
+            ) : null}
+            {requirement.excludesRequester ? <p>{t('requirementExcludesRequester')}</p> : null}
+            {requirement.approvals.map((entry, index) => (
+              <p key={`${String(index)}-${entry.at}`}>
+                <bdi>
+                  {t(
+                    entry.basis === 'break_glass'
+                      ? 'requirementMetByBreakGlass'
+                      : 'requirementMetBy',
+                    {
+                      by: escapeInvisible(principalText(entry.by)),
+                    }
+                  )}
+                </bdi>
+                {entry.at === '' ? null : (
+                  <>
+                    {' '}
+                    <Time value={entry.at} t={t} />
+                  </>
+                )}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Who may satisfy a requirement: its approver entries, or the organisation's administrators when it has none. */
+function approversText(requirement: ApprovalRequirementView, t: Translate): string {
+  const who =
+    requirement.approvers.length === 0
+      ? t('requirementAdmins')
+      : requirement.approvers
+          .map((approver) =>
+            t(approver.kind === 'role' ? 'requirementRoleApprover' : 'requirementUserApprover', {
+              id: escapeInvisible(approver.id),
+            })
+          )
+          .join(', ');
+  return t('requirementWho', { approvers: who });
 }
 
 function History({ approval, t }: { readonly approval: ApprovalSummary; readonly t: Translate }) {
@@ -370,6 +448,7 @@ export function Detail({
             t={t}
             onCopyResult={onCopyResult}
           />
+          <Requirements approval={detail.approval} t={t} />
           <History approval={detail.approval} t={t} />
           {resolved || decide === undefined ? null : (
             <Actions

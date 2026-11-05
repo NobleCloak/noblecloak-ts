@@ -135,10 +135,38 @@ tool and arguments, in the same scope):
 
 ## Who may decide
 
-A policy that asks a person (`ask` or `escalate`) may name `approver_groups`. Together these groups form one
-approval requirement, met by any eligible member of any listed group. When several approval-requiring
-policies match one call, each contributes one requirement, and every requirement must be met. (Contract
-revision 11; `ToolInvocationConfig.approver_groups`. The schema may grow.)
+A policy that asks a person names who may answer it with `approvers` (contract revision 16, on a deployment that
+lists `approvals.requirements`): see "Requirements" below and [Conditions and approvers](./conditions-and-approvers.md).
+That is the member a deployment enforces.
+
+The older `approver_groups` (contract revision 11, `ToolInvocationConfig.approver_groups`) is still accepted and
+stored, but revision 16 leaves it as it was: it does **not** decide who may answer an approval. To route an approval,
+name `approvers`.
+
+## Requirements
+
+Since contract revision 16 an approval lists its **requirements** (`Approval.requirements`), on a deployment that
+lists `approvals.requirements`. Each policy whose result asked contributes one; two policies with the same approvers
+and the same exclusion contribute one between them. A requirement names the approvers in force when the approval
+opened (an empty list means the organisation's administrators), whether it is met, and who met it.
+
+- **Every requirement must be met** before the approval is `approved`. An approver satisfies every unmet requirement
+  they are eligible for, so one person may satisfy several. An approve that leaves one unmet answers 200 with the
+  approval still `pending`.
+- **Any eligible reject rejects**, whatever has been met. A person eligible for none of the unmet requirements is
+  refused with `403 not_eligible`.
+- **A call that matches an open approval joins it.** A `pending` approval that lacks some of the call's requirements
+  gains them, unmet, and the stream carries `approval.updated`. An `approved` approval that has not been consumed is
+  joined as it is: its requirements are those in force when it was approved, nothing is added, and no separate
+  approval opens.
+- The requirements are built from each policy's `approvers` and `exclude` only; `approver_groups` plays no part.
+- `exclude: requester` on a requirement means the person the call was made for never satisfies it, from any
+  surface. When the call carries no person (a service credential acting on its own), the requester is the
+  principal that opened the approval.
+
+The deployment decides who is eligible, and a client never works it out. [Conditions and
+approvers](./conditions-and-approvers.md) says how a policy names approvers and what the organisation's break-glass
+setting does.
 
 ## When the call waits on your own sign-in
 
