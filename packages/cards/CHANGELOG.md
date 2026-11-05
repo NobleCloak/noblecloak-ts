@@ -1,5 +1,12 @@
 # @noblecloak/cards
 
+## 0.1.2
+
+### Patch Changes
+
+- Updated dependencies [a208682]
+  - @noblecloak/client@0.12.0
+
 ## 0.1.1
 
 ### Patch Changes

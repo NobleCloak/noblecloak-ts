@@ -1,6 +1,6 @@
 {
   "name": "@noblecloak/policy-formats",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Converts NobleCloak tool policies to and from Cedar and AGT (ACS manifest with a Cedar policy set), with a report of everything a format cannot carry.",
   "license": "Apache-2.0",
   "author": "NobleCloak",
