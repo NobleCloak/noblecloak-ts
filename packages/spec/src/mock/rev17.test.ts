@@ -1,6 +1,6 @@
 /**
  * The mock's rev 17 behaviour: it validates a request against the document's own schemas, so it accepts and echoes a
- * `claude_agent_sdk` continuation and refuses a kind the enum does not list.
+ * `claude_agent_sdk` continuation with `pull`, and refuses a kind the enum does not list and the new kind with `held` or `push`.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -58,5 +58,28 @@ describe('the mock, rev 17', () => {
     });
     expect(refused.status).toBe(400);
     expect(String(((await refused.json()) as Json).type)).toMatch(/invalid_request$/);
+  });
+
+  it('refuses claude_agent_sdk with held and with push, 400 invalid_request', async () => {
+    const mock = await createMock({ control: true, spec });
+    const tokens = await mock.tokens();
+    for (const continuation of [
+      { kind: 'claude_agent_sdk', delivery: 'held' },
+      { kind: 'claude_agent_sdk', delivery: 'push', callback_url: 'https://example.com/cb' },
+    ]) {
+      const refused = await mock.app.request('/v1/approvals', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.creator_user}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: { tool_ref: 'mcp:tracker:create_issue', arguments: { title: 'rev17-pull-only' } },
+          continuation,
+        }),
+      });
+      expect(refused.status).toBe(400);
+      expect(String(((await refused.json()) as Json).type)).toMatch(/invalid_request$/);
+    }
   });
 });

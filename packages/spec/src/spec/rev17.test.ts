@@ -1,6 +1,6 @@
 /**
  * What rev 17 of the document says, as assertions: `Continuation.kind` gains `claude_agent_sdk`, the seven kinds
- * before it are unchanged, the enum stays closed, and the correlation of the new kind is documented and stays opaque.
+ * before it are unchanged, the enum stays closed, and the new kind is pull only, and its correlation is documented and stays opaque.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -56,6 +56,18 @@ describe('the claude_agent_sdk continuation kind (rev 17)', () => {
     for (const kind of kindEnum.slice(0, 7)) expect(fits({ kind, delivery: 'pull' })).toBe(true);
   });
 
+  it('ties claude_agent_sdk to pull: held and push are refused, and the other kinds keep every delivery', () => {
+    expect(fits({ kind: 'claude_agent_sdk', delivery: 'held' })).toBe(false);
+    expect(
+      fits({ kind: 'claude_agent_sdk', delivery: 'push', callback_url: 'https://example.com/cb' })
+    ).toBe(false);
+    for (const kind of kindEnum.slice(0, 7)) {
+      expect(fits({ kind, delivery: 'held' })).toBe(true);
+      expect(fits({ kind, delivery: 'push', callback_url: 'https://example.com/cb' })).toBe(true);
+    }
+    expect(fits({ delivery: 'pull' })).toBe(false);
+  });
+
   it('keeps the correlation opaque: the schema does not constrain its members', () => {
     const correlation = obj(obj(continuation.properties, 'properties').correlation, 'correlation');
     expect(correlation).toEqual({ type: 'object', additionalProperties: true });
@@ -71,5 +83,6 @@ describe('the claude_agent_sdk continuation kind (rev 17)', () => {
     );
     expect(text).toContain('a missing `agent_id` means the main agent');
     expect(text).toContain('The server reads none of it');
+    expect(text).toContain('used with `pull` only');
   });
 });

@@ -1,9 +1,10 @@
 # Contract revision 17: the continuation kind `claude_agent_sdk`. Its correlation is opaque to the server; the
 # Claude Agent SDK connector puts {session_id, tool_use_id, agent_id?, mode} in it, and the lifecycle below holds the
-# server to echoing it back unchanged. A kind outside the closed enum is still refused. Both scenarios open a pull
-# continuation, so both declare serves_delivery: pull and a deployment that does not serve pull skips them.
+# server to echoing it back unchanged. A kind outside the closed enum is still refused, and the new kind is pull only.
+# Each scenario declares serves_delivery for the one delivery it sends in a continuation (pull, pull, held), so a
+# deployment that does not serve that delivery skips it.
 # Nothing in Capabilities names the kind, so a deployment that serves pull but has not added the kind fails the lifecycle at step 2
-# (400 invalid_request) and passes the negative scenario.
+# (400 invalid_request) and passes both negative scenarios.
 - id: rev17-claude-agent-sdk-continuation-lifecycle
   title: A continuation of kind claude_agent_sdk (pull) is stored on a step_up and echoed unchanged in the Resumption, and the approval is consumed with its resume token
   tags: [both, lifecycle]
@@ -111,4 +112,28 @@
         body:
           action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-foo ${uniq}' } }
           continuation: { kind: foo, delivery: pull }
+      expect: { status: 400, problem: invalid_request }
+- id: rev17-claude-agent-sdk-is-pull-only
+  title: A claude_agent_sdk continuation with delivery held is 400 invalid_request, on a decision and on POST /v1/approvals
+  tags: [both, negative]
+  requires: approvals
+  serves_delivery: held
+  steps:
+    - name: a decision with claude_agent_sdk and held is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-held ${uniq}' } }
+          continuation: { kind: claude_agent_sdk, delivery: held }
+      expect: { status: 400, problem: invalid_request }
+    - name: so is POST /v1/approvals
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-held ${uniq}' } }
+          continuation: { kind: claude_agent_sdk, delivery: held }
       expect: { status: 400, problem: invalid_request }

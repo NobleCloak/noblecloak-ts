@@ -641,16 +641,17 @@ and the negatives `rev16-exclude-requester-refuses-the-requester` (the fourth) a
 Rev 17 adds one value to the closed enum `Continuation.kind`: `claude_agent_sdk`, for the Claude Agent SDK connector, which
 opens its approvals with `delivery: pull`. Its `correlation` is `{ session_id, tool_use_id, agent_id?, mode }`, `mode` being
 `defer` or `retry`, and a missing `agent_id` means the main agent. The server reads none of it: the correlation stays opaque,
-at most 8 KiB, and is echoed as sent. The enum is otherwise unchanged, so a kind outside it is still 400 `invalid_request`,
-and the schema does not tie a kind to a delivery. Nothing is added to `Capabilities`: a deployment either accepts the kind or
+at most 8 KiB, and is echoed as sent. The enum is otherwise unchanged, so a kind outside it is still 400 `invalid_request`.
+The schema ties the new kind to `pull`: `claude_agent_sdk` with `push` or `held` is 400 `invalid_request`, and the seven earlier
+kinds keep every delivery. The tie is not a narrowing: the kind did not exist before rev 17, so it refuses no request a client could already send. Nothing is added to `Capabilities`: a deployment either accepts the kind or
 refuses it. A deployment whose own list of kinds predates rev 17 answers 400 `invalid_request`, not
 `invalid_continuation`, which is for a continuation that does not match its delivery or a delivery not served.
 
 **The mock and the scenarios.** The mock validates a request against the document's schemas, so it accepts and echoes the new
-kind and refuses an unknown one. `34-rev17-claude-agent-sdk.yaml` has two scenarios:
+kind and refuses an unknown one. `34-rev17-claude-agent-sdk.yaml` has three scenarios:
 `rev17-claude-agent-sdk-continuation-lifecycle` (step_up with the continuation, approve, the Resumption echoing the correlation,
-consume) and the negative `rev17-unknown-continuation-kind-is-refused` (the kind `foo` on a decision and on
-`POST /v1/approvals`, and nothing else, so it passes on any deployment that keeps the enum closed, whether its kinds are rev 16's or rev 17's; the existing `skip_request_validation` break fails it). Both scenarios declare `serves_delivery: pull`, so a deployment that does not serve the pull delivery skips them. Nothing in `Capabilities` names the kind, so a deployment that serves pull but has not added the kind runs both: it passes the negative scenario and fails the lifecycle at step 2 (`POST /v1/decisions`, 400 `invalid_request`); it does not skip the lifecycle. A deployment that vendors the scenarios adds `claude_agent_sdk` to its list of kinds in the same change that takes rev 17, or lists `rev17-claude-agent-sdk-continuation-lifecycle` among its expected failures until it does.
+consume) and the negatives `rev17-unknown-continuation-kind-is-refused` (the kind `foo` on a decision and on
+`POST /v1/approvals`, and nothing else, so it passes on any deployment that keeps the enum closed, whether its kinds are rev 16's or rev 17's) and `rev17-claude-agent-sdk-is-pull-only` (`claude_agent_sdk` with `held` on both routes; `push` is covered by the document and mock tests only, because a scenario declares one delivery). The existing `skip_request_validation` break fails both negatives. Each scenario declares `serves_delivery` for the one delivery it sends (`pull`, `pull`, `held`), so a deployment that does not serve that delivery skips it. Nothing in `Capabilities` names the kind, so a deployment that serves pull but has not added the kind runs the lifecycle and the unknown-kind scenario (and the pull-only scenario too, if it serves held): it passes both negatives and fails the lifecycle at step 2 (`POST /v1/decisions`, 400 `invalid_request`); it does not skip the lifecycle. A deployment that vendors the scenarios adds `claude_agent_sdk` to its list of kinds in the same change that takes rev 17, or lists `rev17-claude-agent-sdk-continuation-lifecycle` among its expected failures until it does.
 
 ## Versioning
 

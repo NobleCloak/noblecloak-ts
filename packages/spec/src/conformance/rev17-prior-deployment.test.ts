@@ -1,7 +1,7 @@
 /**
  * The rev 17 scenarios against a deployment that serves pull but whose list of kinds predates rev 17: the mock run with
  * a document whose `Continuation.kind` enum leaves out `claude_agent_sdk`. The negative scenario tests only that a kind
- * outside the enum is refused, so it passes there; the lifecycle scenario fails at its second step.
+ * outside the enum is refused, so it passes there, and so does the pull-only scenario (an unlisted kind is refused whatever its delivery); the lifecycle scenario fails at its second step.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -10,6 +10,7 @@ import { runAgainstMock } from './against-mock.js';
 
 const LIFECYCLE = 'rev17-claude-agent-sdk-continuation-lifecycle';
 const NEGATIVE = 'rev17-unknown-continuation-kind-is-refused';
+const PULL_ONLY = 'rev17-claude-agent-sdk-is-pull-only';
 
 const priorDocument = (): ReturnType<typeof loadCommittedDocument> => {
   const spec = loadCommittedDocument();
@@ -27,15 +28,16 @@ const priorDocument = (): ReturnType<typeof loadCommittedDocument> => {
 
 describe('the rev 17 scenarios on a deployment whose kinds predate rev 17', () => {
   for (const deployment of ['hosted', 'edge'] as const) {
-    it(`${deployment}: the negative scenario passes and the lifecycle fails at step 2 with 400 invalid_request`, async () => {
+    it(`${deployment}: both negative scenarios pass and the lifecycle fails at step 2 with 400 invalid_request`, async () => {
       const run = await runAgainstMock({
         deployment,
         spec: priorDocument(),
-        only: [LIFECYCLE, NEGATIVE],
+        only: [LIFECYCLE, NEGATIVE, PULL_ONLY],
         restrictions: { deliveries: ['pull', 'held'] },
       });
       const byId = new Map(run.results.map((r) => [r.id, r]));
       expect(byId.get(NEGATIVE)?.outcome).toBe('passed');
+      expect(byId.get(PULL_ONLY)?.outcome).toBe('passed');
       const lifecycle = byId.get(LIFECYCLE);
       expect(lifecycle?.outcome).toBe('failed');
       expect(lifecycle?.failures[0]).toMatch(
