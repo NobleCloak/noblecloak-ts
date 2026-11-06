@@ -54,6 +54,9 @@ describe('package boundaries', () => {
   it('the main entry does not import the governance API module', () => {
     const files = [...reachable('index.ts')].map((f) => f.slice(here.length + 1));
     expect(files.filter((f) => f.startsWith('governance-api'))).toEqual([]);
+    // isTransient and ModuleApiError are governance-api subpath exports only.
+    expect(files).not.toContain('transient.ts');
+    expect(files).not.toContain('module-api-error.ts');
   });
 
   it('the governance-api subpath is exported and built', () => {
