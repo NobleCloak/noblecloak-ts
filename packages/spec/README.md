@@ -650,8 +650,7 @@ refuses it. A deployment whose own list of kinds predates rev 17 answers 400 `in
 kind and refuses an unknown one. `34-rev17-claude-agent-sdk.yaml` has two scenarios:
 `rev17-claude-agent-sdk-continuation-lifecycle` (step_up with the continuation, approve, the Resumption echoing the correlation,
 consume) and the negative `rev17-unknown-continuation-kind-is-refused` (the kind `foo` on a decision and on
-`POST /v1/approvals`, and nothing else, so it passes on any deployment that keeps the enum closed, whether its kinds are rev 16's or rev 17's; the existing `skip_request_validation` break fails it). Both scenarios declare `serves_delivery: pull`, so a deployment that does not serve the pull delivery skips them. A deployment that vendors the scenarios and runs them
-nightly adds the two ids to its expected-skips until it accepts the kind.
+`POST /v1/approvals`, and nothing else, so it passes on any deployment that keeps the enum closed, whether its kinds are rev 16's or rev 17's; the existing `skip_request_validation` break fails it). Both scenarios declare `serves_delivery: pull`, so a deployment that does not serve the pull delivery skips them. Nothing in `Capabilities` names the kind, so a deployment that serves pull but has not added the kind runs both: it passes the negative scenario and fails the lifecycle at step 2 (`POST /v1/decisions`, 400 `invalid_request`); it does not skip the lifecycle. A deployment that vendors the scenarios adds `claude_agent_sdk` to its list of kinds in the same change that takes rev 17, or lists `rev17-claude-agent-sdk-continuation-lifecycle` among its expected failures until it does.
 
 ## Versioning
 

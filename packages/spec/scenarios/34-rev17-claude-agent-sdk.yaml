@@ -2,6 +2,8 @@
 # Claude Agent SDK connector puts {session_id, tool_use_id, agent_id?, mode} in it, and the lifecycle below holds the
 # server to echoing it back unchanged. A kind outside the closed enum is still refused. Both scenarios open a pull
 # continuation, so both declare serves_delivery: pull and a deployment that does not serve pull skips them.
+# Nothing in Capabilities names the kind, so a deployment that serves pull but has not added the kind fails the lifecycle at step 2
+# (400 invalid_request) and passes the negative scenario.
 - id: rev17-claude-agent-sdk-continuation-lifecycle
   title: A continuation of kind claude_agent_sdk (pull) is stored on a step_up and echoed unchanged in the Resumption, and the approval is consumed with its resume token
   tags: [both, lifecycle]
