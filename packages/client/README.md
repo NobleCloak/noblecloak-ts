@@ -299,7 +299,7 @@ type Decision = components['schemas']['Decision'];
 
 ## Versioning
 
-This version implements **contract revision 16** (release `contract-v1-rev16` of `@noblecloak/spec`, which
+This version implements **contract revision 17** (release `contract-v1-rev17` of `@noblecloak/spec`, which
 it pairs with). The revision is the contract's, not the OpenAPI document's `info.version`. The
 CHANGELOG names the revision each release was regenerated from. Members added in a revision are optional, so
 against a service of an older revision they are absent.

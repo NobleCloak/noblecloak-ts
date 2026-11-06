@@ -636,9 +636,26 @@ breaks fail it), `rev16-requirements-met-one-by-one` (two requirements met by tw
 and the negatives `rev16-exclude-requester-refuses-the-requester` (the fourth) and
 `rev16-break-glass-follows-the-organisation-setting` (the fifth).
 
+## The `claude_agent_sdk` continuation kind (rev 17)
+
+Rev 17 adds one value to the closed enum `Continuation.kind`: `claude_agent_sdk`, for the Claude Agent SDK connector, which
+opens its approvals with `delivery: pull`. Its `correlation` is `{ session_id, tool_use_id, agent_id?, mode }`, `mode` being
+`defer` or `retry`, and a missing `agent_id` means the main agent. The server reads none of it: the correlation stays opaque,
+at most 8 KiB, and is echoed as sent. The enum is otherwise unchanged, so a kind outside it is still 400 `invalid_request`,
+and the schema does not tie a kind to a delivery. Nothing is added to `Capabilities`: a deployment either accepts the kind or
+refuses it. A deployment whose own list of kinds predates rev 17 answers 400 `invalid_request`, not
+`invalid_continuation`, which is for a continuation that does not match its delivery or a delivery not served.
+
+**The mock and the scenarios.** The mock validates a request against the document's schemas, so it accepts and echoes the new
+kind and refuses an unknown one. `34-rev17-claude-agent-sdk.yaml` has two scenarios:
+`rev17-claude-agent-sdk-continuation-lifecycle` (step_up with the continuation, approve, the Resumption echoing the correlation,
+consume) and the negative `rev17-unknown-continuation-kind-is-refused` (the kind `foo` on a decision and on
+`POST /v1/approvals`, with `claude_agent_sdk` accepted beside it; the existing `skip_request_validation` break fails it). A deployment that vendors the scenarios and runs them
+nightly adds the two ids to its expected-skips until it accepts the kind.
+
 ## Versioning
 
-This version implements **contract revision 16**, released as `contract-v1-rev16`; the CHANGELOG head names it. Rev 16 adds optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
+This version implements **contract revision 17**, released as `contract-v1-rev17`; the CHANGELOG head names it. Rev 17 adds one value to the `Continuation.kind` enum (`claude_agent_sdk`). Rev 16 added optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
 revision is the contract's. `info.version` in the document (1.0.0) is **not** the revision. A revision only adds optional members unless its CHANGELOG entry names a narrowing, as rev 6 does
 for the listing of a tool owned by a principal.
 
