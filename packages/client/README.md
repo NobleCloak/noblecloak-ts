@@ -225,7 +225,9 @@ try {
   whose `meta.next` is neither a string nor null, and any non-ok answer from `jwks` and `stream`.
 - `isTransient(answer | problem | error)` is true for a `ModuleApiError` with code `unreachable` and for a
   refused answer (or bare `Problem`) with status 5xx, 408 or 429. It is false for success, other statuses
-  such as 400, 403, 404 and 409, and any other error.
+  such as 400, 403, 404 and 409, and any other error (an `Error` that carries a numeric `status`, as an SDK
+  error does, is not read as a `Problem`). `jwks` and `stream` throw `ModuleApiError` for every non-ok
+  status, 4xx included, so `isTransient` is true for a 403 or 404 from those two: do not retry them forever.
 - The constructor option `isPassThrough(error)` names errors to re-throw as themselves: when it returns true
   for what `getToken` (or the request) threw, the error is not turned into `unreachable`. The default is none.
 
