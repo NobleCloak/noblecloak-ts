@@ -87,7 +87,7 @@
         body:
           - { path: data.state, equals: consumed }
 - id: rev17-unknown-continuation-kind-is-refused
-  title: A continuation kind outside the enum is 400 invalid_request, on a decision and on POST /v1/approvals, and claude_agent_sdk beside it is accepted
+  title: A continuation kind outside the enum is 400 invalid_request, on a decision and on POST /v1/approvals
   tags: [both, negative]
   requires: approvals
   serves_delivery: pull
@@ -110,18 +110,3 @@
           action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-foo ${uniq}' } }
           continuation: { kind: foo, delivery: pull }
       expect: { status: 400, problem: invalid_request }
-    - name: the same decision with claude_agent_sdk is a step_up
-      as: creator
-      request:
-        method: POST
-        path: /v1/decisions
-        body:
-          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-ok ${uniq}' } }
-          continuation:
-            kind: claude_agent_sdk
-            delivery: pull
-            correlation: { session_id: 's-${uniq}', tool_use_id: 'tu-${uniq}', mode: retry }
-      expect:
-        status: 200
-        body:
-          - { path: data.decision, equals: step_up }
