@@ -338,6 +338,7 @@ export const MATRIX: readonly Flip[] = [
       'negative-record-derived-fields-not-accepted',
       'negative-record-degraded-invalid',
       'negative-batch-above-100-is-invalid-request',
+      'rev17-unknown-continuation-kind-is-refused',
     ],
   },
   { flip: 'withdraw_by_anyone', deployment: 'hosted', fails: ['terminal-withdraw-requester-only'] },
