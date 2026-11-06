@@ -50,7 +50,7 @@ describe('GovernanceApi requests', () => {
     const { api, seen } = harness();
     await api.capabilities();
     await api.createRun('key-1');
-    await api.decide({ action: { tool_ref: 't', arg_digest: 'd' } } as never);
+    await api.decide({ action: { tool_ref: 't', arg_digest: 'd' } });
     await api.getApproval('a1');
     await api.waitApproval('a1', 25);
     await api.getResumption('a1');

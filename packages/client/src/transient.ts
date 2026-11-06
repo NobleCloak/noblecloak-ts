@@ -19,12 +19,13 @@ export function isTransientStatus(status: number): boolean {
 }
 
 /**
- * The single place that says which failures are transient. True for a `ModuleApiError` with code
- * `unreachable`, for a refused answer (or bare `Problem`) whose status is 5xx, 408 or 429, and false for
+ * The single place that says which failures are transient. Takes an `Answer`, a `Problem` or a thrown
+ * error. True for a `ModuleApiError` (its one code is `unreachable`), for a refused answer (or bare `Problem`) whose status is 5xx, 408 or 429, and false for
  * a successful answer, any other status (400, 403, 404, 409 ...) and any other error.
  */
-export function isTransient(subject: Answer<unknown> | Problem | unknown): boolean {
-  if (subject instanceof ModuleApiError) return subject.code === 'unreachable';
+export function isTransient(subject: unknown): boolean {
+  // The only ModuleApiError code is `unreachable`.
+  if (subject instanceof ModuleApiError) return true;
   if (!isObject(subject)) return false;
   if (subject.ok === false && isObject(subject.problem)) {
     return typeof subject.problem.status === 'number' && isTransientStatus(subject.problem.status);
