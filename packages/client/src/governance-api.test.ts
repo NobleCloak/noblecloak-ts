@@ -22,6 +22,7 @@ function harness(
   reply: Reply = () => ok({}),
   options: {
     isPassThrough?: (e: unknown) => boolean;
+    dpopProof?: () => string;
   } = {}
 ) {
   const seen: Seen[] = [];
@@ -227,6 +228,13 @@ describe('unreachable', () => {
       code: 'unreachable',
       message: 'the approval stream answered 200',
     });
+  });
+
+  it('forwards dpopProof to the client it builds', async () => {
+    const { api, seen } = harness(() => ok({}), { dpopProof: () => 'proof-jwt' });
+    await api.capabilities();
+    expect(seen[0]?.headers.get('dpop')).toBe('proof-jwt');
+    expect(seen[0]?.headers.get('authorization')).toBe('DPoP tok');
   });
 
   it('a network failure opening the key set or the stream is unreachable', async () => {

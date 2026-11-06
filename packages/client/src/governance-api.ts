@@ -4,7 +4,7 @@
  * the callers decide what a 4xx means.
  */
 import { createClient } from './client.js';
-import type { ModuleApiClient } from './client.js';
+import type { ClientOptions, ModuleApiClient } from './client.js';
 import { ModuleApiError, messageOf } from './module-api-error.js';
 import type { Jwks } from './resumption.js';
 import type { components } from './schema.js';
@@ -24,6 +24,8 @@ export interface ApiOptions {
   readonly baseUrl: string;
   readonly getToken: () => string | Promise<string>;
   readonly fetch?: typeof globalThis.fetch;
+  /** DPoP proof hook (RFC 9449), forwarded to `createClient`; ignored when `client` is given. */
+  readonly dpopProof?: ClientOptions['dpopProof'];
   /** A client to use instead of building one from `baseUrl`, `getToken` and `fetch`. */
   readonly client?: ModuleApiClient;
   /**
@@ -67,6 +69,7 @@ export class GovernanceApi {
       createClient({
         baseUrl: options.baseUrl,
         getToken: options.getToken,
+        ...(options.dpopProof === undefined ? {} : { dpopProof: options.dpopProof }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       });
   }
