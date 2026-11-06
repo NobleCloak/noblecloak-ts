@@ -17,8 +17,9 @@ const priorDocument = (): ReturnType<typeof loadCommittedDocument> => {
     (
       ((spec.components as Record<string, unknown>).schemas as Record<string, unknown>)
         .Continuation as Record<string, unknown>
-    ).properties as Record<string, { enum: string[] }>
+    ).properties as Record<string, { enum: string[] } | undefined>
   ).kind;
+  if (kind === undefined) throw new Error('Continuation.kind is missing from the document');
   expect(kind.enum).toContain('claude_agent_sdk');
   kind.enum = kind.enum.filter((k) => k !== 'claude_agent_sdk');
   return spec;
