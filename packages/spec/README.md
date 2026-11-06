@@ -643,8 +643,8 @@ opens its approvals with `delivery: pull`. Its `correlation` is `{ session_id, t
 `defer` or `retry`, and a missing `agent_id` means the main agent. The server reads none of it: the correlation stays opaque,
 at most 8 KiB, and is echoed as sent. The enum is otherwise unchanged, so a kind outside it is still 400 `invalid_request`.
 The schema ties the new kind to `pull`: `claude_agent_sdk` with `push` or `held` is 400 `invalid_request`, and the seven earlier
-kinds keep every delivery. The tie is not a narrowing: the kind did not exist before rev 17, so it refuses no request a client could already send. Nothing is added to `Capabilities`: a deployment either accepts the kind or
-refuses it. A deployment whose own list of kinds predates rev 17 answers 400 `invalid_request`, not
+kinds keep every delivery. The tie is not a narrowing: the kind did not exist before rev 17, so it refuses no request a client could already send. Nothing is added to `Capabilities`, unlike rev 15 and rev 16, which each gated their additions on a `Capabilities.features` entry: a deployment either accepts the kind or
+refuses it, and a client finds out only by opening an approval with it. Rev 17 is therefore the first revision whose new lifecycle scenario fails, rather than skips, on a deployment of the previous revision. A deployment whose own list of kinds predates rev 17 answers 400 `invalid_request`, not
 `invalid_continuation`, which is for a continuation that does not match its delivery or a delivery not served.
 
 **The mock and the scenarios.** The mock validates a request against the document's schemas, so it accepts and echoes the new
