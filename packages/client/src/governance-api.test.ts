@@ -249,6 +249,9 @@ describe('transient classification, one case per status', () => {
   it('reads a bare Problem and rejects things that are not answers or API errors', () => {
     expect(isTransient({ status: 429, code: 'x' })).toBe(true);
     expect(isTransient({ status: 404, code: 'x' })).toBe(false);
+    expect(isTransient({ status: 500, code: 'x' })).toBe(true);
+    expect(isTransient({ status: 499, code: 'x' })).toBe(false);
+    expect(isTransient({ ok: false, problem: { status: 599, code: 'x' } })).toBe(true);
     expect(isTransient({ ok: false, problem: { status: 'x' } })).toBe(false);
     expect(isTransient(new Error('boom'))).toBe(false);
     expect(isTransient(new TypeError('fetch failed'))).toBe(false);
