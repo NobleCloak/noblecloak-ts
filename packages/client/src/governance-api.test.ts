@@ -254,6 +254,7 @@ describe('transient classification, one case per status', () => {
     expect(isTransient({ ok: false, problem: { status: 599, code: 'x' } })).toBe(true);
     expect(isTransient({ ok: false, problem: { status: 'x' } })).toBe(false);
     expect(isTransient(new Error('boom'))).toBe(false);
+    expect(isTransient(Object.assign(new Error('boom'), { status: 503 }))).toBe(false);
     expect(isTransient(new TypeError('fetch failed'))).toBe(false);
     expect(isTransient(null)).toBe(false);
     expect(isTransient(undefined)).toBe(false);

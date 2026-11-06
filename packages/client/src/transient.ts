@@ -21,7 +21,8 @@ export function isTransientStatus(status: number): boolean {
 /**
  * The single place that says which failures are transient. Takes an `Answer`, a `Problem` or a thrown
  * error. True for a `ModuleApiError` (its one code is `unreachable`), for a refused answer (or bare `Problem`) whose status is 5xx, 408 or 429, and false for
- * a successful answer, any other status (400, 403, 404, 409 ...) and any other error.
+ * a successful answer, any other status (400, 403, 404, 409 ...) and any other error, including an `Error` that carries a numeric `status` (an SDK error is not a `Problem`).
+ * `jwks` and `stream` throw `ModuleApiError` for every non-ok status, 4xx included, so `isTransient` is true for those.
  */
 export function isTransient(subject: unknown): boolean {
   // The only ModuleApiError code is `unreachable`.
@@ -30,7 +31,7 @@ export function isTransient(subject: unknown): boolean {
   if (subject.ok === false && isObject(subject.problem)) {
     return typeof subject.problem.status === 'number' && isTransientStatus(subject.problem.status);
   }
-  if (subject.ok === undefined && typeof subject.status === 'number') {
+  if (!(subject instanceof Error) && subject.ok === undefined && typeof subject.status === 'number') {
     return isTransientStatus(subject.status);
   }
   return false;
