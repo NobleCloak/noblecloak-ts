@@ -230,6 +230,8 @@ try {
   status, 4xx included, so `isTransient` is true for a 403 or 404 from those two: do not retry them forever.
 - The constructor option `isPassThrough(error)` names errors to re-throw as themselves: when it returns true
   for what `getToken` (or the request) threw, the error is not turned into `unreachable`. The default is none.
+- The constructor option `dpopProof` is the same hook `createClient` takes and is forwarded to the client the
+  constructor builds; it is ignored when you pass `client`.
 
 ## Errors
 
