@@ -31,7 +31,11 @@ export function isTransient(subject: unknown): boolean {
   if (subject.ok === false && isObject(subject.problem)) {
     return typeof subject.problem.status === 'number' && isTransientStatus(subject.problem.status);
   }
-  if (!(subject instanceof Error) && subject.ok === undefined && typeof subject.status === 'number') {
+  if (
+    !(subject instanceof Error) &&
+    subject.ok === undefined &&
+    typeof subject.status === 'number'
+  ) {
     return isTransientStatus(subject.status);
   }
   return false;
