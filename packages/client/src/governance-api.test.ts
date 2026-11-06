@@ -20,7 +20,9 @@ type Reply = (request: Request) => Response | Promise<Response>;
 
 function harness(
   reply: Reply = () => ok({}),
-  options: { isPassThrough?: (e: unknown) => boolean } = {}
+  options: {
+    isPassThrough?: (e: unknown) => boolean;
+  } = {}
 ) {
   const seen: Seen[] = [];
   const api = new GovernanceApi({
@@ -193,6 +195,38 @@ describe('unreachable', () => {
     const body = await api.stream(new AbortController().signal);
     expect(body).toBeInstanceOf(ReadableStream);
     expect(seen[0]?.url.search).toBe('?created_by=me');
+  });
+
+  it('forwards the caller signal to the stream request', async () => {
+    let aborted: boolean | undefined;
+    const { api } = harness((request) => {
+      aborted = request.signal.aborted;
+      return new Response('x', { headers: { 'content-type': 'text/event-stream' } });
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await api.stream(controller.signal).catch(() => undefined);
+    expect(aborted).toBe(true);
+  });
+
+  it('forwards the caller signal to the approval wait', async () => {
+    let aborted: boolean | undefined;
+    const { api } = harness((request) => {
+      aborted = request.signal.aborted;
+      return ok({});
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await api.waitApproval('a1', 5, controller.signal).catch(() => undefined);
+    expect(aborted).toBe(true);
+  });
+
+  it('a 200 stream answer with no body is unreachable', async () => {
+    const { api } = harness(() => new Response(null, { status: 200 }));
+    await expect(api.stream(new AbortController().signal)).rejects.toMatchObject({
+      code: 'unreachable',
+      message: 'the approval stream answered 200',
+    });
   });
 
   it('a network failure opening the key set or the stream is unreachable', async () => {
