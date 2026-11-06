@@ -1,6 +1,7 @@
 # Contract revision 17: the continuation kind `claude_agent_sdk`. Its correlation is opaque to the server; the
 # Claude Agent SDK connector puts {session_id, tool_use_id, agent_id?, mode} in it, and the lifecycle below holds the
-# server to echoing it back unchanged. A kind outside the closed enum is still refused.
+# server to echoing it back unchanged. A kind outside the closed enum is still refused. Both scenarios open a pull
+# continuation, so both declare serves_delivery: pull and a deployment that does not serve pull skips them.
 - id: rev17-claude-agent-sdk-continuation-lifecycle
   title: A continuation of kind claude_agent_sdk (pull) is stored on a step_up and echoed unchanged in the Resumption, and the approval is consumed with its resume token
   tags: [both, lifecycle]
@@ -89,6 +90,7 @@
   title: A continuation kind outside the enum is 400 invalid_request, on a decision and on POST /v1/approvals, and claude_agent_sdk beside it is accepted
   tags: [both, negative]
   requires: approvals
+  serves_delivery: pull
   steps:
     - name: a decision with the kind foo is refused
       as: creator

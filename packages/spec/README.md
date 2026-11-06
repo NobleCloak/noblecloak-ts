@@ -650,7 +650,7 @@ refuses it. A deployment whose own list of kinds predates rev 17 answers 400 `in
 kind and refuses an unknown one. `34-rev17-claude-agent-sdk.yaml` has two scenarios:
 `rev17-claude-agent-sdk-continuation-lifecycle` (step_up with the continuation, approve, the Resumption echoing the correlation,
 consume) and the negative `rev17-unknown-continuation-kind-is-refused` (the kind `foo` on a decision and on
-`POST /v1/approvals`, with `claude_agent_sdk` accepted beside it; the existing `skip_request_validation` break fails it). A deployment that vendors the scenarios and runs them
+`POST /v1/approvals`, with `claude_agent_sdk` accepted beside it; the existing `skip_request_validation` break fails it). Both scenarios declare `serves_delivery: pull`, so a deployment that does not serve the pull delivery skips them. A deployment that vendors the scenarios and runs them
 nightly adds the two ids to its expected-skips until it accepts the kind.
 
 ## Versioning
