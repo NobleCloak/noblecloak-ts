@@ -21,6 +21,7 @@ import type {
   AdvertisedRestrictions,
   ConnectionRegistration,
   ConnectionTransport,
+  ContinuationKind,
   DeploymentApplied,
   Delivery,
   DpopMode,
@@ -370,6 +371,7 @@ async function readAdvertisement(target: Target, index: SpecIndex): Promise<Adve
         dpop?: DpopMode;
         limits?: Partial<Record<string, number>>;
         continuation_deliveries?: Delivery[];
+        continuation_kinds?: ContinuationKind[];
         tool_registration?: 'any' | 'administrators';
         self_approval_from_approver_surface?: boolean;
         user_resolve_scope?: string;
@@ -396,6 +398,9 @@ async function readAdvertisement(target: Target, index: SpecIndex): Promise<Adve
       ...(data.continuation_deliveries === undefined
         ? {}
         : { continuation_deliveries: data.continuation_deliveries }),
+      ...(data.continuation_kinds === undefined
+        ? {}
+        : { continuation_kinds: data.continuation_kinds }),
       tool_registration: data.tool_registration ?? 'any',
       resolutions: data.resolutions,
       self_approval_from_approver_surface: data.self_approval_from_approver_surface ?? false,

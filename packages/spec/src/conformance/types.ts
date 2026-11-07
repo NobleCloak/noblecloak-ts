@@ -27,6 +27,8 @@ export const CAPABILITY_MEMBERS = [
   'connection_transports',
   // Rev 14: the deployment-applied references the deployment applies on approval.
   'deployment_applied',
+  // Rev 17: the continuation kinds the deployment accepts.
+  'continuation_kinds',
 ] as const;
 export type CapabilityMember = (typeof CAPABILITY_MEMBERS)[number];
 
@@ -36,6 +38,27 @@ export type ToolRegistration = 'any' | 'administrators';
 /** The continuation deliveries of the contract. */
 export type Delivery = 'push' | 'pull' | 'held';
 
+/** The continuation kinds of the contract (rev 17), in the order of the document's `Continuation.kind` enum. */
+export const CONTINUATION_KINDS = [
+  'adk',
+  'langgraph',
+  'vercel_ai',
+  'openai_agents',
+  'webhook',
+  'mcp_held',
+  'agt',
+  'claude_agent_sdk',
+] as const;
+export type ContinuationKind = (typeof CONTINUATION_KINDS)[number];
+
+/**
+ * The kinds of rev 16: what a deployment that does not advertise `continuation_kinds` accepts, because one that
+ * predates rev 17 cannot advertise the member.
+ */
+export const REV16_CONTINUATION_KINDS: readonly ContinuationKind[] = CONTINUATION_KINDS.filter(
+  (kind) => kind !== 'claude_agent_sdk'
+);
+
 /**
  * What a deployment advertised beyond its families: the three optional restrictions, and the
  * resolutions it can produce. A member the deployment did not advertise is undefined (and the
@@ -44,6 +67,8 @@ export type Delivery = 'push' | 'pull' | 'held';
 export interface AdvertisedRestrictions {
   readonly approval_arguments_max_bytes?: number;
   readonly continuation_deliveries?: readonly Delivery[];
+  /** `Capabilities.continuation_kinds` (rev 17); undefined when the member is absent (the seven kinds of rev 16). */
+  readonly continuation_kinds?: readonly ContinuationKind[];
   readonly tool_registration: ToolRegistration;
   readonly resolutions: readonly string[];
   /** `Capabilities.self_approval_from_approver_surface`; `false` when the member is absent. */
@@ -433,6 +458,12 @@ export interface Scenario {
    * is skipped (a capability skip, not a failure) where `continuation_deliveries` is advertised and lacks it.
    */
   readonly serves_delivery?: Delivery;
+  /**
+   * Rev 17: a scenario whose success needs the deployment to accept this continuation kind is skipped (a
+   * capability skip, not a failure) where `continuation_kinds` is advertised and lacks it, or is absent and the
+   * kind is not one of the seven of rev 16.
+   */
+  readonly serves_kind?: ContinuationKind;
   /** The converse of `unserved_resolution`: skipped where the deployment advertises approvals and cannot produce this resolution. */
   readonly serves_resolution?: string;
   /**

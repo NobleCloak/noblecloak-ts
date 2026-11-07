@@ -17,7 +17,8 @@ import {
   loadScenarios,
 } from './scenarios.js';
 import { formatSkipWarning, unconfiguredSkips } from './run.js';
-import type { Report, Scenario, Target } from './types.js';
+import { CONTINUATION_KINDS } from './types.js';
+import type { ContinuationKind, Report, Scenario, ScenarioResult, Target } from './types.js';
 
 describe('getPath', () => {
   const body = { data: { items: [{ id: 'a' }, { id: 'b' }], n: 1 } };
@@ -620,6 +621,78 @@ describe('runScenario', () => {
     expect(await skipKind({ serves_resolution: 'approved' }, restricted)).toBeUndefined();
     // Where nothing is advertised the scenario that needs a delivery runs as before.
     expect(await skipKind({ serves_delivery: 'push' })).toBeUndefined();
+  });
+
+  it('skips a scenario whose continuation kind the deployment does not accept (rev 17), reading an absent continuation_kinds as the seven kinds of rev 16', async () => {
+    const run = (
+      scenario: Partial<Scenario>,
+      kinds?: readonly ContinuationKind[]
+    ): Promise<ScenarioResult> =>
+      runScenario(
+        { ...base, ...scenario },
+        {
+          ...deps,
+          restrictions: {
+            tool_registration: 'any',
+            resolutions: ['approved'],
+            ...(kinds === undefined ? {} : { continuation_kinds: kinds }),
+          },
+        }
+      );
+    const skipped = {
+      outcome: 'skipped',
+      skipKind: 'capability',
+      skipReason: 'the deployment does not accept the claude_agent_sdk continuation kind',
+    };
+    // Advertised and listed: it runs (an empty scenario then fails for having no steps).
+    expect(
+      (await run({ serves_kind: 'claude_agent_sdk' }, [...CONTINUATION_KINDS])).skipReason
+    ).toBeUndefined();
+    // Advertised and not listed: a capability skip naming the kind.
+    expect(await run({ serves_kind: 'claude_agent_sdk' }, ['adk', 'langgraph'])).toMatchObject(
+      skipped
+    );
+    expect(await run({ serves_kind: 'langgraph' }, ['adk'])).toMatchObject({
+      outcome: 'skipped',
+      skipKind: 'capability',
+      skipReason: 'the deployment does not accept the langgraph continuation kind',
+    });
+    // Absent: a rev 16 kind runs, and the kind rev 17 added is a capability skip.
+    expect((await run({ serves_kind: 'agt' })).skipReason).toBeUndefined();
+    expect(await run({ serves_kind: 'claude_agent_sdk' })).toMatchObject(skipped);
+    // No restrictions read at all (a run with no capabilities) is the same as the member absent.
+    expect(await runScenario({ ...base, serves_kind: 'claude_agent_sdk' }, deps)).toMatchObject(
+      skipped
+    );
+    expect((await runScenario({ ...base, serves_kind: 'adk' }, deps)).skipReason).toBeUndefined();
+  });
+
+  it('refuses a serves_kind that is not one of the eight continuation kinds, and accepts each of them', () => {
+    expect(() => {
+      assertRestrictions({ ...base, serves_kind: 'foo' as never }, 'f.yaml');
+    }).toThrow(/serves_kind "foo"; it must be one of adk, .*, claude_agent_sdk/);
+    for (const kind of CONTINUATION_KINDS)
+      expect(() => {
+        assertRestrictions({ ...base, serves_kind: kind }, 'f.yaml');
+      }).not.toThrow();
+  });
+
+  it('accepts continuation_kinds in advertises (rev 17), skipping where the member is absent and running where it is advertised', async () => {
+    const scenario = { ...base, advertises: ['continuation_kinds'] } satisfies Scenario;
+    expect(() => {
+      assertRestrictions(scenario, 'f.yaml');
+    }).not.toThrow();
+    const restrictions = { tool_registration: 'any', resolutions: ['approved'] } as const;
+    expect(await runScenario(scenario, { ...deps, restrictions })).toMatchObject({
+      outcome: 'skipped',
+      skipKind: 'capability',
+      skipReason: 'the deployment does not advertise continuation_kinds',
+    });
+    const advertised = await runScenario(scenario, {
+      ...deps,
+      restrictions: { ...restrictions, continuation_kinds: ['adk'] },
+    });
+    expect(advertised.skipReason).toBeUndefined();
   });
 
   it('skips a scenario whose policy subject type policy_forms does not advertise (rev 11 errata), and runs it where policy_forms is absent or lists it', async () => {
