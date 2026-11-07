@@ -2158,6 +2158,18 @@ describe("the steps of rev 12: verify a webhook delivery, and read the mock's de
     );
   });
 
+  it('lacks_key on an optional list passes it absent or empty, and fails it with an entry', () => {
+    // How a scenario asserts "absent or empty" (rev 18, `ApprovalPreview.ineffective`).
+    const run = (value: unknown): string[] => {
+      const failures: string[] = [];
+      check({ path: 'preview.ineffective', lacks_key: 'tool_ref' }, value, failures, 'step');
+      return failures;
+    };
+    expect(run({ preview: {} })).toEqual([]);
+    expect(run({ preview: { ineffective: [] } })).toEqual([]);
+    expect(run({ preview: { ineffective: [{ tool_ref: 'ext:a', subject: {} }] } })).toHaveLength(1);
+  });
+
   it('lacks_key finds a member at any depth, in an object or an array, and is a loaded operator', () => {
     const run = (value: unknown): string[] => {
       const failures: string[] = [];

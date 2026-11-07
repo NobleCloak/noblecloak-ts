@@ -74,7 +74,7 @@
           - { path: data.created, equals: true }
           - { path: data.state, equals: pending }
       save: { approval_id: data.id }
-    - name: the administrator reads the preview - one simulation as everyone, nothing loosened, nothing shadowed
+    - name: the administrator reads the preview - one simulation as everyone, nothing loosened, nothing shadowed (ineffective absent or empty)
       as: admin
       request: { method: GET, path: '/v1/approvals/${approval_id}' }
       expect:
@@ -85,7 +85,7 @@
           - { path: data.preview.simulations.0.tool_ref, equals: 'ext:rr:${uniq}:refund' }
           - { path: data.preview.simulations.0.result.decision, equals: step_up }
           - { path: data.preview.loosening, length: 0 }
-          - { path: data.preview.ineffective, length: 0 }
+          - { path: data.preview.ineffective, lacks_key: tool_ref }
       save: { digest: data.action_digest }
     - name: the administrator approves, and the change is applied at once
       as: admin

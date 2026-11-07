@@ -1280,7 +1280,8 @@ export const MATRIX: readonly Flip[] = [
     // Rev 18: the preview leaves out the role rows a policy of everyone shadows.
     flip: 'preview_ineffective_missing',
     deployment: 'hosted',
-    fails: ['rev18-role-rows-applied-without-an-agent', 'rev18-preview-names-a-shadowed-role-row'],
+    // Absent is what the contract allows for a preview that shadows nothing, so only the shadowed row shows it.
+    fails: ['rev18-preview-names-a-shadowed-role-row'],
   },
   {
     // Rev 18: the preview leaves out the role rows that loosen a tool for their role.
