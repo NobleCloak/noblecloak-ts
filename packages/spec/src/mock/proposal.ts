@@ -156,8 +156,8 @@ export const targetOf = (policy: Obj): string | undefined => {
  * exactly one subject and exactly one target tool; no target is a deployment-applied reference; no two policies
  * have the same target tool and subject; a policy's `config` carries only `mode` and it has no `origin`
  * (`modeOnly: false` is the break that lets the rest through, `baselineModeOnly: false` the one that lets a baseline's
- * through; `grantsNeedPrincipal: false` the one that lets tool grants through without a principal). The first that
- * breaks is `shape`.
+ * through; `grantsNeedPrincipal: false` the one that lets tool grants through when the agent names no principal,
+ * though never when there is no agent). The first that breaks is `shape`.
  */
 export const ruleRefusal = (
   proposal: Proposal,

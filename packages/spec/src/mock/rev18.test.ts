@@ -158,6 +158,26 @@ describe('the mock, rev 18', () => {
     for (const row of rows) expect(row).toMatchObject({ state: 'published', source: 'authored' });
   });
 
+  it('simulates a set without an agent as everyone, not as the person who opened it', async () => {
+    const tool = `ext:r:${unique()}`;
+    await register(tool);
+    const own = await data(
+      await call(tokens.admin, 'POST', '/v1/policies', {
+        kind: 'tool_invocation',
+        subjects: [{ type: 'user', id: 'user_entitled' }],
+        targets: { tools: [tool] },
+        config: { mode: 'deny' },
+      })
+    );
+    await call(tokens.admin, 'POST', `/v1/policies/${String(own.id)}/publish`);
+    const handle = await data(await open(tokens.entitled, { policies: [baseline(tool, 'ask')] }));
+    // The opener's own deny does not reach the baseline every caller holds.
+    const result = (((await read(String(handle.id))).preview as Json).simulations as Json[])[0]
+      ?.result as Json;
+    expect(result.decision).toBe('step_up');
+    await call(tokens.admin, 'POST', `/v1/policies/${String(own.id)}/retire`);
+  });
+
   it('refuses the same set opened by a person whose token holds no policies.role_subjects, naming the first role row and the key', async () => {
     const tool = `ext:r:${unique()}`;
     const args = {
@@ -510,6 +530,24 @@ describe('the rules of a proposal, rev 18', () => {
         { served }
       )
     ).toMatchObject({ member: 'action.arguments.tool_grants' });
+  });
+
+  it('holds a role row to mode even under the break that lets a baseline config through', () => {
+    const wide = proposal({
+      policies: [
+        {
+          role: 'role',
+          policy: entry('role', { type: 'role', id: 'member' }, 'ext:t', 'ask', {
+            mode: 'ask',
+            approver_groups: ['g'],
+          }).policy as Json,
+        },
+      ],
+    });
+    expect(ruleRefusal(wide, { baselineModeOnly: false })).toMatchObject({
+      member: 'action.arguments.policies[0].policy.config.approver_groups',
+    });
+    expect(ruleRefusal(wide, { modeOnly: false })).toBeUndefined();
   });
 
   it('lets grants through without a principal only under the break, and never without an agent', () => {
