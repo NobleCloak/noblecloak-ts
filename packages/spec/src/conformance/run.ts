@@ -21,7 +21,6 @@ import type {
   AdvertisedRestrictions,
   ConnectionRegistration,
   ConnectionTransport,
-  ContinuationKind,
   DeploymentApplied,
   Delivery,
   DpopMode,
@@ -371,7 +370,7 @@ async function readAdvertisement(target: Target, index: SpecIndex): Promise<Adve
         dpop?: DpopMode;
         limits?: Partial<Record<string, number>>;
         continuation_deliveries?: Delivery[];
-        continuation_kinds?: ContinuationKind[];
+        continuation_kinds?: string[];
         tool_registration?: 'any' | 'administrators';
         self_approval_from_approver_surface?: boolean;
         user_resolve_scope?: string;

@@ -7313,7 +7313,7 @@ components:
           type: array
           items:
             type: string
-            enum:
+            x-noblecloak-known-values:
               - adk
               - langgraph
               - vercel_ai
@@ -7323,7 +7323,7 @@ components:
               - agt
               - claude_agent_sdk
           description: |
-            Rev 17: the continuation kinds this deployment accepts. Absent means the seven kinds of rev 16 (`adk` … `agt`): a deployment that accepts `claude_agent_sdk` lists it. A kind not accepted is 400 `invalid_request`, as a kind outside the enum is. Unlike `continuation_deliveries`, where absent means all three, absent here is the list before rev 17, because a deployment that predates rev 17 cannot advertise the member.
+            Rev 17: the continuation kinds this deployment accepts. Absent means the seven kinds of rev 16 (`adk` … `agt`): a deployment that accepts `claude_agent_sdk` lists it. A kind not accepted is 400 `invalid_request`, as a kind outside the `Continuation.kind` enum is. Unlike `continuation_deliveries`, where absent means all three, absent here is the list before rev 17, because a deployment that predates rev 17 cannot advertise the member. Open-ended: a client treats a kind it does not know as one it does not send. Known values: adk | langgraph | vercel_ai | openai_agents | webhook | mcp_held | agt | claude_agent_sdk.
         tool_registration:
           type: string
           enum:

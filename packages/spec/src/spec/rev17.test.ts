@@ -94,11 +94,19 @@ describe('the claude_agent_sdk continuation kind (rev 17)', () => {
     const properties = capabilities.properties as Record<string, JsonObject>;
     const member = obj(properties.continuation_kinds, 'continuation_kinds');
     expect(member.type).toBe('array');
-    expect((member.items as JsonObject).enum).toEqual(kindEnum);
+    // Open-ended, as PolicyKind and ApprovalAction.kind are: a later revision's kind must not make a rev 17 kit fail
+    // the capabilities read. The known values are the document's kinds, and no enum closes the items.
+    const items = obj(member.items, 'continuation_kinds.items');
+    expect(items.type).toBe('string');
+    expect(items.enum).toBeUndefined();
+    expect(items['x-noblecloak-known-values']).toEqual(kindEnum);
     expect(capabilities.required).not.toContain('continuation_kinds');
     const text = flat(member.description);
     expect(text).toContain('Absent means the seven kinds of rev 16 (`adk` … `agt`)');
     expect(text).toContain('A kind not accepted is 400 `invalid_request`');
+    expect(text).toContain(
+      'Open-ended: a client treats a kind it does not know as one it does not send.'
+    );
     expect(flat(continuation.description)).toContain(
       'A deployment lists the kinds it accepts in `Capabilities.continuation_kinds`.'
     );

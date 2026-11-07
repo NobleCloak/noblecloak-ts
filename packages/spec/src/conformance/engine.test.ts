@@ -18,7 +18,7 @@ import {
 } from './scenarios.js';
 import { formatSkipWarning, unconfiguredSkips } from './run.js';
 import { CONTINUATION_KINDS } from './types.js';
-import type { ContinuationKind, Report, Scenario, ScenarioResult, Target } from './types.js';
+import type { Report, Scenario, ScenarioResult, Target } from './types.js';
 
 describe('getPath', () => {
   const body = { data: { items: [{ id: 'a' }, { id: 'b' }], n: 1 } };
@@ -624,10 +624,7 @@ describe('runScenario', () => {
   });
 
   it('skips a scenario whose continuation kind the deployment does not accept (rev 17), reading an absent continuation_kinds as the seven kinds of rev 16', async () => {
-    const run = (
-      scenario: Partial<Scenario>,
-      kinds?: readonly ContinuationKind[]
-    ): Promise<ScenarioResult> =>
+    const run = (scenario: Partial<Scenario>, kinds?: readonly string[]): Promise<ScenarioResult> =>
       runScenario(
         { ...base, ...scenario },
         {
@@ -657,6 +654,14 @@ describe('runScenario', () => {
       skipKind: 'capability',
       skipReason: 'the deployment does not accept the langgraph continuation kind',
     });
+    // The member is open-ended: a kind this kit does not know is ignored, and the listed kinds still count.
+    expect(
+      (await run({ serves_kind: 'claude_agent_sdk' }, ['claude_agent_sdk', 'rev18_future_kind']))
+        .skipReason
+    ).toBeUndefined();
+    expect(await run({ serves_kind: 'claude_agent_sdk' }, ['rev18_future_kind'])).toMatchObject(
+      skipped
+    );
     // Absent: a rev 16 kind runs, and the kind rev 17 added is a capability skip.
     expect((await run({ serves_kind: 'agt' })).skipReason).toBeUndefined();
     expect(await run({ serves_kind: 'claude_agent_sdk' })).toMatchObject(skipped);

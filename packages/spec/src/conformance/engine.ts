@@ -613,7 +613,7 @@ export async function runScenario(scenario: Scenario, deps: EngineDeps): Promise
       skipKind: 'capability',
     };
   // Rev 17: an absent `continuation_kinds` is the seven kinds of rev 16, not all of them.
-  const kinds = restrictions?.continuation_kinds ?? REV16_CONTINUATION_KINDS;
+  const kinds: readonly string[] = restrictions?.continuation_kinds ?? REV16_CONTINUATION_KINDS;
   if (scenario.serves_kind !== undefined && !kinds.includes(scenario.serves_kind))
     return {
       ...base,

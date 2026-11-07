@@ -2946,8 +2946,8 @@ export interface components {
             };
             /** @description The continuation deliveries this deployment serves. Absent means all three. A continuation whose delivery is not listed is refused with 400 `invalid_continuation`, as the routes that take one say. */
             continuation_deliveries?: ("push" | "pull" | "held")[];
-            /** @description Rev 17: the continuation kinds this deployment accepts. Absent means the seven kinds of rev 16 (`adk` … `agt`): a deployment that accepts `claude_agent_sdk` lists it. A kind not accepted is 400 `invalid_request`, as a kind outside the enum is. Unlike `continuation_deliveries`, where absent means all three, absent here is the list before rev 17, because a deployment that predates rev 17 cannot advertise the member. */
-            continuation_kinds?: ("adk" | "langgraph" | "vercel_ai" | "openai_agents" | "webhook" | "mcp_held" | "agt" | "claude_agent_sdk")[];
+            /** @description Rev 17: the continuation kinds this deployment accepts. Absent means the seven kinds of rev 16 (`adk` … `agt`): a deployment that accepts `claude_agent_sdk` lists it. A kind not accepted is 400 `invalid_request`, as a kind outside the `Continuation.kind` enum is. Unlike `continuation_deliveries`, where absent means all three, absent here is the list before rev 17, because a deployment that predates rev 17 cannot advertise the member. Open-ended: a client treats a kind it does not know as one it does not send. Known values: adk | langgraph | vercel_ai | openai_agents | webhook | mcp_held | agt | claude_agent_sdk. */
+            continuation_kinds?: string[];
             /**
              * @description Who may register or change tools: `any` principal of the organisation, or only its `administrators`. Absent means `any`. Any other principal is 403 `forbidden`, whatever the body. The per-tool setting `show_arguments_to_approvers` has no member of its own: it is honoured whenever `resolutions` is non-empty.
              * @enum {string}

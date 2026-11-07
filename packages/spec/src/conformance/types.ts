@@ -67,8 +67,12 @@ export const REV16_CONTINUATION_KINDS: readonly ContinuationKind[] = CONTINUATIO
 export interface AdvertisedRestrictions {
   readonly approval_arguments_max_bytes?: number;
   readonly continuation_deliveries?: readonly Delivery[];
-  /** `Capabilities.continuation_kinds` (rev 17); undefined when the member is absent (the seven kinds of rev 16). */
-  readonly continuation_kinds?: readonly ContinuationKind[];
+  /**
+   * `Capabilities.continuation_kinds` (rev 17); undefined when the member is absent (the seven kinds of rev 16). Strings,
+   * not `ContinuationKind`: the member is open-ended, so a later revision's deployment may list a kind this kit does not
+   * know.
+   */
+  readonly continuation_kinds?: readonly string[];
   readonly tool_registration: ToolRegistration;
   readonly resolutions: readonly string[];
   /** `Capabilities.self_approval_from_approver_surface`; `false` when the member is absent. */

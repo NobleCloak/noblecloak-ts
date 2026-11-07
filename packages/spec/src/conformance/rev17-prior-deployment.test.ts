@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { loadCommittedDocument } from '../spec/testing.js';
 import { runAgainstMock } from './against-mock.js';
+import { CONTINUATION_KINDS } from './types.js';
 
 const LIFECYCLE = 'rev17-claude-agent-sdk-continuation-lifecycle';
 const NEGATIVE = 'rev17-unknown-continuation-kind-is-refused';
@@ -63,4 +64,22 @@ describe('the rev 17 scenarios on a deployment that has adopted the kind', () =>
       expect(byId.get(PULL_ONLY)?.outcome).toBe('passed');
     });
   }
+});
+
+describe('a deployment of a later revision that advertises a kind this kit does not know', () => {
+  it('passes the capabilities read and runs the rev 17 scenarios, the unknown kind ignored', async () => {
+    const run = await runAgainstMock({
+      deployment: 'hosted',
+      spec: loadCommittedDocument(),
+      only: [LIFECYCLE, NEGATIVE, PULL_ONLY],
+      restrictions: { deliveries: ['pull', 'held'] },
+      capabilities: { continuation_kinds: [...CONTINUATION_KINDS, 'rev18_future_kind'] },
+    });
+    const byId = new Map(run.results.map((r) => [r.id, r]));
+    // A failed capabilities read is reported as a failed result of this id and runs nothing else.
+    expect(byId.has('capabilities-read-at-run-start')).toBe(false);
+    expect(byId.get(LIFECYCLE)?.outcome).toBe('passed');
+    expect(byId.get(NEGATIVE)?.outcome).toBe('passed');
+    expect(byId.get(PULL_ONLY)?.outcome).toBe('passed');
+  });
 });
