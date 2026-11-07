@@ -253,7 +253,9 @@ info:
     `POST /v1/approvals`, an administrator of the organisation approves it, and the deployment applies the
     change in one step. The first and only reference is `tool:noblecloak:propose-policy-set`, whose
     arguments are a `PolicySetProposal`: an agent's tools, its binding to a service principal and the
-    policies that govern it, proposed together.
+    policies that govern it, proposed together. Rev 18: a proposal may also carry policies for a role of the
+    organisation (`role` rows) and tool grants for the agent's service principal (`tool_grants`), and a proposal
+    without an agent proposes organisation policies alone (`baseline` and `role` rows).
 
     - *The namespace is reserved.* Registering a tool under it is 422 `reserved_tool_ref`. A deployment-applied
       reference is never listed by `GET /v1/tools`, and is never decided as an ordinary tool: a decision on
@@ -274,8 +276,8 @@ info:
       several smaller ones.
     - *Approving applies, all or nothing.* Approving re-runs the checks that opening ran against the state at
       that moment, then applies the change in a fixed order: the tools of the proposal are registered, the
-      agent is bound to its service principal, and each policy is created and published, in the order of
-      `policies`. If any step cannot be applied, nothing is applied, whatever the earlier steps did. The
+      agent is bound to its service principal, (rev 18) its `tool_grants` are granted to that service principal,
+      and each policy is created and published, in the order of `policies`. If any step cannot be applied, nothing is applied, whatever the earlier steps did. The
       approval then resolves `rejected`, and the answer to the approve call is still 200 with the approval
       in that state; the approval is not left `approved`. `resolution_history` records why: its last entry
       has `resolution: rejected`, `by` the administrator whose approval the deployment refused to apply, and
@@ -3489,7 +3491,8 @@ paths:
         sizes this deployment accepts when they are below the contract's 100 and the bound on the arguments
         it keeps for an approval. A deployment that restricts what the rest of the document allows says
         so in optional members: `continuation_deliveries` (the deliveries it serves), rev 17,
-        `continuation_kinds` (the continuation kinds it accepts; absent, the seven kinds of rev 16),
+        `continuation_kinds` (the continuation kinds it accepts; absent, the seven kinds of rev 16), rev 18,
+        `proposals` (the rows and members of a policy-set proposal it accepts; absent, those of rev 14),
         `tool_registration` (who may register tools) and, rev 11, `policy_forms` (the policy forms it
         enforces), `connection_registration` (who may register a connection) and `connection_transports`
         (the connection transports it serves); any other absent member is the unrestricted rev 5 behaviour. A client needs
@@ -4327,7 +4330,7 @@ components:
           type: string
           pattern: ^[a-z][a-z0-9_]{0,63}$
           description: |
-            Only on `proposal_refused` (rev 14), and always present on it: why the proposal was refused. The documented values are `not_a_user`, `shape`, `unknown_agent`, `principal_bound`, `tool_ref_in_use`, `target_unknown`, `baseline_exists` and `tightening_looser` (see `PolicySetProposal`). A client treats a well-formed value it does not know as a plain refusal; a client that matches on `type` keeps working.
+            Only on `proposal_refused` (rev 14), and always present on it: why the proposal was refused. The documented values are `not_a_user`, `shape`, `unknown_agent`, `principal_bound`, `tool_ref_in_use`, `target_unknown`, `baseline_exists`, `tightening_looser` and, rev 18, `not_entitled` (see `PolicySetProposal`). A client treats a well-formed value it does not know as a plain refusal; a client that matches on `type` keeps working.
     Meta:
       type: object
       required:
@@ -5013,7 +5016,7 @@ components:
     ApprovalPreview:
       type: object
       description: |
-        What approving a `tool:noblecloak:propose-policy-set` approval would change (rev 14), computed by the deployment when the approval is opened from the proposed bodies, with nothing stored, as `POST /v1/policies/simulate` does. It is no part of `arguments`.
+        What approving a `tool:noblecloak:propose-policy-set` approval would change (rev 14), computed by the deployment when the approval is opened from the proposed bodies, with nothing stored, as `POST /v1/policies/simulate` does. It is no part of `arguments`. Rev 18 adds `grants` and `ineffective`; a deployment that predates rev 18 sends neither.
       required:
         - simulations
         - loosening
@@ -5022,7 +5025,7 @@ components:
         simulations:
           type: array
           description: |
-            One entry for each tool that the proposal's policies govern, in the order the tools first appear in `policies`: the decision for a call to that tool, composed for the agent of the proposal, as a simulation as `{ type: agent, id: <agent.id> }` with every proposed body standing beside the policies in force and the proposal's tools registered. Once the agent is bound, the bound service principal holds exactly those policies.
+            One entry for each tool that the proposal's policies govern, in the order the tools first appear in `policies`: the decision for a call to that tool, composed for the agent of the proposal, as a simulation as `{ type: agent, id: <agent.id> }` with every proposed body standing beside the policies in force and the proposal's tools registered. Once the agent is bound, the bound service principal holds exactly those policies. Rev 18: for a proposal without `agent`, the simulation is as `{ type: role, id: everyone }`, the baseline every caller holds.
           items:
             type: object
             required:
@@ -5054,6 +5057,35 @@ components:
                 $ref: "#/components/schemas/PolicyMode"
               to:
                 $ref: "#/components/schemas/PolicyMode"
+        grants:
+          type: array
+          description: |
+            Rev 18: one entry for each reference of the proposal's `tool_grants`, in that order: the tools whose grant approving records for the service principal in `agent.principal_id`. Absent or empty when the proposal carries no `tool_grants`.
+          items:
+            type: object
+            required:
+              - tool_ref
+            additionalProperties: false
+            properties:
+              tool_ref:
+                type: string
+                minLength: 1
+        ineffective:
+          type: array
+          description: |
+            Rev 18: one entry for each `role` row of the proposal whose mode is looser than the tightest mode a `tool_invocation` policy of the role `everyone` gives the same tool, counting the published policies and the proposal's own `baseline` rows. Under tightest-wins such a row changes nothing for the role while that policy of `everyone` stands. It is reported to the approver and refuses nothing. Absent or empty means no row of the proposal is shadowed this way.
+          items:
+            type: object
+            required:
+              - tool_ref
+              - subject
+            additionalProperties: false
+            properties:
+              tool_ref:
+                type: string
+                minLength: 1
+              subject:
+                $ref: "#/components/schemas/PolicySubject"
     ApprovalActionInput:
       type: object
       description: |
@@ -5169,8 +5201,9 @@ components:
           enum:
             - baseline
             - tightening
+            - role
           description: |
-            `baseline`: the organisation's policy for the tool, which every caller holds (`everyone`). `tightening`: a policy of the agent alone, which only tightens what the baseline and the other policies in force give the agent.
+            `baseline`: the organisation's policy for the tool, which every caller holds (`everyone`). `tightening`: a policy of the agent alone, which only tightens what the baseline and the other policies in force give the agent. `role` (rev 18): a policy for one role of the organisation, which every holder of the role holds beside the baseline. A deployment lists the kinds of row it accepts in `Capabilities.proposals.row_kinds`.
         rationale:
           type: string
           minLength: 1
@@ -5182,19 +5215,20 @@ components:
     PolicySetProposal:
       type: object
       description: |
-        The arguments of `tool:noblecloak:propose-policy-set` (rev 14): an agent's tools, its binding to a service principal and the policies that govern it, proposed together and applied together (see Deployment-applied proposals). The schema is closed. The whole `action.arguments` fits `limits.approval_arguments_max_bytes` where the deployment advertises one; the two caps of 50 keep a typical proposal well inside the 32 KiB that a deployment commonly sets, and an agent that needs more is proposed in several sets.
-        **Rules beyond the schema.** A `baseline` is a `tool_invocation` policy with exactly one subject, `{ type: role, id: everyone }`, and `targets.tools` a list of exactly one `tool_ref`. A `tightening` is a `tool_invocation` policy with exactly one subject, `{ type: agent, id: <agent.id> }`, and `targets.tools` a list of exactly one `tool_ref`. No two entries of `tools` have the same `tool_ref`. No two entries of `policies` have the same target tool and subject. No policy targets a reference in the namespace `tool:noblecloak:`. A proposed policy's `config` carries `mode` only: any other member (`approver_groups`, `expires_after`, `on_deny`, or any other) and any `origin` is not proposed. The approver does see the arguments, but what the checks at open (loosening and tightening) and the preview compare is the mode alone, so a change to the routing, the expiry or `on_deny` would get no check and no preview line. A proposal that breaks one of these is refused with `code` `shape` and, where it has a part to name, that part as `member` (for example `action.arguments.policies[1].policy.config.approver_groups`).
-        **Refusals at open (422 `proposal_refused`, rev 14).** `code` is one of: `not_a_user` (the caller is not a user, a service principal or an agent; only a person proposes); `shape` (the body breaks the schema or a rule above, or `agent.principal_id` names no service principal of the organisation; `member` names the part); `unknown_agent` (`agent.id` is no agent of the organisation; `member` `action.arguments.agent.id`); `principal_bound` (`agent.principal_id` is bound to another agent; `member` `action.arguments.agent.principal_id`); `tool_ref_in_use` (a tool of the proposal collides with a tool of the organisation, or with one the deployment dispatches another way; `member` `action.arguments.tools[<i>].tool_ref`); `target_unknown` (a policy targets a tool that is neither registered nor in this proposal's `tools`; `member` `action.arguments.policies[<i>].policy.targets.tools[0]`); `baseline_exists` (a published policy of the role `everyone` already governs the tool, so a baseline would loosen or replace it without anyone choosing to: propose a tightening instead; `member` `action.arguments.policies[<i>]`); `tightening_looser` (the tightening gives the agent a looser mode than the policies in force and the proposal's baselines compose to for that tool; `member` `action.arguments.policies[<i>]`). When several apply, which one is reported is the deployment's choice. Opening applies nothing and stores nothing but the approval and its preview.
+        The arguments of `tool:noblecloak:propose-policy-set` (rev 14): an agent's tools, its binding to a service principal and the policies that govern it, proposed together and applied together (see Deployment-applied proposals). Rev 18: also policies for roles of the organisation and tool grants for the agent's service principal; without `agent`, policies of the organisation alone. The schema is closed. The whole `action.arguments` fits `limits.approval_arguments_max_bytes` where the deployment advertises one; the two caps of 50 keep a typical proposal well inside the 32 KiB that a deployment commonly sets, and an agent that needs more is proposed in several sets.
+        **Rules beyond the schema.** A `baseline` is a `tool_invocation` policy with exactly one subject, `{ type: role, id: everyone }`, and `targets.tools` a list of exactly one `tool_ref`. A `tightening` is a `tool_invocation` policy with exactly one subject, `{ type: agent, id: <agent.id> }`, and `targets.tools` a list of exactly one `tool_ref`. A `role` row (rev 18) is a `tool_invocation` policy with exactly one subject, `{ type: role, id: <key> }`, where the key is a bare role key of the organisation as `PolicySubject` describes it and never `everyone` (in any case, or in a form that ends in `:everyone` or `/everyone`: a policy of `everyone` is a `baseline`), and `targets.tools` a list of exactly one `tool_ref`. Rev 18: without `agent`, the proposal has no `tightening` (`member` `action.arguments.policies[<i>].role`) and no `tool_grants` (`member` `action.arguments.tool_grants`). `tool_grants` is present only when `agent.principal_id` is (`member` `action.arguments.tool_grants`), and none of its references is in the namespace `tool:noblecloak:` or is a `tool_ref` of this proposal's own `tools` (`member` `action.arguments.tool_grants[<i>]`): a grant names a tool the organisation already holds. A deployment that does not list `role` in `Capabilities.proposals.row_kinds` refuses a `role` row (`member` `action.arguments.policies[<i>].role`), and one that does not list `tool_grants` in `Capabilities.proposals.members` refuses the member (`member` `action.arguments.tool_grants`). No two entries of `tools` have the same `tool_ref`. No two entries of `policies` have the same target tool and subject. No policy targets a reference in the namespace `tool:noblecloak:`. A proposed policy's `config` carries `mode` only: any other member (`approver_groups`, `expires_after`, `on_deny`, or any other) and any `origin` is not proposed. The approver does see the arguments, but what the checks at open (loosening and tightening) and the preview compare is the mode alone, so a change to the routing, the expiry or `on_deny` would get no check and no preview line. A proposal that breaks one of these is refused with `code` `shape` and, where it has a part to name, that part as `member` (for example `action.arguments.policies[1].policy.config.approver_groups`).
+        **Refusals at open (422 `proposal_refused`, rev 14).** `code` is one of: `not_a_user` (the caller is not a user, a service principal or an agent; only a person proposes); `shape` (the body breaks the schema or a rule above, or `agent.principal_id` names no service principal of the organisation; `member` names the part); `unknown_agent` (`agent.id` is no agent of the organisation; `member` `action.arguments.agent.id`); `principal_bound` (`agent.principal_id` is bound to another agent; `member` `action.arguments.agent.principal_id`); `tool_ref_in_use` (a tool of the proposal collides with a tool of the organisation, or with one the deployment dispatches another way; `member` `action.arguments.tools[<i>].tool_ref`); `target_unknown` (a policy targets a tool that is neither registered nor in this proposal's `tools`; `member` `action.arguments.policies[<i>].policy.targets.tools[0]`); `baseline_exists` (a published policy of the role `everyone` already governs the tool, so a baseline would loosen or replace it without anyone choosing to: propose a tightening instead; `member` `action.arguments.policies[<i>]`); `tightening_looser` (the tightening gives the agent a looser mode than the policies in force and the proposal's baselines compose to for that tool; `member` `action.arguments.policies[<i>]`); rev 18, `target_unknown` also for a reference of `tool_grants` that is no tool of the organisation, or one that is withdrawn (`member` `action.arguments.tool_grants[<i>]`); rev 18, `not_entitled` (the organisation is not entitled to policies with a role subject, the entitlement `policies.role_subjects` of `Capabilities.entitlements`; `member` names the first `role` row, `action.arguments.policies[<i>]`, and `detail` names the entitlement). No check compares a `role` row with the baseline: a role may be given a looser mode than `everyone` or a tighter one, and the preview lists, in `ineffective`, a `role` row that a tighter policy of `everyone` shadows. When several apply, which one is reported is the deployment's choice. Opening applies nothing and stores nothing but the approval and its preview.
         **A tightening for an agent that already has a policy for the tool.** No check at open refuses a tightening because a published `tool_invocation` policy of the same agent already governs its tool, by name or by `all`. Such a proposal may open when no other check refuses it, but approving it never applies it: it is refused with `proposal_refused:policy_conflict` (or another code, when a check run again refuses it first), because at most one published policy governs a (tool, subject) pair. Such a tightening is made by changing that policy, or by retiring it before the proposal is approved.
+        **Entitlement at approval (rev 18).** Approving checks the entitlement again: a proposal with a `role` row that is approved when the organisation is no longer entitled to policies with a role subject applies nothing, and the approval resolves `rejected` with the reason `proposal_refused:not_entitled`.
+        **Tool grants (rev 18).** A grant is a change the deployment makes, as the binding is: on approval the deployment records that the service principal in `agent.principal_id` may list and call each tool of `tool_grants`, where the deployment limits a service principal's tools to those granted to it. The visibility rule of `GET /v1/tools` (`Owner`) is unchanged, and what a grant does beyond that is the deployment's. A grant that already exists is kept as it is. A deployment lists `tool_grants` in `Capabilities.proposals.members` only when it applies grants.
       required:
-        - agent
         - policies
       additionalProperties: false
       properties:
         agent:
           type: object
           description: |
-            The agent the proposal is for, a row of `/v1/agents` of the organisation. `principal_id`, when present, is a service principal of the organisation to bind to the agent on approval, as `PUT /v1/agents/{id}/principal` binds it; absent, the agent's binding is left as it is.
+            The agent the proposal is for, a row of `/v1/agents` of the organisation. `principal_id`, when present, is a service principal of the organisation to bind to the agent on approval, as `PUT /v1/agents/{id}/principal` binds it; absent, the agent's binding is left as it is. Rev 18: optional; a proposal without it carries only `baseline` and `role` rows and, optionally, `tools`.
           required:
             - id
           additionalProperties: false
@@ -5229,6 +5263,16 @@ components:
           maxItems: 50
           items:
             $ref: "#/components/schemas/PolicySetEntry"
+        tool_grants:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: |
+            Rev 18: the `tool_ref`s of tools the organisation already holds, to grant to the service principal in `agent.principal_id` on approval (see Tool grants above).
+          items:
+            type: string
+            minLength: 1
     ResolveResolution:
       type: string
       description: |
@@ -7248,6 +7292,13 @@ components:
           type: array
           items:
             type: string
+            x-noblecloak-known-values:
+              - records.verify
+              - evidence.export
+              - policies.suggested
+              - policies.role_subjects
+          description: |
+            The entitlement keys the organisation holds; a route or a request member that needs one names it. Open-ended: a client treats a key it does not know as one it does not use. A route names its key in `x-noblecloak-entitlement` (or, for one value of a parameter, `x-noblecloak-entitlement-for-values`) and answers 403 `entitlement_required` without it; rev 18, a `role` row of a `PolicySetProposal` needs `policies.role_subjects` and is refused `proposal_refused` with `code` `not_entitled` without it. Known values: records.verify | evidence.export | policies.suggested | policies.role_subjects.
         jwks_uri:
           type: string
           format: uri
@@ -7434,6 +7485,36 @@ components:
                 minLength: 1
                 description: |
                   The name of the schema in `components.schemas` that `action.arguments` of an approval for this reference must fit, for example `PolicySetProposal`.
+        proposals:
+          type: object
+          description: |
+            Rev 18: what this deployment accepts in a `PolicySetProposal`, where it lists `tool:noblecloak:propose-policy-set` in `deployment_applied`. Absent means what a deployment of rev 14 to 17 accepts: `row_kinds` `baseline` and `tightening`, and no optional member. A row kind or an optional member the deployment does not list is refused `proposal_refused` with `code` `shape`.
+          required:
+            - row_kinds
+            - members
+          additionalProperties: false
+          properties:
+            row_kinds:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                type: string
+                x-noblecloak-known-values:
+                  - baseline
+                  - tightening
+                  - role
+              description: |
+                The values of `PolicySetEntry.role` this deployment accepts. Open-ended: a client treats a kind it does not know as one it does not send. Known values: baseline | tightening | role.
+            members:
+              type: array
+              uniqueItems: true
+              items:
+                type: string
+                x-noblecloak-known-values:
+                  - tool_grants
+              description: |
+                The optional members of `PolicySetProposal` beyond those of rev 14 that this deployment accepts, possibly none. Open-ended: a client treats a member it does not know as one it does not send. Known values: tool_grants.
         self_approval_from_approver_surface:
           type: boolean
           description: |
