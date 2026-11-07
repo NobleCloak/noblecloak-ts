@@ -156,10 +156,11 @@ approve their own proposal only from the deployment's approver surface (see
 
 - **Applied.** The answer is the approval, `consumed`, with `resolution: approved`. The tools exist, the agent is
   bound, the policies are published, and a simulation by the bound service principal shows the tightening. From a
-  revision 18 deployment an administrator sees the same without that principal's token:
+  revision 18 deployment an administrator simulates it without that principal's token:
   `POST /v1/policies/{id}/simulate` (or `POST /v1/policies/simulate`) with
   `"subject": { "type": "service", "id": "<principal_id>" }` composes the principal's own policies, the bound agent's,
-  `everyone`'s and the organisation's.
+  `everyone`'s and the organisation's. It leaves out any role the principal's token carries, so where the token
+  carries one, the principal's own simulation may differ.
 - **Not applied.** Approving runs the checks of step 3 again against the state of that moment, then applies the
   change. If one fails, or a policy to publish meets a published policy of the same tool and subject, nothing is
   applied. The answer is still `200`, and the approval is `rejected`: the last entry of its `resolution_history`
@@ -192,7 +193,7 @@ On approval, the grants are applied after the binding and before the policies, i
 Revision 18 also lets an administrator simulate as a service principal,
 `"subject": { "type": "service", "id": "<principal_id>" }` on either simulate route: the principal's own
 policies, those of the agent it is bound to (none while it is unbound), `everyone`'s and the organisation's, as its
-gateway would compose them. Run it before approving to see what the principal gets today, and after to see the
+gateway would compose them, except for any role its token carries, which is not simulated. Run it before approving to see what the principal gets today, and after to see the
 tightening.
 
 The refusals at open that revision 18 adds or widens:

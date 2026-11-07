@@ -690,7 +690,8 @@ A deployment says what it accepts in `Capabilities.proposals` (`row_kinds`, `mem
 **Simulating as a service principal.** `POST /v1/policies/{id}/simulate`, and the set form that defers to it, take
 `subject: { type: service, id: <service principal id> }` (the `AgentPrincipalWrite.principal_id` string). The deployment
 composes what that principal's gateway would: the policies whose subject is the principal, the policies of the agent it is
-bound to (none while it is unbound), `everyone` and the organisation, and no user's or other role's. A deployment whose
+bound to (none while it is unbound), `everyone` and the organisation, and no user's or other role's: a role the principal's
+token carries, which its gateway would compose, is not simulated. A deployment whose
 `policy_forms.subject_types` lacks `service` still accepts it and composes as if no `service` policy existed. This is a text
 change: `PolicySubject` already took `service`, which rev 17 refused 422 `unsupported_policy_form`; `group` is still
 refused so. No capability advertises it beyond the revision; the kit gates its scenarios on `proposals`, the member that
