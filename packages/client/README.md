@@ -8,6 +8,7 @@ are `openapi-fetch` and `canonicalize`; the digest hash and the signature check 
 - **Quickstart**
 - **The primitives:** `createClient`, `argDigest`, `verifyResumption`
 - **Service principals:** `@noblecloak/client/service-principal`, tokens from a key
+- **Governance API:** `@noblecloak/client/governance-api`, one method per operation, and `isTransient`
 - **Errors:** API problems, `ResumptionError`, `DigestError`
 - **Types**, **Versioning**, **License**
 
@@ -191,6 +192,50 @@ credential file or a `key_file` needs `node:fs` and `node:path`; inline JSON wit
 | `network_error`          | The request got no answer, or timed out (`timeoutMs`, default 10 seconds), including while the response body was being read.                                                                              |
 
 Messages never contain the key or an assertion, and never echo a credential source that is not a path (a quoted `.env` value is refused as `invalid_credential`, and an unreadable path is named only by where it came from).
+
+## Governance API
+
+`@noblecloak/client/governance-api` wraps the operations a governed runtime calls: `capabilities`, `jwks`,
+`createRun`, `decide`, `getApproval`, `waitApproval`, `listApprovals`, `stream`, `getResumption`, `consume`,
+`withdraw` and `appendRecord` (`createRun` and `appendRecord` take an idempotency key). Each returns the
+unwrapped `data` or a `Problem`, so a 4xx is a value you branch on, not an exception. The main entry does
+not import it.
+
+```ts
+import { GovernanceApi, isTransient } from '@noblecloak/client/governance-api';
+
+const api = new GovernanceApi({ baseUrl: 'https://govern.example.com', getToken: () => token });
+
+try {
+  const answer = await api.getApproval(id);
+  if (!answer.ok) {
+    // answer.problem is { status, code, detail? }. 408 and 429 ask for patience; the rest are refusals.
+    return isTransient(answer) ? 'try again' : 'refused';
+  }
+  use(answer.data);
+} catch (error) {
+  // A network failure, a 5xx or a body that is not an answer: ModuleApiError with code 'unreachable'.
+  // isTransient alone, not `instanceof`, so an error from another installed copy of the client still counts.
+  if (isTransient(error)) return 'try again';
+  throw error;
+}
+```
+
+- `ModuleApiError` has one code, `unreachable`, and keeps the original failure as `cause`. It is thrown for a
+  network failure, any 5xx, a 2xx body without a `data` member, a list page whose `data` is not an array or
+  whose `meta.next` is neither a string nor null, and any non-ok answer from `jwks` and `stream`.
+- `isTransient(answer | problem | error)` is true for a `ModuleApiError` with code `unreachable` and for a
+  refused answer (or bare `Problem`) with status 5xx, 408 or 429. It is false for success, other statuses
+  such as 400, 403, 404 and 409, and any other error (an `Error` that carries a numeric `status`, as an SDK
+  error does, is not read as a `Problem`). A `ModuleApiError` thrown by another installed copy of the
+  client is recognised too, by `name === 'ModuleApiError'` and `code === 'unreachable'`. `jwks` and `stream` throw `ModuleApiError` for every non-ok
+  status, 4xx included, so `isTransient` is true for a 403 or 404 from those two: do not retry them forever.
+- `isTransientStatus(status)` is the status half of that rule, exported for callers that hold a bare HTTP
+  status: true for any 5xx, 408 and 429, false otherwise.
+- The constructor option `isPassThrough(error)` names errors to re-throw as themselves: when it returns true
+  for what `getToken` (or the request) threw, the error is not turned into `unreachable`. The default is none.
+- The constructor option `dpopProof` is the same hook `createClient` takes and is forwarded to the client the
+  constructor builds; it is ignored when you pass `client`.
 
 ## Errors
 

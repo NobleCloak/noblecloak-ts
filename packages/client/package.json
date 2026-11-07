@@ -20,6 +20,10 @@
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js"
     },
+    "./governance-api": {
+      "types": "./dist/governance-api.d.ts",
+      "import": "./dist/governance-api.js"
+    },
     "./service-principal": {
       "types": "./dist/service-principal.d.ts",
       "import": "./dist/service-principal.js"
