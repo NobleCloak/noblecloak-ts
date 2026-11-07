@@ -696,7 +696,9 @@ entitlement, which is what the contract speaks of. It records grants in its stat
 a person of another organisation that does not hold the entitlement, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, a shadowed role row in the
 preview, and a role row that loosens in the preview). Six new breaks fail them, as do the existing
 `proposal_refusal_code_missing` (every refusal), `proposal_not_consumed` (the two that apply) and `preview_loosening_missing`
-(the loosening role row).
+(the loosening role row). The re-check of the entitlement at approval (`proposal_refused:not_entitled`) has no scenario
+and no break: the kit cannot take an entitlement away from an organisation between the open and the approval, so only the
+mock's own tests (`src/mock/rev18.test.ts`) show it, and a deployment that skips that re-check still passes the kit.
 
 ## Versioning
 
