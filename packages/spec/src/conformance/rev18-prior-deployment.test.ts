@@ -24,7 +24,7 @@ describe('the rev 18 scenarios on a deployment that lists only the rows of rev 1
       restrictions: { proposals: { row_kinds: ['baseline', 'tightening'], members: [] } },
     });
     const byId = new Map(run.results.map((r) => [r.id, r]));
-    const skipped = (reason: string): unknown => ({
+    const skipped = (reason: string): Record<string, unknown> => ({
       outcome: 'skipped',
       skipKind: 'capability',
       skipReason: reason,
