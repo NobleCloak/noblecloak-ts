@@ -496,8 +496,6 @@ const TOOLS_FACTS_FEATURE = 'tools.facts';
 const POLICY_RULES_FEATURE = 'policies.rules';
 /** Rev 16: the feature that says a deployment enforces approvers, serves `approval_routing` and sets requirements. */
 const APPROVAL_REQUIREMENTS_FEATURE = 'approvals.requirements';
-/** Rev 17: the feature that says a deployment accepts the `claude_agent_sdk` continuation kind. */
-const CLAUDE_AGENT_SDK_FEATURE = 'continuations.claude_agent_sdk';
 
 /**
  * The `tool_invocation` forms the mock enforces (rev 11, `Capabilities.policy_forms`): every mode but the
@@ -586,16 +584,17 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
   const spec = options.spec ?? loadDocument();
   const index = new SpecIndex(spec);
   /**
-   * Rev 17: the mock accepts the kind iff the document it implements lists it in `Continuation.kind`, so a document
-   * that predates rev 17 stands in for a deployment that has not adopted the kind and does not advertise the feature.
+   * Rev 17: the continuation kinds the mock accepts are the `Continuation.kind` enum of the document it implements
+   * (schema validation refuses any other), so a document that predates rev 17 stands in for a deployment that has
+   * not adopted `claude_agent_sdk` and advertises the seven kinds of rev 16.
    */
-  const claudeAgentSdkServed = (): boolean => {
+  const continuationKinds = (): string[] => {
     const schemas = ((spec.components as JsonObject | undefined)?.schemas ?? {}) as Record<
       string,
       JsonObject
     >;
     const kind = (schemas.Continuation?.properties as Record<string, JsonObject> | undefined)?.kind;
-    return Array.isArray(kind?.enum) && kind.enum.includes('claude_agent_sdk');
+    return Array.isArray(kind?.enum) ? kind.enum.filter((k) => typeof k === 'string') : [];
   };
   const state = new MockState();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins ?? []);
@@ -5521,8 +5520,6 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       TOOLS_FACTS_FEATURE,
       ...(rulesServed() ? [POLICY_RULES_FEATURE] : []),
       ...(requirementsServed() ? [APPROVAL_REQUIREMENTS_FEATURE] : []),
-      // Rev 17: it accepts the kind wherever it serves approvals, on either deployment, if its document lists it.
-      ...(advertised.has('approvals') && claudeAgentSdkServed() ? [CLAUDE_AGENT_SDK_FEATURE] : []),
     ];
     return ok(c, {
       deployment: config.deployment,
@@ -5556,6 +5553,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       ...(options.deliveries === undefined
         ? {}
         : { continuation_deliveries: [...options.deliveries] }),
+      // Rev 17: the kinds its document lists, wherever it serves approvals, on either deployment.
+      ...(advertised.has('approvals') ? { continuation_kinds: continuationKinds() } : {}),
       ...(options.restrictToolRegistration === true ? { tool_registration: 'administrators' } : {}),
       // Rev 11: who registers a connection, when the mock is started restricted, and the transports it serves.
       ...(options.connectionRegistration === undefined

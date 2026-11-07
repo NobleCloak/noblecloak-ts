@@ -1,9 +1,11 @@
 /**
  * What rev 17 of the document says, as assertions: `Continuation.kind` gains `claude_agent_sdk`, the seven kinds
  * before it are unchanged, the enum stays closed, and the new kind is pull only, and its correlation is documented and stays opaque.
+ * A deployment advertises the kinds it accepts as `Capabilities.continuation_kinds`.
  */
 import { describe, expect, it } from 'vitest';
 
+import { CONTINUATION_KINDS, REV16_CONTINUATION_KINDS } from '../conformance/types.js';
 import { FEATURES } from './families.js';
 import { loadSpec } from './load.js';
 import type { JsonObject } from './load.js';
@@ -87,12 +89,28 @@ describe('the claude_agent_sdk continuation kind (rev 17)', () => {
     expect(text).toContain('used with `pull` only');
   });
 
-  it('names the feature in Capabilities.features and in the features a scenario may require', () => {
-    const features = flat(
-      (obj(schemas.Capabilities, 'Capabilities').properties as Record<string, JsonObject>).features
-        ?.description
+  it('advertises the kinds as Capabilities.continuation_kinds, absent meaning the seven of rev 16, and as no feature', () => {
+    const capabilities = obj(schemas.Capabilities, 'Capabilities');
+    const properties = capabilities.properties as Record<string, JsonObject>;
+    const member = obj(properties.continuation_kinds, 'continuation_kinds');
+    expect(member.type).toBe('array');
+    expect((member.items as JsonObject).enum).toEqual(kindEnum);
+    expect(capabilities.required).not.toContain('continuation_kinds');
+    const text = flat(member.description);
+    expect(text).toContain('Absent means the seven kinds of rev 16 (`adk` … `agt`)');
+    expect(text).toContain('A kind not accepted is 400 `invalid_request`');
+    expect(flat(continuation.description)).toContain(
+      'A deployment lists the kinds it accepts in `Capabilities.continuation_kinds`.'
     );
-    expect(features).toContain('`continuations.claude_agent_sdk`');
-    expect(FEATURES).toContain('continuations.claude_agent_sdk');
+    // The feature flag an earlier draft of rev 17 had is gone, from the document and from the features a scenario may
+    // require. Its name is spelled in parts so that no copy of it is left in the tree.
+    const retired = ['continuations', 'claude_agent_sdk'].join('.');
+    expect(JSON.stringify(doc)).not.toContain(retired);
+    expect(FEATURES as readonly string[]).not.toContain(retired);
+  });
+
+  it('keeps the conformance list of kinds equal to the document, and the rev 16 list the same less claude_agent_sdk', () => {
+    expect([...CONTINUATION_KINDS]).toEqual(kindEnum);
+    expect([...REV16_CONTINUATION_KINDS]).toEqual(kindEnum.slice(0, 7));
   });
 });

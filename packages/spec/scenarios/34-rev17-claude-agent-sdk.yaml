@@ -3,14 +3,15 @@
 # server to echoing it back unchanged. A kind outside the closed enum is still refused, and the new kind is pull only.
 # Each scenario declares serves_delivery for the one delivery it sends in a continuation (pull, pull, held), so a
 # deployment that does not serve that delivery skips it.
-# The lifecycle requires the feature continuations.claude_agent_sdk, so a deployment that has not adopted the kind skips it.
-# The two negatives are not gated on it: a kind outside the enum, and claude_agent_sdk with held, are refused either way.
+# The lifecycle declares serves_kind: claude_agent_sdk, so a deployment whose Capabilities.continuation_kinds lacks the
+# kind, or does not advertise the member (the seven kinds of rev 16), skips it.
+# The two negatives are not gated on the kind: a kind outside the enum, and claude_agent_sdk with held, are refused either way.
 - id: rev17-claude-agent-sdk-continuation-lifecycle
   title: A continuation of kind claude_agent_sdk (pull) is stored on a step_up and echoed unchanged in the Resumption, and the approval is consumed with its resume token
   tags: [both, lifecycle]
   needs: [approver]
   requires: [approvals, records.chain]
-  features: [continuations.claude_agent_sdk]
+  serves_kind: claude_agent_sdk
   serves_delivery: pull
   steps:
     - name: register the external tool

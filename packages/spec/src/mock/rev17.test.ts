@@ -1,6 +1,7 @@
 /**
  * The mock's rev 17 behaviour: it validates a request against the document's own schemas, so it accepts and echoes a
  * `claude_agent_sdk` continuation with `pull`, and refuses a kind the enum does not list and the new kind with `held` or `push`.
+ * It advertises the document's kinds as `continuation_kinds` wherever it serves approvals.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -83,19 +84,35 @@ describe('the mock, rev 17', () => {
     }
   });
 
-  it('advertises continuations.claude_agent_sdk iff its document lists the kind and it serves approvals', async () => {
-    const FEATURE = 'continuations.claude_agent_sdk';
-    const features = async (options: Parameters<typeof createMock>[0]): Promise<string[]> => {
+  it('advertises continuation_kinds as its document lists them wherever it serves approvals, and no feature for the kind', async () => {
+    const capabilities = async (
+      options: Parameters<typeof createMock>[0]
+    ): Promise<{ features: string[]; continuation_kinds?: string[] }> => {
       const mock = await createMock({ control: true, ...options });
       const tokens = await mock.tokens();
       const res = await mock.app.request('/v1/capabilities', {
         headers: { authorization: `Bearer ${tokens.creator_user}` },
       });
-      return ((await res.json()) as { data: { features: string[] } }).data.features;
+      return ((await res.json()) as { data: { features: string[]; continuation_kinds?: string[] } })
+        .data;
     };
-    expect(await features({ spec })).toContain(FEATURE);
-    expect(await features({ spec, deployment: 'edge' })).toContain(FEATURE);
-    expect(await features({ spec, advertise: ['runs'] })).not.toContain(FEATURE);
+    const kindsOf = (document: typeof spec): string[] =>
+      (
+        ((document.components as Json).schemas as Json).Continuation as {
+          properties: { kind: { enum: string[] } };
+        }
+      ).properties.kind.enum;
+    const eight = kindsOf(spec);
+    expect(eight).toHaveLength(8);
+    expect(eight).toContain('claude_agent_sdk');
+    for (const deployment of ['hosted', 'edge'] as const) {
+      const data = await capabilities({ spec, deployment });
+      expect(data.continuation_kinds).toEqual(eight);
+      expect(data.features.filter((f) => f.startsWith('continuations.'))).toEqual([]);
+    }
+    expect(await capabilities({ spec, advertise: ['runs'] })).not.toHaveProperty(
+      'continuation_kinds'
+    );
     const prior = loadCommittedDocument();
     const kind = (
       ((prior.components as Json).schemas as Json).Continuation as {
@@ -103,6 +120,6 @@ describe('the mock, rev 17', () => {
       }
     ).properties.kind;
     kind.enum = kind.enum.filter((k) => k !== 'claude_agent_sdk');
-    expect(await features({ spec: prior })).not.toContain(FEATURE);
+    expect((await capabilities({ spec: prior })).continuation_kinds).toEqual(eight.slice(0, 7));
   });
 });

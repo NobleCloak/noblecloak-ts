@@ -1,8 +1,8 @@
 /**
  * The rev 17 scenarios against a deployment that serves pull but whose list of kinds predates rev 17: the mock run with
- * a document whose `Continuation.kind` enum leaves out `claude_agent_sdk`, so the mock does not advertise
- * `continuations.claude_agent_sdk`. The lifecycle scenario requires that feature and is skipped; the negative scenarios are
- * ungated and still pass (an unlisted kind is refused whatever its delivery).
+ * a document whose `Continuation.kind` enum leaves out `claude_agent_sdk`, so the mock's `continuation_kinds` lists
+ * the seven kinds of rev 16. The lifecycle scenario declares `serves_kind: claude_agent_sdk` and is skipped; the negative
+ * scenarios are ungated and still pass (an unlisted kind is refused whatever its delivery).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -29,7 +29,7 @@ const priorDocument = (): ReturnType<typeof loadCommittedDocument> => {
 
 describe('the rev 17 scenarios on a deployment whose kinds predate rev 17', () => {
   for (const deployment of ['hosted', 'edge'] as const) {
-    it(`${deployment}: both negative scenarios pass and the lifecycle is skipped for the missing feature`, async () => {
+    it(`${deployment}: both negative scenarios pass and the lifecycle is skipped for the missing kind`, async () => {
       const run = await runAgainstMock({
         deployment,
         spec: priorDocument(),
@@ -42,7 +42,7 @@ describe('the rev 17 scenarios on a deployment whose kinds predate rev 17', () =
       expect(byId.get(LIFECYCLE)).toMatchObject({
         outcome: 'skipped',
         skipKind: 'capability',
-        skipReason: 'the deployment does not advertise continuations.claude_agent_sdk',
+        skipReason: 'the deployment does not accept the claude_agent_sdk continuation kind',
       });
     });
   }

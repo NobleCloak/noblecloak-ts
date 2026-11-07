@@ -53,8 +53,6 @@ export const FEATURES = [
   'tools.facts',
   'policies.rules',
   'approvals.requirements',
-  // Rev 17: the deployment accepts the `claude_agent_sdk` continuation kind (pull only).
-  'continuations.claude_agent_sdk',
 ] as const;
 
 export type Feature = (typeof FEATURES)[number];
