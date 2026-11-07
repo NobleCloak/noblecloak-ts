@@ -66,12 +66,20 @@ export interface ProposalsServed {
 
 /**
  * Whether a role key names `everyone`, the reserved role a `baseline` is for: the bare key in any case, or a form
- * that ends in `:everyone` or `/everyone`.
+ * that ends in `:everyone` or `/everyone`, compared after Unicode compatibility normalisation (NFKC), so that a
+ * full-width `ｅveryone` names it too.
  */
 export const namesEveryone = (key: string): boolean => {
-  const lower = key.toLowerCase();
+  const lower = key.normalize('NFKC').toLowerCase();
   return lower === 'everyone' || lower.endsWith(':everyone') || lower.endsWith('/everyone');
 };
+
+/**
+ * Whether a role row may name `key` (rev 18): a key that is not empty, has no whitespace before or after it (a
+ * deployment that trims keys would read another role, or `everyone`), and does not name `everyone`.
+ */
+export const isRoleRowKey = (key: string): boolean =>
+  key.length > 0 && key.trim() === key && !namesEveryone(key);
 
 /** Where `action.arguments` sits in the body of `POST /v1/approvals`. */
 export const ARGUMENTS_AT = 'action.arguments';
@@ -136,7 +144,7 @@ const at = (path: string): string => `${ARGUMENTS_AT}.${path}`;
 const SUBJECT_RULE: Readonly<Record<RowKind, string>> = {
   baseline: 'A baseline is for the subject { type: role, id: everyone }.',
   tightening: "A tightening is for the proposal's agent, { type: agent, id: <agent.id> }.",
-  role: 'A role row is for one role of the organisation, { type: role, id: <key> }, and never everyone: a policy of everyone is a baseline.',
+  role: 'A role row is for one role of the organisation, { type: role, id: <key> }, with a key that is not empty and has no whitespace before or after it, and never everyone: a policy of everyone is a baseline.',
 };
 
 /** The tool a policy of the proposal targets, when it targets exactly one. */
@@ -254,7 +262,7 @@ export const ruleRefusal = (
       role === 'baseline'
         ? subject.type === 'role' && subject.id === 'everyone'
         : role === 'role'
-          ? subject.type === 'role' && typeof subject.id === 'string' && !namesEveryone(subject.id)
+          ? subject.type === 'role' && typeof subject.id === 'string' && isRoleRowKey(subject.id)
           : subject.type === 'agent' && subject.id === proposal.agent?.id;
     if (!wanted)
       return {

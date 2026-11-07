@@ -625,6 +625,20 @@ describe('the rules of a proposal, rev 18', () => {
     expect(ruleRefusal(proposal())).toBeUndefined();
   });
 
+  it('refuses a role row whose key is empty, has surrounding whitespace, or is everyone once normalised', () => {
+    const on = (key: string): Proposal =>
+      proposal({
+        policies: [{ role: 'role', policy: roleRow(key, 'ext:t', 'ask').policy as Json }],
+      });
+    for (const key of ['', ' ', 'everyone ', ' member', 'member\t', '\uFF45veryone', 'EVERYONE'])
+      expect(ruleRefusal(on(key)), JSON.stringify(key)).toMatchObject({
+        code: 'shape',
+        member: 'action.arguments.policies[0].policy.subjects[0]',
+      });
+    for (const key of ['member', 'org_1:admin', 'billing team'])
+      expect(ruleRefusal(on(key)), key).toBeUndefined();
+  });
+
   it('refuses a row kind or a member the deployment does not serve before anything else', () => {
     const served = { row_kinds: ['baseline', 'tightening'], members: [] };
     expect(ruleRefusal(proposal(), { served })).toMatchObject({
@@ -671,7 +685,7 @@ describe('the rules of a proposal, rev 18', () => {
   });
 
   it('knows everyone by its bare key in any case and by a form that ends in it', () => {
-    for (const key of ['everyone', 'EVERYONE', 'role:everyone', 'a/b/everyone'])
+    for (const key of ['everyone', 'EVERYONE', 'role:everyone', 'a/b/everyone', '\uFF45veryone'])
       expect(namesEveryone(key), key).toBe(true);
     for (const key of ['member', 'everyones', 'everyone:member', 'not_everyone'])
       expect(namesEveryone(key), key).toBe(false);

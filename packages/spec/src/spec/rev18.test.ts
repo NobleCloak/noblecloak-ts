@@ -82,6 +82,12 @@ describe('PolicySetProposal (rev 18)', () => {
     expect(text).toContain('never `everyone`');
   });
 
+  it('says a role row key is not empty, has no surrounding whitespace, and is never everyone in any form', () => {
+    expect(flat(schemas.PolicySetProposal?.description)).toContain(
+      'a bare role key of the organisation as `PolicySubject` describes it, not empty and with no whitespace before or after it, and never `everyone` (in any case, compared after Unicode NFKC normalisation,'
+    );
+  });
+
   it('carries tool_grants as 1 to 50 distinct references, and says they need agent.principal_id', () => {
     const grants = props('PolicySetProposal').tool_grants;
     expect(grants).toMatchObject({ type: 'array', minItems: 1, maxItems: 50, uniqueItems: true });

@@ -667,8 +667,8 @@ consume) and the negatives `rev17-unknown-continuation-kind-is-refused` (the kin
 
 Rev 18 widens `PolicySetProposal` three ways so that a set of starter policies is proposed through the same reference as an
 agent's. A **`role` row** (a new value of `PolicySetEntry.role`) is a `tool_invocation` policy for one role of the
-organisation, `{ type: role, id: <key> }`, with a bare role key that is never `everyone` (a policy of `everyone` is a
-`baseline`), one tool and `mode` only. No check compares it with the baseline; instead `Approval.preview.ineffective` lists a
+organisation, `{ type: role, id: <key> }`, with a bare role key that is not empty, has no whitespace before or after it
+and is never `everyone` in any form (a policy of `everyone` is a `baseline`), one tool and `mode` only. No check compares it with the baseline; instead `Approval.preview.ineffective` lists a
 role row whose mode is looser than a policy of `everyone` gives the same tool (published, or a baseline of the same set),
 because tightest-wins makes it change nothing while that policy stands, and `Approval.preview.loosening` gains an entry with
 `subject` for a role row that loosens what its role gets (where no published policy the role holds governs the tool, against
