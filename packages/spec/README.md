@@ -300,7 +300,8 @@ names the simulated policy as the decision's `policy` when it contributed, and f
 default only when nothing matched; the mock's decide still answers from the tool's mode, so the agent binding and the
 `everyone` role below are shown through simulate without `subject`, which is scoped as a decision would be. As a subject (rev 11, the
 `admin` token only) it evaluates a role as that role and the organisation, the organisation alone, or a user with the
-roles of the latest token the mock saw for that user (a user it never saw holds none). It retires a published policy
+roles of the latest token the mock saw for that user (a user it never saw holds none); since rev 18 a service principal
+as its own `service` policies, those of the agent it is bound to, `everyone` and the organisation. It retires a published policy
 and discards a draft (rev 11), and keeps each version's `origin`.
 
 The mock's connections (rev 11) keep a status, a credential tier and a write-only organisation credential; a server's
@@ -686,15 +687,27 @@ visibility rule of `GET /v1/tools` is unchanged, and what a grant does beyond it
 A deployment says what it accepts in `Capabilities.proposals` (`row_kinds`, `members`); absent means `baseline` and
 `tightening` and no member, and a row kind or member it does not list is `shape`.
 
+**Simulating as a service principal.** `POST /v1/policies/{id}/simulate`, and the set form that defers to it, take
+`subject: { type: service, id: <service principal id> }` (the `AgentPrincipalWrite.principal_id` string). The deployment
+composes what that principal's gateway would: the policies whose subject is the principal, the policies of the agent it is
+bound to (none while it is unbound), `everyone` and the organisation, and no user's or other role's. A deployment whose
+`policy_forms.subject_types` lacks `service` still accepts it and composes as if no `service` policy existed. This is a text
+change: `PolicySubject` already took `service`, which rev 17 refused 422 `unsupported_policy_form`; `group` is still
+refused so. No capability advertises it beyond the revision; the kit gates its scenario on `proposals`, the member that
+says rev 18.
+
 **The mock and the scenarios.** The mock implements all of it on the hosted deployment and advertises every row kind and
 `tool_grants` (`MockOptions.proposals` starts it with less). The mock keeps no entitlements per organisation: it reads the
 opener's token (the `entitled` token holds `policies.role_subjects`; `creator_user` and `other_org` do not) and records that
 set on the approval; at approval an approving token that carries an `entitlements` claim stands for the organisation's current set, and
 one without the claim leaves the recorded set in force. That token model is the mock's stand-in for the organisation's
 entitlement, which is what the contract speaks of. It records grants in its state and changes no tool's visibility.
-`35-rev18-proposal-role-rows-and-grants.yaml` has eight scenarios (the entitled set applied without an agent, its refusal for
+`35-rev18-proposal-role-rows-and-grants.yaml` has nine scenarios (the entitled set applied without an agent, its refusal for
 a person of another organisation that does not hold the entitlement, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, a shadowed role row in the
-preview, and a role row that loosens in the preview). Six new breaks fail them, as do the existing
+preview, a role row that loosens in the preview, and a simulation as a service principal before and after a proposal binds it).
+The simulation as a service principal runs on hosted only, as the proposal that binds the principal does, and is gated on
+`proposals` like the rest. The two negatives that asserted a `service` subject is 422 (`negative-simulate-as-a-subject`,
+`unsupported-policy-form-names-member`) now send a `group` subject. Seven new breaks fail them, as do the existing
 `proposal_refusal_code_missing` (every refusal), `proposal_not_consumed` (the two that apply) and `preview_loosening_missing`
 (the loosening role row). The re-check of the entitlement at approval (`proposal_refused:not_entitled`) has no scenario
 and no break: the kit cannot take an entitlement away from an organisation between the open and the approval, so only the
@@ -705,7 +718,8 @@ mock's own tests (`src/mock/rev18.test.ts`) show it, and a deployment that skips
 This version implements **contract revision 18**, released as `contract-v1-rev18`; the CHANGELOG head names it. Rev 18 adds a
 value to the closed `PolicySetEntry.role` enum (`role`), the optional members `PolicySetProposal.tool_grants`,
 `ApprovalPreview.grants`, `ApprovalPreview.ineffective`, `ApprovalPreview.loosening[].subject` and `Capabilities.proposals`, the `proposal_refused` code
-`not_entitled`, and known values on `Capabilities.entitlements`, and it makes `PolicySetProposal.agent` optional. That last one
+`not_entitled`, and known values on `Capabilities.entitlements`, lists `service` among the subject types a simulation takes
+(text only: `PolicySubject` already had it), and it makes `PolicySetProposal.agent` optional. That last one
 widens what a request may send: a reader of a proposal's `arguments` may now find no `agent`, and such an approval names no
 agent. Rev 17 adds one value to the closed `Continuation.kind` enum (`claude_agent_sdk`) and one optional member, `Capabilities.continuation_kinds`. The widening keeps a rev 16 server's responses valid: the full `continuation` is read only by the creating principal, and every other reader sees `continuation_kind`, a free string. Rev 16 added optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
 revision is the contract's. `info.version` in the document (1.0.0) is **not** the revision. A revision only adds optional members, or values to a closed enum, unless its CHANGELOG entry names a narrowing, as rev 6 does
