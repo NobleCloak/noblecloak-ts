@@ -7,7 +7,7 @@ import { parse } from 'yaml';
 import { FAMILIES, FEATURES, isFamily, isFeature } from '../spec/families.js';
 import type { Family, Feature } from '../spec/families.js';
 import { packageRoot } from '../spec/paths.js';
-import { CAPABILITY_MEMBERS, DPOP_MODES, LIMIT_NAMES } from './types.js';
+import { CAPABILITY_MEMBERS, CONTINUATION_KINDS, DPOP_MODES, LIMIT_NAMES } from './types.js';
 import type { Scenario } from './types.js';
 
 export const SCENARIO_DIR = (): string => resolve(packageRoot(), 'scenarios');
@@ -297,6 +297,11 @@ export function assertRestrictions(scenario: Scenario, file: string): void {
         `${file}: ${scenario.id} ${field} ${JSON.stringify(delivery)}; it must be push, pull or held`
       );
   }
+  const kind: unknown = scenario.serves_kind;
+  if (kind !== undefined && !(CONTINUATION_KINDS as readonly unknown[]).includes(kind))
+    throw new Error(
+      `${file}: ${scenario.id} serves_kind ${JSON.stringify(kind)}; it must be one of ${CONTINUATION_KINDS.join(', ')}`
+    );
 }
 
 /** Throws unless `predicates` is a list of predicates that each check something: a `path` and an operator the engine knows. */

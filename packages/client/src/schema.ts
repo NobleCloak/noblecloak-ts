@@ -1678,10 +1678,11 @@ export interface paths {
          *     families and hosted-only features served here), `authzen_configuration`, and `limits`, the batch
          *     sizes this deployment accepts when they are below the contract's 100 and the bound on the arguments
          *     it keeps for an approval. A deployment that restricts what the rest of the document allows says
-         *     so in optional members: `continuation_deliveries` (the deliveries it serves),
+         *     so in optional members: `continuation_deliveries` (the deliveries it serves), rev 17,
+         *     `continuation_kinds` (the continuation kinds it accepts; absent, the seven kinds of rev 16),
          *     `tool_registration` (who may register tools) and, rev 11, `policy_forms` (the policy forms it
          *     enforces), `connection_registration` (who may register a connection) and `connection_transports`
-         *     (the connection transports it serves); an absent member is the unrestricted rev 5 behaviour. A client needs
+         *     (the connection transports it serves); any other absent member is the unrestricted rev 5 behaviour. A client needs
          *     nothing else to know what this deployment offers.
          *
          *     **Families.** A deployment may serve only part of the document. The routes it may leave out fall
@@ -1907,10 +1908,10 @@ export interface components {
         RecordContext: {
             invocation_channel?: components["schemas"]["InvocationChannel"];
         };
-        /** @description How the runtime is told that an approval resolved. One continuation per obligation. `correlation` is opaque, at most 8 KiB, and never an input to identity. `callback_url` is required if and only if `delivery` is `push`, must be https and public-routable: the server resolves the host and refuses loopback, RFC 1918, link-local and cloud-metadata ranges, follows no redirects, and checks again at every delivery. Wherever a continuation is echoed (`Approval.continuation`, the Resumption, the approval stream) it is the same JSON value as was sent; the order of an object's members and insignificant whitespace are not preserved and carry no meaning, and two continuations are the same when their RFC 8785 canonical forms are equal. A deployment may refuse a delivery it does not serve with 400 `invalid_continuation`, after the `callback_url` check for a push. */
+        /** @description How the runtime is told that an approval resolved. One continuation per obligation. `correlation` is opaque, at most 8 KiB, and never an input to identity. `callback_url` is required if and only if `delivery` is `push`, must be https and public-routable: the server resolves the host and refuses loopback, RFC 1918, link-local and cloud-metadata ranges, follows no redirects, and checks again at every delivery. Wherever a continuation is echoed (`Approval.continuation`, the Resumption, the approval stream) it is the same JSON value as was sent; the order of an object's members and insignificant whitespace are not preserved and carry no meaning, and two continuations are the same when their RFC 8785 canonical forms are equal. A deployment may refuse a delivery it does not serve with 400 `invalid_continuation`, after the `callback_url` check for a push. `claude_agent_sdk` is the Claude Agent SDK connector's kind and is used with `pull` only: it with `push` or `held` is 400 `invalid_request`; its `correlation` is `{ session_id, tool_use_id, agent_id?, mode }` with `mode` `defer` or `retry`, and a missing `agent_id` means the main agent. The server reads none of it: the correlation stays opaque, at most 8 KiB, and is echoed as sent. A deployment lists the kinds it accepts in `Capabilities.continuation_kinds`. */
         Continuation: {
             /** @enum {string} */
-            kind: "adk" | "langgraph" | "vercel_ai" | "openai_agents" | "webhook" | "mcp_held" | "agt";
+            kind: "adk" | "langgraph" | "vercel_ai" | "openai_agents" | "webhook" | "mcp_held" | "agt" | "claude_agent_sdk";
             /** @enum {string} */
             delivery: "push" | "pull" | "held";
             correlation?: {
@@ -1920,7 +1921,7 @@ export interface components {
             callback_url?: string;
             /** @description The continuation's own validity. It is separate from the approval's per-policy `expires_after`. */
             expires_at?: components["schemas"]["Timestamp"];
-        };
+        } & (unknown & unknown);
         DecisionRequest: {
             actor?: components["schemas"]["ActorHint"];
             action: components["schemas"]["Action"];
@@ -2945,6 +2946,8 @@ export interface components {
             };
             /** @description The continuation deliveries this deployment serves. Absent means all three. A continuation whose delivery is not listed is refused with 400 `invalid_continuation`, as the routes that take one say. */
             continuation_deliveries?: ("push" | "pull" | "held")[];
+            /** @description Rev 17: the continuation kinds this deployment accepts. Absent means the seven kinds of rev 16 (`adk` … `agt`): a deployment that accepts `claude_agent_sdk` lists it. A kind not accepted is 400 `invalid_request`, as a kind outside the `Continuation.kind` enum is. Unlike `continuation_deliveries`, where absent means all three, absent here is the list before rev 17, because a deployment that predates rev 17 cannot advertise the member. Open-ended: a client treats a kind it does not know as one it does not send. Known values: adk | langgraph | vercel_ai | openai_agents | webhook | mcp_held | agt | claude_agent_sdk. */
+            continuation_kinds?: string[];
             /**
              * @description Who may register or change tools: `any` principal of the organisation, or only its `administrators`. Absent means `any`. Any other principal is 403 `forbidden`, whatever the body. The per-tool setting `show_arguments_to_approvers` has no member of its own: it is honoured whenever `resolutions` is non-empty.
              * @enum {string}

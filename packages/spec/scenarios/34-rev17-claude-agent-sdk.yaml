@@ -1,0 +1,141 @@
+# Contract revision 17: the continuation kind `claude_agent_sdk`. Its correlation is opaque to the server; the
+# Claude Agent SDK connector puts {session_id, tool_use_id, agent_id?, mode} in it, and the lifecycle below holds the
+# server to echoing it back unchanged. A kind outside the closed enum is still refused, and the new kind is pull only.
+# Each scenario declares serves_delivery for the one delivery it sends in a continuation (pull, pull, held), so a
+# deployment that does not serve that delivery skips it.
+# The lifecycle declares serves_kind: claude_agent_sdk, so a deployment whose Capabilities.continuation_kinds lacks the
+# kind, or does not advertise the member (the seven kinds of rev 16), skips it.
+# The two negatives are not gated on the kind: a kind outside the enum, and claude_agent_sdk with held, are refused either way.
+- id: rev17-claude-agent-sdk-continuation-lifecycle
+  title: A continuation of kind claude_agent_sdk (pull) is stored on a step_up and echoed unchanged in the Resumption, and the approval is consumed with its resume token
+  tags: [both, lifecycle]
+  needs: [approver]
+  requires: [approvals, records.chain]
+  serves_kind: claude_agent_sdk
+  serves_delivery: pull
+  steps:
+    - name: register the external tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:r17:${uniq}'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: write
+          owner_kind: org
+      expect:
+        status: 201
+        body:
+          - { path: data.transport, equals: external }
+    - name: decide opens the obligation with a claude_agent_sdk continuation
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: 'ext:r17:${uniq}', arguments: { to: 'a@example.com' } }
+          continuation:
+            kind: claude_agent_sdk
+            delivery: pull
+            correlation:
+              session_id: 'sess-${uniq}'
+              tool_use_id: 'toolu-${uniq}'
+              agent_id: 'agent-${uniq}'
+              mode: retry
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.approval.resume_token_will_issue, equals: true }
+      save: { approval_id: data.approval.id, digest: data.action_digest }
+    - name: the creating principal reads the approval, which echoes the continuation
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation.kind, equals: claude_agent_sdk }
+          - { path: data.continuation.delivery, equals: pull }
+          - { path: data.continuation.correlation.mode, equals: retry }
+    - name: the approver approves it
+      as: approver
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/approve
+        body: { expected_action_digest: '${digest}' }
+      expect: { status: 200, body: [{ path: data.state, equals: approved }] }
+    - name: the Resumption echoes the correlation as it was sent
+      as: creator
+      request: { method: GET, path: '/v1/approvals/${approval_id}/resumption' }
+      expect:
+        status: 200
+        body:
+          - { path: data.continuation.kind, equals: claude_agent_sdk }
+          - { path: data.continuation.correlation.session_id, equals: 'sess-${uniq}' }
+          - { path: data.continuation.correlation.tool_use_id, equals: 'toolu-${uniq}' }
+          - { path: data.continuation.correlation.agent_id, equals: 'agent-${uniq}' }
+          - { path: data.continuation.correlation.mode, equals: retry }
+          - { path: data.resume_token, exists: true }
+      save: { token: data.resume_token }
+    - name: consume
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals/${approval_id}/consume
+        body:
+          resume_token: '${token}'
+          action: { tool_ref: 'ext:r17:${uniq}', arguments: { to: 'a@example.com' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+- id: rev17-unknown-continuation-kind-is-refused
+  title: A continuation kind outside the enum is 400 invalid_request, on a decision and on POST /v1/approvals
+  tags: [both, negative]
+  requires: approvals
+  serves_delivery: pull
+  steps:
+    - name: a decision with the kind foo is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-foo ${uniq}' } }
+          continuation: { kind: foo, delivery: pull }
+      expect: { status: 400, problem: invalid_request }
+    - name: so is POST /v1/approvals
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-foo ${uniq}' } }
+          continuation: { kind: foo, delivery: pull }
+      expect: { status: 400, problem: invalid_request }
+- id: rev17-claude-agent-sdk-is-pull-only
+  title: A claude_agent_sdk continuation with delivery held is 400 invalid_request, on a decision and on POST /v1/approvals
+  tags: [both, negative]
+  requires: approvals
+  serves_delivery: held
+  steps:
+    - name: a decision with claude_agent_sdk and held is refused
+      as: creator
+      request:
+        method: POST
+        path: /v1/decisions
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-held ${uniq}' } }
+          continuation: { kind: claude_agent_sdk, delivery: held }
+      expect: { status: 400, problem: invalid_request }
+    - name: so is POST /v1/approvals
+      as: creator
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action: { tool_ref: '${proxied_tool}', arguments: { title: 'r17-held ${uniq}' } }
+          continuation: { kind: claude_agent_sdk, delivery: held }
+      expect: { status: 400, problem: invalid_request }

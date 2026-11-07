@@ -583,6 +583,19 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
   };
   const spec = options.spec ?? loadDocument();
   const index = new SpecIndex(spec);
+  /**
+   * Rev 17: the continuation kinds the mock accepts are the `Continuation.kind` enum of the document it implements
+   * (schema validation refuses any other), so a document that predates rev 17 stands in for a deployment that has
+   * not adopted `claude_agent_sdk` and advertises the seven kinds of rev 16.
+   */
+  const continuationKinds = (): string[] => {
+    const schemas = ((spec.components as JsonObject | undefined)?.schemas ?? {}) as Record<
+      string,
+      JsonObject
+    >;
+    const kind = (schemas.Continuation?.properties as Record<string, JsonObject> | undefined)?.kind;
+    return Array.isArray(kind?.enum) ? kind.enum.filter((k) => typeof k === 'string') : [];
+  };
   const state = new MockState();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins ?? []);
   /** The deployment's own origins: the configured list and the mock's module origin. Every organisation admits them. */
@@ -5540,6 +5553,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       ...(options.deliveries === undefined
         ? {}
         : { continuation_deliveries: [...options.deliveries] }),
+      // Rev 17: the kinds its document lists, wherever it serves approvals, on either deployment.
+      ...(advertised.has('approvals') ? { continuation_kinds: continuationKinds() } : {}),
       ...(options.restrictToolRegistration === true ? { tool_registration: 'administrators' } : {}),
       // Rev 11: who registers a connection, when the mock is started restricted, and the transports it serves.
       ...(options.connectionRegistration === undefined

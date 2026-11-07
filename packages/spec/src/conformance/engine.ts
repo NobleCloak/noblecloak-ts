@@ -39,6 +39,7 @@ import type {
   VerifySpec,
   VerifyStep,
 } from './types.js';
+import { REV16_CONTINUATION_KINDS } from './types.js';
 import { verifyDeliverySignature } from './verify-delivery.js';
 
 type Vars = Record<string, unknown>;
@@ -609,6 +610,16 @@ export async function runScenario(scenario: Scenario, deps: EngineDeps): Promise
       outcome: 'skipped',
       failures: [],
       skipReason: `the deployment does not serve the ${scenario.serves_delivery} delivery`,
+      skipKind: 'capability',
+    };
+  // Rev 17: an absent `continuation_kinds` is the seven kinds of rev 16, not all of them.
+  const kinds: readonly string[] = restrictions?.continuation_kinds ?? REV16_CONTINUATION_KINDS;
+  if (scenario.serves_kind !== undefined && !kinds.includes(scenario.serves_kind))
+    return {
+      ...base,
+      outcome: 'skipped',
+      failures: [],
+      skipReason: `the deployment does not accept the ${scenario.serves_kind} continuation kind`,
       skipKind: 'capability',
     };
   if (
