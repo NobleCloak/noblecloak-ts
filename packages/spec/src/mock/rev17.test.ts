@@ -82,4 +82,27 @@ describe('the mock, rev 17', () => {
       expect(String(((await refused.json()) as Json).type)).toMatch(/invalid_request$/);
     }
   });
+
+  it('advertises continuations.claude_agent_sdk iff its document lists the kind and it serves approvals', async () => {
+    const FEATURE = 'continuations.claude_agent_sdk';
+    const features = async (options: Parameters<typeof createMock>[0]): Promise<string[]> => {
+      const mock = await createMock({ control: true, ...options });
+      const tokens = await mock.tokens();
+      const res = await mock.app.request('/v1/capabilities', {
+        headers: { authorization: `Bearer ${tokens.creator_user}` },
+      });
+      return ((await res.json()) as { data: { features: string[] } }).data.features;
+    };
+    expect(await features({ spec })).toContain(FEATURE);
+    expect(await features({ spec, deployment: 'edge' })).toContain(FEATURE);
+    expect(await features({ spec, advertise: ['runs'] })).not.toContain(FEATURE);
+    const prior = loadCommittedDocument();
+    const kind = (
+      ((prior.components as Json).schemas as Json).Continuation as {
+        properties: { kind: { enum: string[] } };
+      }
+    ).properties.kind;
+    kind.enum = kind.enum.filter((k) => k !== 'claude_agent_sdk');
+    expect(await features({ spec: prior })).not.toContain(FEATURE);
+  });
 });

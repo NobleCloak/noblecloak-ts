@@ -496,6 +496,8 @@ const TOOLS_FACTS_FEATURE = 'tools.facts';
 const POLICY_RULES_FEATURE = 'policies.rules';
 /** Rev 16: the feature that says a deployment enforces approvers, serves `approval_routing` and sets requirements. */
 const APPROVAL_REQUIREMENTS_FEATURE = 'approvals.requirements';
+/** Rev 17: the feature that says a deployment accepts the `claude_agent_sdk` continuation kind. */
+const CLAUDE_AGENT_SDK_FEATURE = 'continuations.claude_agent_sdk';
 
 /**
  * The `tool_invocation` forms the mock enforces (rev 11, `Capabilities.policy_forms`): every mode but the
@@ -583,6 +585,18 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
   };
   const spec = options.spec ?? loadDocument();
   const index = new SpecIndex(spec);
+  /**
+   * Rev 17: the mock accepts the kind iff the document it implements lists it in `Continuation.kind`, so a document
+   * that predates rev 17 stands in for a deployment that has not adopted the kind and does not advertise the feature.
+   */
+  const claudeAgentSdkServed = (): boolean => {
+    const schemas = ((spec.components as JsonObject | undefined)?.schemas ?? {}) as Record<
+      string,
+      JsonObject
+    >;
+    const kind = (schemas.Continuation?.properties as Record<string, JsonObject> | undefined)?.kind;
+    return Array.isArray(kind?.enum) && kind.enum.includes('claude_agent_sdk');
+  };
   const state = new MockState();
   const allowedOrigins = parseAllowedOrigins(options.allowedOrigins ?? []);
   /** The deployment's own origins: the configured list and the mock's module origin. Every organisation admits them. */
@@ -5507,6 +5521,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       TOOLS_FACTS_FEATURE,
       ...(rulesServed() ? [POLICY_RULES_FEATURE] : []),
       ...(requirementsServed() ? [APPROVAL_REQUIREMENTS_FEATURE] : []),
+      // Rev 17: it accepts the kind wherever it serves approvals, on either deployment, if its document lists it.
+      ...(advertised.has('approvals') && claudeAgentSdkServed() ? [CLAUDE_AGENT_SDK_FEATURE] : []),
     ];
     return ok(c, {
       deployment: config.deployment,

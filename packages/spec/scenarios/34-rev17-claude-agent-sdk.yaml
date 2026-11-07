@@ -3,13 +3,14 @@
 # server to echoing it back unchanged. A kind outside the closed enum is still refused, and the new kind is pull only.
 # Each scenario declares serves_delivery for the one delivery it sends in a continuation (pull, pull, held), so a
 # deployment that does not serve that delivery skips it.
-# Nothing in Capabilities names the kind, so a deployment that serves pull but has not added the kind fails the lifecycle at step 2
-# (400 invalid_request) and passes both negative scenarios.
+# The lifecycle requires the feature continuations.claude_agent_sdk, so a deployment that has not adopted the kind skips it.
+# The two negatives are not gated on it: a kind outside the enum, and claude_agent_sdk with held, are refused either way.
 - id: rev17-claude-agent-sdk-continuation-lifecycle
   title: A continuation of kind claude_agent_sdk (pull) is stored on a step_up and echoed unchanged in the Resumption, and the approval is consumed with its resume token
   tags: [both, lifecycle]
   needs: [approver]
   requires: [approvals, records.chain]
+  features: [continuations.claude_agent_sdk]
   serves_delivery: pull
   steps:
     - name: register the external tool
@@ -41,7 +42,7 @@
               session_id: 'sess-${uniq}'
               tool_use_id: 'toolu-${uniq}'
               agent_id: 'agent-${uniq}'
-              mode: defer
+              mode: retry
       expect:
         status: 200
         body:
@@ -56,7 +57,7 @@
         body:
           - { path: data.continuation.kind, equals: claude_agent_sdk }
           - { path: data.continuation.delivery, equals: pull }
-          - { path: data.continuation.correlation.mode, equals: defer }
+          - { path: data.continuation.correlation.mode, equals: retry }
     - name: the approver approves it
       as: approver
       request:
@@ -74,7 +75,7 @@
           - { path: data.continuation.correlation.session_id, equals: 'sess-${uniq}' }
           - { path: data.continuation.correlation.tool_use_id, equals: 'toolu-${uniq}' }
           - { path: data.continuation.correlation.agent_id, equals: 'agent-${uniq}' }
-          - { path: data.continuation.correlation.mode, equals: defer }
+          - { path: data.continuation.correlation.mode, equals: retry }
           - { path: data.resume_token, exists: true }
       save: { token: data.resume_token }
     - name: consume
