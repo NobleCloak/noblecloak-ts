@@ -4,9 +4,12 @@
 #
 # A deployment says what it accepts in `Capabilities.proposals`; a scenario that needs a row kind or a member declares
 # `serves_row_kind` or `serves_proposal_member` and is a capability skip where the deployment does not list it; a
-# scenario that sends a proposal without an agent also needs `proposals` advertised, which says rev 18. As
-# for the paid routes (`hosted-paid-routes`), the entitlement is read from the caller: `entitled` holds
-# `policies.role_subjects` and `creator_user` does not. Every scenario that applies a proposal retires the policies it
+# scenario that sends a proposal without an agent also needs `proposals` advertised, which says rev 18. The
+# entitlement is the organisation's. A scenario that opens a role row as `entitled` and approves it as `admin` needs
+# `entitled` to be a person of the organisation of `--token` and `--admin-token` that holds `policies.role_subjects`;
+# the refusal is opened as `other_org`, a person of an organisation that does not hold it. Each first reads
+# `GET /v1/capabilities` with that token and fails there, naming the entitlement, when the token's organisation is not
+# the one it needs. Every scenario that applies a proposal retires the policies it
 # published and unbinds any agent it bound in `cleanup`. A tool a proposal registers stays registered, under a
 # reference no other run uses. What a tool grant does to the tools a service principal sees is the deployment's, so no
 # scenario reads it: they read the open, the preview, the approval and the refusals.
@@ -21,6 +24,12 @@
   arguments_bytes: 4096
   needs: [admin, entitled]
   steps:
+    - name: the organisation of the entitled person holds policies.role_subjects
+      as: entitled
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body: [{ path: data.entitlements, contains: policies.role_subjects }]
     - name: an entitled person opens a proposal of a baseline and a role row, and names no agent
       as: entitled
       request:
@@ -128,9 +137,16 @@
   advertises: [deployment_applied, proposals]
   serves_row_kind: role
   arguments_bytes: 4096
-  needs: [creator_user]
+  needs: [other_org]
   steps:
-    - as: creator_user
+    - name: the other organisation does not hold policies.role_subjects
+      as: other_org
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body: [{ path: data.entitlements, lacks: policies.role_subjects }]
+    - name: a person of that organisation proposes a role row
+      as: other_org
       request:
         method: POST
         path: /v1/approvals
@@ -509,6 +525,12 @@
   arguments_bytes: 4096
   needs: [admin, entitled]
   steps:
+    - name: the organisation of the entitled person holds policies.role_subjects
+      as: entitled
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body: [{ path: data.entitlements, contains: policies.role_subjects }]
     - name: a baseline that denies, and a role row that would allow
       as: entitled
       request:
@@ -587,6 +609,12 @@
   arguments_bytes: 4096
   needs: [admin, entitled]
   steps:
+    - name: the organisation of the entitled person holds policies.role_subjects
+      as: entitled
+      request: { method: GET, path: /v1/capabilities }
+      expect:
+        status: 200
+        body: [{ path: data.entitlements, contains: policies.role_subjects }]
     - name: a tool of the organisation that no policy governs
       as: admin
       request:

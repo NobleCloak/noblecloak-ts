@@ -3,6 +3,8 @@
  * rev 14 and no member, and a deployment of rev 17 that advertises no `proposals` at all. The scenarios gated on a row
  * kind, a member or the advertisement are capability skips; the one negative that needs only `proposals` advertised
  * still passes where the member is listed without `role` or `tool_grants`, since the refusal it asserts is the same.
+ * Last, the entitlement scenarios against tokens of an organisation that is not the one each needs: each fails at
+ * its first step, the capabilities read that names the entitlement.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -33,6 +35,7 @@ describe('the rev 18 scenarios on a deployment that lists only the rows of rev 1
       'rev18-role-rows-applied-without-an-agent',
       'rev18-role-row-not-entitled',
       'rev18-preview-names-a-shadowed-role-row',
+      'rev18-preview-names-a-loosening-role-row',
     ])
       expect(byId.get(id), id).toMatchObject(
         skipped('the deployment does not accept role rows in a proposal')
@@ -61,5 +64,43 @@ describe('the rev 18 scenarios on a deployment of rev 17, which advertises no pr
     });
     for (const result of run.results.filter((r) => r.id.startsWith('rev18-')))
       expect(result, result.id).toMatchObject({ outcome: 'skipped', skipKind: 'capability' });
+  });
+});
+
+describe('the rev 18 entitlement scenarios on tokens of the wrong organisation', () => {
+  const ENTITLED = [
+    'rev18-role-rows-applied-without-an-agent',
+    'rev18-preview-names-a-shadowed-role-row',
+    'rev18-preview-names-a-loosening-role-row',
+  ];
+  // The overlay answers every token's capabilities read with the same entitlements, as a deployment would answer
+  // tokens of one organisation, so the precondition of each scenario sees the organisation it does not need.
+  const run = (entitlements: string[]) =>
+    runAgainstMock({
+      deployment: 'hosted',
+      spec: loadCommittedDocument(),
+      only: [...ENTITLED, 'rev18-role-row-not-entitled'],
+      capabilities: { entitlements },
+    });
+
+  it('fails the refusal at its first step when the other organisation holds policies.role_subjects', async () => {
+    const result = (await run(['policies.role_subjects'])).results.find(
+      (r) => r.id === 'rev18-role-row-not-entitled'
+    );
+    expect(result?.outcome).toBe('failed');
+    expect(result?.failures.join('\n')).toMatch(
+      /step 1 GET \/v1\/capabilities.*data\.entitlements should not contain "policies\.role_subjects"/
+    );
+  });
+
+  it('fails the entitled scenarios at their first step when the organisation does not hold it', async () => {
+    const results = (await run([])).results;
+    for (const id of ENTITLED) {
+      const result = results.find((r) => r.id === id);
+      expect(result?.outcome, id).toBe('failed');
+      expect(result?.failures.join('\n'), id).toMatch(
+        /step 1 GET \/v1\/capabilities.*data\.entitlements should contain "policies\.role_subjects"/
+      );
+    }
   });
 });

@@ -127,6 +127,12 @@ capability skip, and with the member but without the token it is an `unconfigure
 deployment that restricts approving to some users, a user outside them): the scenarios that show such a user
 reads an approval's digest and never its arguments, and sees no available actions (rev 15), need it. Absent, those scenarios are skipped as
 unconfigured, so a run exits 1 unless it passes `--allow-skips` or the token, as for `--other-service-token`.
+`--entitled-token` is a user whose organisation holds the paid entitlements (`hosted-paid-routes` calls the paid routes with it).
+The rev 18 scenarios that open a `role` row as `entitled` and approve it as `admin` need it to be a user of the
+organisation of `--token` and `--admin-token`, an organisation that holds `policies.role_subjects`, and the rev 18 refusal
+`rev18-role-row-not-entitled` needs `--other-org-token`'s organisation not to hold that entitlement. Each of those scenarios
+first reads `GET /v1/capabilities` with that token, and fails at that step, naming the entitlement, when the organisation
+is not the one it needs, so a full run needs both organisations set up that way.
 `--reserved-tool-ref` and `--system-tool-ref` name a tool reference in a namespace the deployment reserves
 and the reference of one of its system tools, which `POST /v1/tools` must refuse (`reserved_tool_ref`,
 `system_tool_ref`). `--tool-ref-in-use` names a reference already in use in the caller's organisation
@@ -682,12 +688,12 @@ A deployment says what it accepts in `Capabilities.proposals` (`row_kinds`, `mem
 
 **The mock and the scenarios.** The mock implements all of it on the hosted deployment and advertises every row kind and
 `tool_grants` (`MockOptions.proposals` starts it with less). The mock keeps no entitlements per organisation: it reads the
-opener's token (the `entitled` token holds `policies.role_subjects`, `creator_user` does not) and records that set on the
-approval; at approval an approving token that carries an `entitlements` claim stands for the organisation's current set, and
+opener's token (the `entitled` token holds `policies.role_subjects`; `creator_user` and `other_org` do not) and records that
+set on the approval; at approval an approving token that carries an `entitlements` claim stands for the organisation's current set, and
 one without the claim leaves the recorded set in force. That token model is the mock's stand-in for the organisation's
 entitlement, which is what the contract speaks of. It records grants in its state and changes no tool's visibility.
 `35-rev18-proposal-role-rows-and-grants.yaml` has eight scenarios (the entitled set applied without an agent, its refusal for
-`creator_user`, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, a shadowed role row in the
+a person of another organisation that does not hold the entitlement, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, a shadowed role row in the
 preview, and a role row that loosens in the preview). Six new breaks fail them, as do the existing
 `proposal_refusal_code_missing` (every refusal), `proposal_not_consumed` (the two that apply) and `preview_loosening_missing`
 (the loosening role row).
