@@ -1,0 +1,579 @@
+# Contract revision 18: a policy-set proposal may carry `role` rows (policies for one role of the organisation), may
+# leave out `agent` (a set of organisation policies alone), and may carry `tool_grants` for the agent's service
+# principal. A `role` row needs the entitlement `policies.role_subjects`, refused `not_entitled` without it.
+#
+# A deployment says what it accepts in `Capabilities.proposals`; a scenario that needs a row kind or a member declares
+# `serves_row_kind` or `serves_proposal_member` and is a capability skip where the deployment does not list it; a
+# scenario that sends a proposal without an agent also needs `proposals` advertised, which says rev 18. As
+# for the paid routes (`hosted-paid-routes`), the entitlement is read from the caller: `entitled` holds
+# `policies.role_subjects` and `creator_user` does not. Every scenario that applies a proposal retires the policies it
+# published and unbinds any agent it bound in `cleanup`. A tool a proposal registers stays registered, under a
+# reference no other run uses. What a tool grant does to the tools a service principal sees is the deployment's, so no
+# scenario reads it: they read the open, the preview, the approval and the refusals.
+- id: rev18-role-rows-applied-without-an-agent
+  title: A proposal without an agent, of a baseline and a role row, opened by an entitled person, previews as the baseline every caller holds and is applied on approval - both policies are published and the approval is consumed
+  tags: [hosted]
+  only: hosted
+  requires: [approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied, proposals]
+  serves_row_kind: role
+  arguments_bytes: 4096
+  needs: [admin, entitled]
+  steps:
+    - name: an entitled person opens a proposal of a baseline and a role row, and names no agent
+      as: entitled
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rr:${uniq}:refund'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: Every caller asks before a refund.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:rr:${uniq}:refund'] }
+                    config: { mode: ask }
+                - role: role
+                  rationale: Members never refund.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: member }]
+                    targets: { tools: ['ext:rr:${uniq}:refund'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 201
+        body:
+          - { path: data.created, equals: true }
+          - { path: data.state, equals: pending }
+      save: { approval_id: data.id }
+    - name: the administrator reads the preview - one simulation as everyone, nothing loosened, nothing shadowed
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: pending }
+          - { path: data.preview.simulations, length: 1 }
+          - { path: data.preview.simulations.0.tool_ref, equals: 'ext:rr:${uniq}:refund' }
+          - { path: data.preview.simulations.0.result.decision, equals: step_up }
+          - { path: data.preview.loosening, length: 0 }
+          - { path: data.preview.ineffective, length: 0 }
+      save: { digest: data.action_digest }
+    - name: the administrator approves, and the change is applied at once
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.resolution, equals: approved }
+    - name: the baseline and the role row are both published
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:rr:${uniq}:refund&subject_type=role&state=published&limit=200'
+      expect:
+        status: 200
+        body:
+          - { path: data, length: 2 }
+          - path: data
+            contains_where: { key: subjects.0.id, equals: everyone }
+          - path: data
+            contains_where: { key: subjects.0.id, equals: member }
+      save: { first: data.0.id, second: data.1.id }
+  cleanup:
+    - name: the policies the approval published are retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${first}/retire' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${second}/retire' }
+      expect: { status: 200 }
+- id: rev18-role-row-not-entitled
+  title: A role row opened by a person whose organisation is not entitled to policies with a role subject is refused 422 proposal_refused with code not_entitled, naming the row
+  tags: [hosted, negative]
+  only: hosted
+  requires: [approvals]
+  advertises: [deployment_applied, proposals]
+  serves_row_kind: role
+  arguments_bytes: 4096
+  needs: [creator_user]
+  steps:
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rn:${uniq}:refund'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: Every caller asks before a refund.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:rn:${uniq}:refund'] }
+                    config: { mode: ask }
+                - role: role
+                  rationale: Members never refund.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: member }]
+                    targets: { tools: ['ext:rn:${uniq}:refund'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: not_entitled }
+          - { path: member, equals: 'action.arguments.policies[1]' }
+- id: rev18-no-agent-no-tightening-no-grants
+  title: A proposal without an agent that carries a tightening, or tool grants, is refused with code shape, naming the row or the member
+  tags: [hosted, negative]
+  only: hosted
+  requires: [approvals]
+  advertises: [deployment_applied, proposals]
+  arguments_bytes: 4096
+  needs: [creator_user]
+  steps:
+    - name: a tightening needs the agent it is for
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:na:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: tightening
+                  rationale: Held to more.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: 'agent_${uniq}' }]
+                    targets: { tools: ['ext:na:${uniq}:send'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[0].role' }
+    - name: tool grants need the service principal of an agent
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:na:${uniq}:send'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: Every caller asks.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:na:${uniq}:send'] }
+                    config: { mode: ask }
+              tool_grants: ['ext:na:${uniq}:elsewhere']
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: action.arguments.tool_grants }
+- id: rev18-tool-grants-need-a-principal
+  title: Tool grants on a proposal whose agent names no service principal are refused with code shape, naming tool_grants
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  serves_proposal_member: tool_grants
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, and a tool the organisation already has
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'ungranted agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:gp:${uniq}:lookup'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the grant is refused, because nothing names whom it is for
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}' }
+              policies:
+                - role: tightening
+                  rationale: The agent asks before it looks a record up.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:gp:${uniq}:lookup'] }
+                    config: { mode: ask }
+              tool_grants: ['ext:gp:${uniq}:lookup']
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: action.arguments.tool_grants }
+- id: rev18-tool-grant-unknown-tool
+  title: A tool grant for a tool the organisation does not hold is refused with code target_unknown, naming the grant
+  tags: [hosted, negative]
+  only: hosted
+  requires: [agents, approvals]
+  advertises: [deployment_applied]
+  serves_proposal_member: tool_grants
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, the service principal it would be bound to, and a tool the organisation already has
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'unknown-grant agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'gu:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:gu:${uniq}:lookup'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+    - name: the second grant names no tool of the organisation
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              policies:
+                - role: tightening
+                  rationale: The agent asks before it looks a record up.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:gu:${uniq}:lookup'] }
+                    config: { mode: ask }
+              tool_grants: ['ext:gu:${uniq}:lookup', 'ext:gu:${uniq}:nowhere']
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: target_unknown }
+          - { path: member, equals: 'action.arguments.tool_grants[1]' }
+- id: rev18-tool-grants-previewed-and-applied
+  title: Tool grants for the agent's service principal are listed in the preview and applied on approval with the binding and the policies - the approval is consumed and the agent is bound
+  tags: [hosted]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire]
+  advertises: [deployment_applied]
+  serves_proposal_member: tool_grants
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, the service principal the proposal binds to it, and a tool the organisation already has
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'granted agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'ga:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:ga:${uniq}:lookup'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a person proposes the binding, a tightening and the grant
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              policies:
+                - role: tightening
+                  rationale: The agent asks before it looks a record up.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:ga:${uniq}:lookup'] }
+                    config: { mode: ask }
+              tool_grants: ['ext:ga:${uniq}:lookup']
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: the administrator reads the grant in the preview
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.preview.grants, length: 1 }
+          - { path: data.preview.grants.0.tool_ref, equals: 'ext:ga:${uniq}:lookup' }
+      save: { digest: data.action_digest }
+    - name: the administrator approves, and the change is applied at once
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.resolution, equals: approved }
+    - name: the service principal is bound
+      as: creator
+      request: { method: GET, path: '/v1/agents/${agent}' }
+      expect: { status: 200, body: [{ path: data.principal_id, equals: '${sp}' }] }
+    - name: the tightening is published
+      as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:ga:${uniq}:lookup&subject_type=agent&state=published&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 1 }] }
+      save: { tightening: data.0.id }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+    - name: and the policy the approval published is retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${tightening}/retire' }
+      expect: { status: 200 }
+- id: rev18-preview-names-a-shadowed-role-row
+  title: The preview lists, in ineffective, a role row whose mode is looser than the mode a policy of everyone gives the same tool, and opening still succeeds
+  tags: [hosted]
+  only: hosted
+  requires: [approvals, policies]
+  advertises: [deployment_applied, proposals]
+  serves_row_kind: role
+  arguments_bytes: 4096
+  needs: [admin, entitled]
+  steps:
+    - name: a baseline that denies, and a role row that would allow
+      as: entitled
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rs:${uniq}:wire'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: baseline
+                  rationale: No caller wires money.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:rs:${uniq}:wire'] }
+                    config: { mode: deny }
+                - role: role
+                  rationale: Members may.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: member }]
+                    targets: { tools: ['ext:rs:${uniq}:wire'] }
+                    config: { mode: always_allow }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: the administrator reads the shadowed row in the preview
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.preview.ineffective, length: 1 }
+          - path: data.preview.ineffective
+            contains_members:
+              { tool_ref: 'ext:rs:${uniq}:wire', subject: { type: role, id: member } }
+      save: { digest: data.action_digest }
+  cleanup:
+    - name: the proposal is denied, so that it is not left pending
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/deny'
+        body: { expected_action_digest: '${digest}', reason: 'preview only' }
+      expect: { status: 200 }

@@ -1164,6 +1164,11 @@ export const MATRIX: readonly Flip[] = [
       'proposal-refused-tools-and-targets',
       'proposal-refused-baseline-exists',
       'proposal-refused-tightening-looser',
+      // Rev 18: the refusals of role rows, of a proposal without an agent and of tool grants.
+      'rev18-role-row-not-entitled',
+      'rev18-no-agent-no-tightening-no-grants',
+      'rev18-tool-grants-need-a-principal',
+      'rev18-tool-grant-unknown-tool',
     ],
   },
   {
@@ -1230,7 +1235,12 @@ export const MATRIX: readonly Flip[] = [
     // Rev 14: an applied proposal is left approved instead of consumed.
     flip: 'proposal_not_consumed',
     deployment: 'hosted',
-    fails: ['proposal-applied-on-approval', 'proposal-self-approval-from-the-approver-surface'],
+    fails: [
+      'proposal-applied-on-approval',
+      'proposal-self-approval-from-the-approver-surface',
+      'rev18-role-rows-applied-without-an-agent',
+      'rev18-tool-grants-previewed-and-applied',
+    ],
   },
   {
     // Rev 14: a proposed policy whose config carries a member beyond mode (or an origin) is accepted.
@@ -1243,6 +1253,36 @@ export const MATRIX: readonly Flip[] = [
     flip: 'proposal_baseline_config_beyond_mode_accepted',
     deployment: 'hosted',
     fails: ['proposal-refused-config-beyond-mode'],
+  },
+  {
+    // Rev 18: a role row is accepted from an organisation that is not entitled to policies with a role subject.
+    flip: 'proposal_role_unentitled_accepted',
+    deployment: 'hosted',
+    fails: ['rev18-role-row-not-entitled'],
+  },
+  {
+    // Rev 18: tool grants are accepted on a proposal whose agent names no service principal.
+    flip: 'proposal_grants_without_principal_accepted',
+    deployment: 'hosted',
+    fails: ['rev18-tool-grants-need-a-principal'],
+  },
+  {
+    // Rev 18: a tool grant for a tool the organisation does not hold is accepted.
+    flip: 'proposal_unknown_grant_accepted',
+    deployment: 'hosted',
+    fails: ['rev18-tool-grant-unknown-tool'],
+  },
+  {
+    // Rev 18: the preview leaves out the role rows a policy of everyone shadows.
+    flip: 'preview_ineffective_missing',
+    deployment: 'hosted',
+    fails: ['rev18-role-rows-applied-without-an-agent', 'rev18-preview-names-a-shadowed-role-row'],
+  },
+  {
+    // Rev 18: the preview leaves out the tool grants.
+    flip: 'preview_grants_missing',
+    deployment: 'hosted',
+    fails: ['rev18-tool-grants-previewed-and-applied'],
   },
   {
     // Rev 15: the single read lists the available actions to a reader who may not resolve the approval.

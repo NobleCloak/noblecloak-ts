@@ -17,7 +17,7 @@ import {
   loadScenarios,
 } from './scenarios.js';
 import { formatSkipWarning, unconfiguredSkips } from './run.js';
-import { CONTINUATION_KINDS } from './types.js';
+import { CONTINUATION_KINDS, PROPOSAL_MEMBERS, PROPOSAL_ROW_KINDS } from './types.js';
 import type { Report, Scenario, ScenarioResult, Target } from './types.js';
 
 describe('getPath', () => {
@@ -698,6 +698,71 @@ describe('runScenario', () => {
       restrictions: { ...restrictions, continuation_kinds: ['adk'] },
     });
     expect(advertised.skipReason).toBeUndefined();
+  });
+
+  it('skips a scenario whose proposal row kind or member the deployment does not accept (rev 18), reading an absent proposals as rev 14', async () => {
+    const run = (
+      scenario: Partial<Scenario>,
+      proposals?: { row_kinds: readonly string[]; members: readonly string[] }
+    ): Promise<ScenarioResult> =>
+      runScenario(
+        { ...base, ...scenario },
+        {
+          ...deps,
+          restrictions: {
+            tool_registration: 'any',
+            resolutions: ['approved'],
+            ...(proposals === undefined ? {} : { proposals }),
+          },
+        }
+      );
+    const noRole = {
+      outcome: 'skipped',
+      skipKind: 'capability',
+      skipReason: 'the deployment does not accept role rows in a proposal',
+    };
+    const noGrants = {
+      outcome: 'skipped',
+      skipKind: 'capability',
+      skipReason: 'the deployment does not accept tool_grants in a proposal',
+    };
+    const all = { row_kinds: [...PROPOSAL_ROW_KINDS], members: [...PROPOSAL_MEMBERS] };
+    // Listed: it runs.
+    expect((await run({ serves_row_kind: 'role' }, all)).skipReason).toBeUndefined();
+    expect((await run({ serves_proposal_member: 'tool_grants' }, all)).skipReason).toBeUndefined();
+    // Advertised and not listed: a capability skip naming what is missing.
+    const rev14 = { row_kinds: ['baseline', 'tightening'], members: [] };
+    expect(await run({ serves_row_kind: 'role' }, rev14)).toMatchObject(noRole);
+    expect(await run({ serves_proposal_member: 'tool_grants' }, rev14)).toMatchObject(noGrants);
+    // Open-ended: a value this kit does not know is ignored, and the listed ones still count.
+    expect(
+      (await run({ serves_row_kind: 'role' }, { row_kinds: ['role', 'later'], members: [] }))
+        .skipReason
+    ).toBeUndefined();
+    // Absent: the rows of rev 14 run, and role rows and every member are capability skips.
+    expect((await run({ serves_row_kind: 'tightening' })).skipReason).toBeUndefined();
+    expect(await run({ serves_row_kind: 'role' })).toMatchObject(noRole);
+    expect(await run({ serves_proposal_member: 'tool_grants' })).toMatchObject(noGrants);
+    expect(await runScenario({ ...base, serves_row_kind: 'role' }, deps)).toMatchObject(noRole);
+  });
+
+  it('refuses a serves_row_kind or serves_proposal_member the contract does not name, and accepts each it does', () => {
+    expect(() => {
+      assertRestrictions({ ...base, serves_row_kind: 'owner' as never }, 'f.yaml');
+    }).toThrow(/serves_row_kind "owner"; it must be one of baseline, tightening, role/);
+    expect(() => {
+      assertRestrictions({ ...base, serves_proposal_member: 'grants' as never }, 'f.yaml');
+    }).toThrow(/serves_proposal_member "grants"; it must be one of tool_grants/);
+    for (const kind of PROPOSAL_ROW_KINDS)
+      expect(() => {
+        assertRestrictions({ ...base, serves_row_kind: kind }, 'f.yaml');
+      }).not.toThrow();
+    expect(() => {
+      assertRestrictions(
+        { ...base, serves_proposal_member: 'tool_grants', advertises: ['proposals'] },
+        'f.yaml'
+      );
+    }).not.toThrow();
   });
 
   it('skips a scenario whose policy subject type policy_forms does not advertise (rev 11 errata), and runs it where policy_forms is absent or lists it', async () => {

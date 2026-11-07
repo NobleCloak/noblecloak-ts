@@ -7,7 +7,14 @@ import { parse } from 'yaml';
 import { FAMILIES, FEATURES, isFamily, isFeature } from '../spec/families.js';
 import type { Family, Feature } from '../spec/families.js';
 import { packageRoot } from '../spec/paths.js';
-import { CAPABILITY_MEMBERS, CONTINUATION_KINDS, DPOP_MODES, LIMIT_NAMES } from './types.js';
+import {
+  CAPABILITY_MEMBERS,
+  CONTINUATION_KINDS,
+  DPOP_MODES,
+  LIMIT_NAMES,
+  PROPOSAL_MEMBERS,
+  PROPOSAL_ROW_KINDS,
+} from './types.js';
 import type { Scenario } from './types.js';
 
 export const SCENARIO_DIR = (): string => resolve(packageRoot(), 'scenarios');
@@ -301,6 +308,16 @@ export function assertRestrictions(scenario: Scenario, file: string): void {
   if (kind !== undefined && !(CONTINUATION_KINDS as readonly unknown[]).includes(kind))
     throw new Error(
       `${file}: ${scenario.id} serves_kind ${JSON.stringify(kind)}; it must be one of ${CONTINUATION_KINDS.join(', ')}`
+    );
+  const rowKind: unknown = scenario.serves_row_kind;
+  if (rowKind !== undefined && !(PROPOSAL_ROW_KINDS as readonly unknown[]).includes(rowKind))
+    throw new Error(
+      `${file}: ${scenario.id} serves_row_kind ${JSON.stringify(rowKind)}; it must be one of ${PROPOSAL_ROW_KINDS.join(', ')}`
+    );
+  const member: unknown = scenario.serves_proposal_member;
+  if (member !== undefined && !(PROPOSAL_MEMBERS as readonly unknown[]).includes(member))
+    throw new Error(
+      `${file}: ${scenario.id} serves_proposal_member ${JSON.stringify(member)}; it must be one of ${PROPOSAL_MEMBERS.join(', ')}`
     );
 }
 

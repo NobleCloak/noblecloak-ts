@@ -46,6 +46,7 @@ describe('MockIssuer', () => {
       scopes: [],
       dpopBound: false,
       entitlements: ['e'],
+      entitlementsClaimed: true,
     });
   });
 

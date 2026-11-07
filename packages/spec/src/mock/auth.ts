@@ -34,6 +34,11 @@ export interface Principal {
   /** The token carries `cnf.jkt`: it can only be used with a DPoP proof. */
   readonly dpopBound: boolean;
   readonly entitlements: readonly string[];
+  /**
+   * Whether the token carries an `entitlements` claim at all. The mock's stand-in for the organisation's current
+   * entitlements when a proposal is approved (rev 18): a claim, even an empty one, is taken as the current set.
+   */
+  readonly entitlementsClaimed?: boolean;
   /** The `client_id` claim: the client the token was issued to; absent when the token names none. */
   readonly clientId?: string;
 }
@@ -110,6 +115,7 @@ export class MockIssuer {
         scopes: (claims.scope ?? '').split(/\s+/).filter((scope) => scope !== ''),
         dpopBound: typeof claims.cnf?.jkt === 'string',
         entitlements: claims.entitlements ?? [],
+        entitlementsClaimed: Array.isArray(claims.entitlements),
         ...(typeof claims.client_id === 'string' ? { clientId: claims.client_id } : {}),
       };
     } catch {

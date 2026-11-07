@@ -202,6 +202,12 @@ export const BREAKS = [
   'proposal_not_consumed',
   'proposal_config_beyond_mode_accepted',
   'proposal_baseline_config_beyond_mode_accepted',
+  // Rev 18: role rows, proposals without an agent, and tool grants.
+  'proposal_role_unentitled_accepted',
+  'proposal_grants_without_principal_accepted',
+  'proposal_unknown_grant_accepted',
+  'preview_ineffective_missing',
+  'preview_grants_missing',
   // Rev 15: per-approval actions.
   'available_actions_shown_to_all',
   'available_actions_shown_when_resolved',

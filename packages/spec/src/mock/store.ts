@@ -93,6 +93,11 @@ export interface Obligation {
   proposal: Proposal | undefined;
   preview: Obj | undefined;
   /**
+   * Rev 18: the entitlements of the principal that opened a proposal, the mock's record of the organisation's
+   * entitlements at open. Approving reads them again unless the approving token carries its own claim.
+   */
+  entitlementsAtOpen?: readonly string[];
+  /**
    * Rev 14: true while an approval of `proposal` is being applied. Applying awaits, so a second resolution or a
    * withdrawal that arrives meanwhile is answered 409 `already_resolved` instead of passing the `pending` check.
    */
@@ -251,6 +256,11 @@ export class MockState {
   readonly rejections = new Map<string, Rejection[]>();
   /** When each identity's last approval was consumed: a consumed approval resets the rejection count (rev 10). */
   readonly lastConsumed = new Map<string, Date>();
+  /**
+   * Rev 18: the tools granted to each service principal by an applied proposal, keyed `org|principal`. The mock
+   * records them and changes nothing about which tools a principal sees.
+   */
+  readonly toolGrants = new Map<string, Set<string>>();
   readonly webhooks = new Map<string, Obj>();
   /** Rev 12: the deliveries the mock owes the webhooks, oldest first. */
   readonly outbox: OutboxEntry[] = [];

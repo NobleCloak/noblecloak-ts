@@ -39,7 +39,8 @@ export interface MockRun {
   };
   /**
    * What a deployment restricts, as the `nc-mock` flags say it (`--approval-arguments-max-bytes`,
-   * `--deliveries`, `--restrict-tool-registration`, `--max-body-bytes`, `--resolutions`; `restrictPolicyTargets` has no flag). Every run is given the
+   * `--deliveries`, `--restrict-tool-registration`, `--max-body-bytes`, `--resolutions`; `restrictPolicyTargets` and, rev 18,
+   * `proposals` have no flag). Every run is given the
    * administrator's token, as a real run is by `--admin-token`.
    */
   readonly restrictions?: Pick<
@@ -53,6 +54,7 @@ export interface MockRun {
     | 'connectionRegistration'
     | 'connectionTransports'
     | 'restrictPolicyTargets'
+    | 'proposals'
   >;
   /** Serve every echoed continuation with its object members in reverse order (same value, other bytes). */
   readonly reorderContinuation?: boolean;

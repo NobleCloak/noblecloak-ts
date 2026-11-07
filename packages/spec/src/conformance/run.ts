@@ -27,6 +27,7 @@ import type {
   HttpStep,
   LimitName,
   PolicyForms,
+  ProposalsAccepted,
   Report,
   Scenario,
   ScenarioResult,
@@ -378,6 +379,7 @@ async function readAdvertisement(target: Target, index: SpecIndex): Promise<Adve
         connection_registration?: ConnectionRegistration;
         connection_transports?: ConnectionTransport[];
         deployment_applied?: DeploymentApplied[];
+        proposals?: ProposalsAccepted;
       };
     }
   ).data;
@@ -417,6 +419,7 @@ async function readAdvertisement(target: Target, index: SpecIndex): Promise<Adve
       ...(data.deployment_applied === undefined || data.deployment_applied.length === 0
         ? {}
         : { deployment_applied: data.deployment_applied }),
+      ...(data.proposals === undefined ? {} : { proposals: data.proposals }),
     },
   };
 }
