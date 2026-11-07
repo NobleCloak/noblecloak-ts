@@ -100,6 +100,9 @@ describe('the claude_agent_sdk continuation kind (rev 17)', () => {
     expect(items.type).toBe('string');
     expect(items.enum).toBeUndefined();
     expect(items['x-noblecloak-known-values']).toEqual(kindEnum);
+    // A deployment that serves approvals lists at least one kind, each once, as the rev 11 list members do.
+    expect(member.minItems).toBe(1);
+    expect(member.uniqueItems).toBe(true);
     expect(capabilities.required).not.toContain('continuation_kinds');
     const text = flat(member.description);
     expect(text).toContain('Absent means the seven kinds of rev 16 (`adk` … `agt`)');

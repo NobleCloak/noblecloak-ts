@@ -7311,6 +7311,8 @@ components:
             The continuation deliveries this deployment serves. Absent means all three. A continuation whose delivery is not listed is refused with 400 `invalid_continuation`, as the routes that take one say.
         continuation_kinds:
           type: array
+          minItems: 1
+          uniqueItems: true
           items:
             type: string
             x-noblecloak-known-values:
