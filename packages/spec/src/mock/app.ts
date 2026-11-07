@@ -3809,11 +3809,18 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
    * mock's view of that user, its own id with the roles of its latest token here and the organisation (a user the
    * mock has never seen holds no role); an agent is that agent and the organisation, never a user or another
    * role; the organisation is the organisation subject alone. Rev 13: every holder of a subject but the
-   * organisation also holds the reserved role `everyone`.
+   * organisation also holds the reserved role `everyone`. Rev 18: a service principal is its own `service` policies,
+   * the policies of the agent `state.agents` binds it to (none when unbound) and the organisation, never a user or
+   * another role, as `callerHolder` would hold for that principal without the roles of its token.
    */
   const subjectHolder = (org: string, subject: Obj): Holder => {
     const roles =
       subject.type === 'user' ? (scopesSeen.get(`${org}|${String(subject.id)}`) ?? []) : [];
+    // The defect leaves the bound agent's policies out of a simulation as its service principal.
+    const boundAgent =
+      subject.type === 'service' && !broken('simulate_service_ignores_binding')
+        ? (agentBoundTo(org, String(subject.id))?.id as string | undefined)
+        : undefined;
     return (candidate) => {
       if (candidate.type === 'organization') return true;
       // The defect takes `everyone` from an agent.
@@ -3837,11 +3844,22 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           (candidate.type === 'agent' && candidate.id === subject.id) ||
           (broken('simulate_agent_holds_roles') && candidate.type === 'role')
         );
+      if (subject.type === 'service')
+        return (
+          (candidate.type === 'service' && candidate.id === subject.id) ||
+          (boundAgent !== undefined && candidate.type === 'agent' && candidate.id === boundAgent)
+        );
       return false;
     };
   };
-  /** The subject types the mock simulates as (rev 11). */
-  const SIMULATED_SUBJECT_TYPES: readonly string[] = ['role', 'user', 'agent', 'organization'];
+  /** The subject types the mock simulates as (rev 11; `service` since rev 18). */
+  const SIMULATED_SUBJECT_TYPES: readonly string[] = [
+    'role',
+    'user',
+    'agent',
+    'service',
+    'organization',
+  ];
   /** The decision a `tool_invocation` mode gives, with the reason `decide` would give it. */
   const decisionOfMode = (mode: string): { decision: string; reason?: string } =>
     mode === 'always_allow'

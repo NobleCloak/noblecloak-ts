@@ -12,7 +12,9 @@
 # the one it needs. Every scenario that applies a proposal retires the policies it
 # published and unbinds any agent it bound in `cleanup`. A tool a proposal registers stays registered, under a
 # reference no other run uses. What a tool grant does to the tools a service principal sees is the deployment's, so no
-# scenario reads it: they read the open, the preview, the approval and the refusals.
+# scenario reads it: they read the open, the preview, the approval and the refusals. Rev 18 also simulates as a
+# `service` subject (`POST /v1/policies/{id}/simulate`); its scenario binds the principal with a proposal, so it is
+# gated as the proposal scenarios are.
 - id: rev18-role-rows-applied-without-an-agent
   title: A proposal without an agent, of a baseline and a role row, opened by an entitled person, previews as the baseline every caller holds and is applied on approval - both policies are published and the approval is consumed
   tags: [hosted]
@@ -677,4 +679,173 @@
         method: POST
         path: '/v1/approvals/${approval_id}/deny'
         body: { expected_action_digest: '${digest}', reason: 'preview only' }
+      expect: { status: 200 }
+- id: rev18-simulate-as-a-service-principal
+  title: An administrator simulates as a service principal - unbound, it gets the result of the everyone role; once a proposal binds it to an agent with a tightening, the same simulation gives the agent's tighter mode and considered names the agent's policy as what contributed; unbound again, the agent's policy is gone
+  tags: [hosted]
+  only: hosted
+  requires: [agents, approvals, policies]
+  features: [policies.retire, policies.tightest_wins]
+  advertises: [deployment_applied, proposals]
+  serves_policy_subject_type: [role, agent]
+  arguments_bytes: 4096
+  needs: [admin, creator_user]
+  steps:
+    - name: an agent, and the service principal the proposal binds to it
+      as: creator
+      request: { method: POST, path: /v1/agents, body: { name: 'simulated agent ${uniq}' } }
+      expect: { status: 201 }
+      save: { agent: data.id }
+    - as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'sv:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: a tool, and a published policy of everyone that asks
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:sv:${uniq}:lookup'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+    - as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: everyone }]
+          targets: { tools: ['ext:sv:${uniq}:lookup'] }
+          config: { mode: ask }
+      expect: { status: 201 }
+      save: { everyone_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${everyone_policy}/publish' }
+      expect: { status: 200 }
+    - name: the result of the everyone role
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: role, id: everyone }
+          action: { tool_ref: 'ext:sv:${uniq}:lookup', arguments: { q: 'as everyone ${uniq}' } }
+      expect: { status: 200 }
+      save: { everyone_decision: data.decision }
+    - name: unbound, the service principal gets the result of the everyone role
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: service, id: '${sp}' }
+          action: { tool_ref: 'ext:sv:${uniq}:lookup', arguments: { q: 'as unbound ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: '${everyone_decision}' }
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: ask }
+    - name: a person proposes the binding and a tightening that denies
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              policies:
+                - role: tightening
+                  rationale: The agent never looks a record up.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:sv:${uniq}:lookup'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect: { status: 200 }
+      save: { digest: data.action_digest }
+    - name: the administrator approves, and the binding and the tightening are applied
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/approve'
+        body: { expected_action_digest: '${digest}' }
+      expect:
+        status: 200
+        body:
+          - { path: data.state, equals: consumed }
+          - { path: data.resolution, equals: approved }
+    - as: admin
+      request:
+        method: GET
+        path: '/v1/policies?kind=tool_invocation&tool=ext:sv:${uniq}:lookup&subject_type=agent&state=published&limit=200'
+      expect: { status: 200, body: [{ path: data, length: 1 }] }
+      save: { tightening: data.0.id }
+    - name: bound, the same simulation gives the agent's tighter mode, and names the agent's policy as what contributed
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: service, id: '${sp}' }
+          action: { tool_ref: 'ext:sv:${uniq}:lookup', arguments: { q: 'as bound ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${tightening}', result: deny, contributed: true }
+          - path: data.considered.policies
+            contains_members: { id: '${everyone_policy}', result: ask }
+    - name: the administrator unbinds the agent
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+    - name: unbound again, the agent's policy no longer reaches the service principal
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${everyone_policy}/simulate
+        body:
+          subject: { type: service, id: '${sp}' }
+          action:
+            { tool_ref: 'ext:sv:${uniq}:lookup', arguments: { q: 'as unbound again ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: '${everyone_decision}' }
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${tightening}' } }
+  cleanup:
+    - name: whatever the steps did, the agent is unbound
+      as: admin
+      request: { method: DELETE, path: '/v1/agents/${agent}/principal' }
+      expect: { status: 204 }
+    - name: and the policies are retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${tightening}/retire' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${everyone_policy}/retire' }
       expect: { status: 200 }

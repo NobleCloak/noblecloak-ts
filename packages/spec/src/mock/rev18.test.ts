@@ -3,7 +3,8 @@
  * approval from the approving token's claim or else the set recorded at open), proposals without an agent, tool
  * grants (refused, previewed, recorded in the mock's state and rolled back with the rest), the `ineffective` preview
  * and the `loosening` entries of role rows,
- * and the `proposals` advertisement with the refusals of a deployment that does not serve a row kind or a member.
+ * and the `proposals` advertisement with the refusals of a deployment that does not serve a row kind or a member;
+ * and a simulation as a `service` subject (its own policies, its bound agent's, `everyone` and the organisation).
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -595,6 +596,160 @@ describe('the mock, rev 18', () => {
       code: 'shape',
       member: 'action.arguments.tool_grants',
     });
+  });
+
+  /** Publishes a `tool_invocation` policy of one subject on `tool` as the administrator, and answers its id. */
+  const publish = async (subject: Json, tool: string, mode: string): Promise<string> => {
+    const row = await data(
+      await call(tokens.admin, 'POST', '/v1/policies', {
+        kind: 'tool_invocation',
+        subjects: [subject],
+        targets: { tools: [tool] },
+        config: { mode },
+      })
+    );
+    expect(
+      (await call(tokens.admin, 'POST', `/v1/policies/${String(row.id)}/publish`)).status
+    ).toBe(200);
+    return String(row.id);
+  };
+  const asSubject = async (
+    policy: string,
+    tool: string,
+    subject: Json,
+    target: Mock = mock,
+    token = tokens.admin
+  ): Promise<{ status: number; body: Json }> => {
+    const answer = await call(
+      token,
+      'POST',
+      `/v1/policies/${policy}/simulate`,
+      { subject, action: { tool_ref: tool, arguments: {} } },
+      target
+    );
+    return { status: answer.status, body: await json(answer) };
+  };
+  const considered = (body: Json): Json[] =>
+    ((body.data as Json).considered as Json).policies as Json[];
+
+  it('simulates an unbound service principal as its own service policies, everyone and the organisation, and nothing else', async () => {
+    const tool = `ext:r:${unique()}`;
+    await register(tool);
+    const everyone = await publish({ type: 'role', id: 'everyone' }, tool, 'ask');
+    const organisation = await publish({ type: 'organization' }, tool, 'always_allow');
+    const role = await publish({ type: 'role', id: 'policy_admin' }, tool, 'deny');
+    const agentRow = await publish({ type: 'agent', id: await agent() }, tool, 'deny');
+    const other = await publish({ type: 'service', id: 'svc_other' }, tool, 'deny');
+    const unbound = await asSubject(everyone, tool, { type: 'service', id: 'svc_unbound' });
+    expect(unbound.status).toBe(200);
+    expect(unbound.body.data).toMatchObject({ decision: 'step_up', policy: { id: everyone } });
+    const ids = considered(unbound.body).map((entry) => entry.id);
+    expect(ids).toEqual(expect.arrayContaining([everyone, organisation]));
+    for (const absent of [role, agentRow, other]) expect(ids).not.toContain(absent);
+    // Its own service policy is composed tightest-wins with the rest, and is what contributed.
+    const own = await publish({ type: 'service', id: 'svc_unbound' }, tool, 'deny');
+    const withOwn = await asSubject(everyone, tool, { type: 'service', id: 'svc_unbound' });
+    expect(withOwn.body.data).toMatchObject({ decision: 'deny', policy: { id: own } });
+    expect(considered(withOwn.body)).toContainEqual(
+      expect.objectContaining({ id: own, result: 'deny', contributed: true })
+    );
+    for (const id of [everyone, organisation, role, agentRow, other, own])
+      await call(tokens.admin, 'POST', `/v1/policies/${id}/retire`);
+  });
+
+  it('simulates a bound service principal with the policies of the agent it is bound to, on both simulate routes', async () => {
+    const tool = `ext:r:${unique()}`;
+    await register(tool);
+    const id = await agent();
+    const everyone = await publish({ type: 'role', id: 'everyone' }, tool, 'ask');
+    const tighter = await publish({ type: 'agent', id }, tool, 'deny');
+    const subject = { type: 'service', id: 'svc_other' };
+    expect((await asSubject(everyone, tool, subject)).body.data).toMatchObject({
+      decision: 'step_up',
+    });
+    expect(
+      (await call(tokens.admin, 'PUT', `/v1/agents/${id}/principal`, { principal_id: 'svc_other' }))
+        .status
+    ).toBe(200);
+    const bound = await asSubject(everyone, tool, subject);
+    expect(bound.body.data).toMatchObject({ decision: 'deny', policy: { id: tighter } });
+    expect(considered(bound.body)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: tighter, result: 'deny', contributed: true }),
+        expect.objectContaining({ id: everyone, result: 'ask', contributed: false }),
+      ])
+    );
+    // The set form takes the same subject, and composes a proposed body beside the bound agent's policy.
+    const set = await call(tokens.admin, 'POST', '/v1/policies/simulate', {
+      policies: [
+        {
+          kind: 'tool_invocation',
+          subjects: [{ type: 'role', id: 'everyone' }],
+          targets: { tools: [tool] },
+          config: { mode: 'always_allow' },
+        },
+      ],
+      subject,
+      action: { tool_ref: tool, arguments: {} },
+    });
+    expect(set.status).toBe(200);
+    expect((await json(set)).data).toMatchObject({ decision: 'deny', policy: { id: tighter } });
+    // Only an administrator simulates as a service principal, as for any subject.
+    expect((await asSubject(everyone, tool, subject, mock, tokens.member)).status).toBe(403);
+    await call(tokens.admin, 'DELETE', `/v1/agents/${id}/principal`);
+    for (const policy of [everyone, tighter])
+      await call(tokens.admin, 'POST', `/v1/policies/${policy}/retire`);
+  });
+
+  it('leaves the bound agent out of a service simulation under the break, and still refuses a group subject naming subject', async () => {
+    const broken = await createMock({
+      control: true,
+      spec,
+      breaks: new Set(['simulate_service_ignores_binding']),
+    });
+    const own = await broken.tokens();
+    const tool = `ext:r:${unique()}`;
+    expect((await call(own.admin, 'POST', '/v1/tools', registration(tool), broken)).status).toBe(
+      201
+    );
+    const id = String(
+      (await data(await call(own.creator, 'POST', '/v1/agents', { name: unique() }, broken))).id
+    );
+    const created = await data(
+      await call(
+        own.admin,
+        'POST',
+        '/v1/policies',
+        {
+          kind: 'tool_invocation',
+          subjects: [{ type: 'agent', id }],
+          targets: { tools: [tool] },
+          config: { mode: 'deny' },
+        },
+        broken
+      )
+    );
+    const policy = String(created.id);
+    await call(own.admin, 'POST', `/v1/policies/${policy}/publish`, undefined, broken);
+    await call(
+      own.admin,
+      'PUT',
+      `/v1/agents/${id}/principal`,
+      { principal_id: 'svc_other' },
+      broken
+    );
+    const answer = await asSubject(
+      policy,
+      tool,
+      { type: 'service', id: 'svc_other' },
+      broken,
+      own.admin
+    );
+    expect(answer.status).toBe(200);
+    expect(considered(answer.body).map((entry) => entry.id)).not.toContain(policy);
+    const group = await asSubject(policy, tool, { type: 'group', id: 'g' }, broken, own.admin);
+    expect(group.status).toBe(422);
+    expect(group.body).toMatchObject({ member: 'subject' });
   });
 
   it('gives the entitled token policies.role_subjects, and lists it in the capabilities that token reads', async () => {

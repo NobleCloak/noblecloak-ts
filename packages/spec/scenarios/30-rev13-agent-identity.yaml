@@ -948,13 +948,14 @@
           config: { mode: ask }
       expect: { status: 201 }
       save: { draft: data.id }
-    - name: a service is not a subject a simulation takes, and says so in member
+    # A group is a subject type of the schema that no deployment simulates (a type outside the schema is 400).
+    - name: a group is not a subject a simulation takes, and says so in member
       as: admin
       request:
         method: POST
         path: /v1/policies/${draft}/simulate
         body:
-          subject: { type: service, id: '00000000-0000-4000-8000-0000000005e5' }
+          subject: { type: group, id: '00000000-0000-4000-8000-00000000969e' }
           action: { tool_ref: 'ext:um:${uniq}', arguments: {} }
       expect:
         status: 422

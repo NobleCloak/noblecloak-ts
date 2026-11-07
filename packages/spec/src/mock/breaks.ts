@@ -209,6 +209,7 @@ export const BREAKS = [
   'preview_ineffective_missing',
   'preview_grants_missing',
   'preview_role_loosening_missing',
+  'simulate_service_ignores_binding',
   // Rev 15: per-approval actions.
   'available_actions_shown_to_all',
   'available_actions_shown_when_resolved',

@@ -106,12 +106,12 @@ describe('policies: simulate as a subject (P-5)', () => {
     const simulate = op('/v1/policies/{id}/simulate', 'post');
     const text = flat(simulate.description);
     expect(text).toContain('administrator');
-    expect(text).toContain('`role`, `user`, `agent` or `organization`');
+    expect(text).toContain('`role`, `user`, `agent`, `service` (rev 18) or `organization`');
     expect(text).toContain(
       'an agent: the policies whose subjects name that agent, plus the `everyone` role (rev 13) and the organisation'
     );
     expect(text).toContain('422 `unsupported_policy_form`');
-    expect(text).toContain('The caller remains the token');
+    expect(text).toContain('the caller remains the token');
     expect(text).toContain('nothing is recorded');
     expect(text).toContain(TENANCY_SENTENCE);
     expect(problemTypesOf(simulate, '403')).toContain('forbidden');

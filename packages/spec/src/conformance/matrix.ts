@@ -1290,6 +1290,12 @@ export const MATRIX: readonly Flip[] = [
     fails: ['rev18-preview-names-a-loosening-role-row'],
   },
   {
+    // Rev 18: a simulation as a service principal leaves out the policies of the agent it is bound to.
+    flip: 'simulate_service_ignores_binding',
+    deployment: 'hosted',
+    fails: ['rev18-simulate-as-a-service-principal'],
+  },
+  {
     // Rev 18: the preview leaves out the tool grants.
     flip: 'preview_grants_missing',
     deployment: 'hosted',

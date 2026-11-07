@@ -2,7 +2,8 @@
  * What rev 18 of the document says, as assertions: a `PolicySetProposal` may carry `role` rows, may leave out `agent`
  * and may carry `tool_grants`; `proposal_refused` gains the code `not_entitled`; `ApprovalPreview` gains `grants`,
  * `ineffective` and a `subject` on the `loosening` entry of a role row; `Capabilities` gains `proposals` and documents its entitlement keys as known values. Each addition is
- * optional on the wire, so a rev 17 response that lacks it still validates.
+ * optional on the wire, so a rev 17 response that lacks it still validates. `POST /v1/policies/{id}/simulate` (and the
+ * set form, which defers to it) simulates as a `service` subject, a text change only: `PolicySubject` already takes it.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -229,5 +230,52 @@ describe('Capabilities (rev 18)', () => {
     expect(route).toContain(
       '`proposals` (the rows and members of a policy-set proposal it accepts; absent, those of rev 14)'
     );
+  });
+});
+
+describe('simulate as a service principal (rev 18)', () => {
+  const simulate = flat(
+    ((paths['/v1/policies/{id}/simulate'] as JsonObject).post as JsonObject).description
+  );
+
+  it('lists service among the simulated subject types, so only another in-schema type is 422', () => {
+    expect(simulate).toContain(
+      'The subject types are `role`, `user`, `agent`, `service` (rev 18) or `organization`; any other type, or one the deployment cannot simulate, is 422 `unsupported_policy_form`'
+    );
+  });
+
+  it('composes the principal, its bound agent, everyone and the organisation, and names the id it takes', () => {
+    expect(simulate).toContain(
+      'the deployment composes the policies whose subject is that principal, the policies of the agent it is bound to (if any), the `everyone` role and the organisation, as its gateway would'
+    );
+    expect(simulate).toContain(
+      'an unbound principal composes its own `service` policies, `everyone` and the organisation only'
+    );
+    expect(simulate).toContain('the `AgentPrincipalWrite.principal_id` string');
+    expect(simulate).toContain(
+      'A deployment that does not enforce `service` policies (its `policy_forms.subject_types` lacks `service`) still accepts the simulation'
+    );
+  });
+
+  it('needs no schema change: a service subject and a group subject fit both simulate bodies, an unknown type does not', () => {
+    const action = { tool_ref: 'mcp:a:b', arg_digest: 'a'.repeat(64) };
+    const policies = [
+      {
+        kind: 'tool_invocation',
+        subjects: [{ type: 'role', id: 'everyone' }],
+        targets: { tools: ['mcp:a:b'] },
+        config: { mode: 'ask' },
+      },
+    ];
+    for (const name of ['SimulateRequest', 'SimulateSetRequest']) {
+      const validate = index.schema(name);
+      const body = (subject: JsonObject): JsonObject =>
+        name === 'SimulateRequest' ? { action, subject } : { policies, action, subject };
+      expect(validate(body({ type: 'service', id: 'svc_1' })), name).toBe(true);
+      expect(validate(body({ type: 'group', id: 'g_1' })), name).toBe(true);
+      expect(validate(body({ type: 'robot', id: 'r_1' })), name).toBe(false);
+    }
+    const set = flat(props('SimulateSetRequest').subject?.description);
+    expect(set).toContain('as on `POST /v1/policies/{id}/simulate`');
   });
 });

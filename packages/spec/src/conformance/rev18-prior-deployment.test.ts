@@ -1,8 +1,9 @@
 /**
  * The rev 18 scenarios against deployments that accept less: the mock started with `proposals` listing only the rows of
  * rev 14 and no member, and a deployment of rev 17 that advertises no `proposals` at all. The scenarios gated on a row
- * kind, a member or the advertisement are capability skips; the one negative that needs only `proposals` advertised
- * still passes where the member is listed without `role` or `tool_grants`, since the refusal it asserts is the same.
+ * kind, a member or the advertisement are capability skips; the negative that needs only `proposals` advertised still
+ * passes where the member is listed without `role` or `tool_grants`, since the refusal it asserts is the same, and so
+ * does the simulation as a service principal, whose proposal carries a tightening alone.
  * Last, the entitlement scenarios against tokens of an organisation that is not the one each needs: each fails at
  * its first step, the capabilities read that names the entitlement.
  */
@@ -18,7 +19,7 @@ const REV18 = loadScenarios()
 
 describe('the rev 18 scenarios on a deployment that lists only the rows of rev 14', () => {
   it('skips every scenario that needs role rows or tool grants, and passes the rest', async () => {
-    expect(REV18.length).toBeGreaterThanOrEqual(7);
+    expect(REV18.length).toBeGreaterThanOrEqual(8);
     const run = await runAgainstMock({
       deployment: 'hosted',
       spec: loadCommittedDocument(),
@@ -48,7 +49,11 @@ describe('the rev 18 scenarios on a deployment that lists only the rows of rev 1
       expect(byId.get(id), id).toMatchObject(
         skipped('the deployment does not accept tool_grants in a proposal')
       );
-    expect(byId.get('rev18-no-agent-no-tightening-no-grants')?.outcome).toBe('passed');
+    for (const id of [
+      'rev18-no-agent-no-tightening-no-grants',
+      'rev18-simulate-as-a-service-principal',
+    ])
+      expect(byId.get(id)?.outcome, id).toBe('passed');
   });
 });
 

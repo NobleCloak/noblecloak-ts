@@ -2332,19 +2332,19 @@ describe('rev 11 behaviours of the mock: policies', () => {
         (await simulate(call, tokens.creator, 'pol_default', { subject: { type: 'organization' } }))
           .status
       ).toBe(403);
-      for (const type of ['service', 'group']) {
-        const answer = await simulate(call, tokens.admin, 'pol_default', {
-          subject: { type, id: 'x' },
-        });
-        expect(answer.status, type).toBe(422);
-        expect(String(answer.body.type)).toMatch(/\/unsupported_policy_form$/);
-        expect(String(answer.body.detail)).toMatch(/^subject/);
-      }
-      // An agent is simulated: its own policies and the organisation's.
-      expect(
-        (await simulate(call, tokens.admin, 'pol_default', { subject: { type: 'agent', id: 'x' } }))
-          .status
-      ).toBe(200);
+      const group = await simulate(call, tokens.admin, 'pol_default', {
+        subject: { type: 'group', id: 'x' },
+      });
+      expect(group.status).toBe(422);
+      expect(String(group.body.type)).toMatch(/\/unsupported_policy_form$/);
+      expect(String(group.body.detail)).toMatch(/^subject/);
+      // An agent is simulated: its own policies and the organisation's; and since rev 18 a service principal.
+      for (const type of ['agent', 'service'])
+        expect(
+          (await simulate(call, tokens.admin, 'pol_default', { subject: { type, id: 'x' } }))
+            .status,
+          type
+        ).toBe(200);
       // A policy the caller cannot see is still 404 first.
       expect(
         (await simulate(call, tokens.member, 'pol_none', { subject: { type: 'organization' } }))

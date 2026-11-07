@@ -2023,13 +2023,22 @@ paths:
         included; an agent: the policies whose subjects name that agent, plus the `everyone` role (rev 13)
         and the organisation, and no user's or other role's; the organisation: the organisation subject
         alone). Every holder of a subject other than the organisation also holds `everyone` (rev 13), so
-        a role simulation of `everyone` gives the baseline of the organisation. The caller remains the token's
-        principal, nothing identifying the caller is read from `subject`, and nothing is recorded. Only an
-        administrator of the organisation simulates as a subject: any other caller is 403 `forbidden`,
-        answered after the visibility rule. The subject types are `role`, `user`, `agent` or
-        `organization`; any other type, or one the deployment cannot simulate, is 422
-        `unsupported_policy_form`, whose `member` names `subject` (rev 13; a rev 12 deployment names it in
-        `detail`). A simulation as a subject reads the tools as the caller sees them, so a tool the subject
+        a role simulation of `everyone` gives the baseline of the organisation.
+
+        **As a service principal** (rev 18). `service` simulates a call by that service principal: the
+        deployment composes the policies whose subject is that principal, the policies of the agent it is
+        bound to (if any), the `everyone` role and the organisation, as its gateway would, and no user's or
+        other role's (a role the principal's token may carry is not simulated); an unbound principal
+        composes its own `service` policies, `everyone` and the organisation only. The id is the service principal id (the `AgentPrincipalWrite.principal_id`
+        string). A deployment that does not enforce `service` policies (its `policy_forms.subject_types`
+        lacks `service`) still accepts the simulation, and composes as if no `service` policy existed.
+
+        With any subject, the caller remains the token's principal, nothing identifying the caller is read
+        from `subject`, and nothing is recorded. Only an administrator of the organisation simulates as a
+        subject: any other caller is 403 `forbidden`, answered after the visibility rule. The subject types
+        are `role`, `user`, `agent`, `service` (rev 18) or `organization`; any other type, or one the
+        deployment cannot simulate, is 422 `unsupported_policy_form`, whose `member` names `subject` (rev
+        13; a rev 12 deployment names it in `detail`). A simulation as a subject reads the tools as the caller sees them, so a tool the subject
         could not see is still simulated. It applies no rejected-duplicate rule: a hypothetical holder
         has no rejections, so the duplicate-requests policy is listed with the result `none`.
 
