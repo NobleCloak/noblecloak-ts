@@ -39,7 +39,28 @@ describe('the rev 17 scenarios on a deployment whose kinds predate rev 17', () =
       const byId = new Map(run.results.map((r) => [r.id, r]));
       expect(byId.get(NEGATIVE)?.outcome).toBe('passed');
       expect(byId.get(PULL_ONLY)?.outcome).toBe('passed');
-      expect(byId.get(LIFECYCLE)).toMatchObject({ outcome: 'skipped', skipKind: 'capability' });
+      expect(byId.get(LIFECYCLE)).toMatchObject({
+        outcome: 'skipped',
+        skipKind: 'capability',
+        skipReason: 'the deployment does not advertise continuations.claude_agent_sdk',
+      });
+    });
+  }
+});
+
+describe('the rev 17 scenarios on a deployment that has adopted the kind', () => {
+  for (const deployment of ['hosted', 'edge'] as const) {
+    it(`${deployment}: all three scenarios pass, the lifecycle included`, async () => {
+      const run = await runAgainstMock({
+        deployment,
+        spec: loadCommittedDocument(),
+        only: [LIFECYCLE, NEGATIVE, PULL_ONLY],
+        restrictions: { deliveries: ['pull', 'held'] },
+      });
+      const byId = new Map(run.results.map((r) => [r.id, r]));
+      expect(byId.get(LIFECYCLE)?.outcome).toBe('passed');
+      expect(byId.get(NEGATIVE)?.outcome).toBe('passed');
+      expect(byId.get(PULL_ONLY)?.outcome).toBe('passed');
     });
   }
 });

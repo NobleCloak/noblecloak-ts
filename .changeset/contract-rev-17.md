@@ -9,6 +9,6 @@ A deployment that keeps its own list of kinds adds `claude_agent_sdk` and lists 
 
 **Mock and conformance**
 
-- The mock validates a request against the document's schemas, so it accepts and echoes the new kind and refuses an unknown one.
+- The mock validates a request against the document's schemas, so it accepts and echoes the new kind and refuses an unknown one. The mock lists `continuations.claude_agent_sdk` on either deployment wherever it serves approvals, iff its document lists the kind.
 - New scenarios in `34-rev17-claude-agent-sdk.yaml`: `rev17-claude-agent-sdk-continuation-lifecycle` and the negatives `rev17-unknown-continuation-kind-is-refused` and `rev17-claude-agent-sdk-is-pull-only`. Each declares `serves_delivery` for the one delivery it sends (`pull`, `pull`, `held`), so a deployment that does not serve that delivery skips it. The lifecycle also declares `features: [continuations.claude_agent_sdk]` and uses `mode: retry`, so a deployment that has not adopted the kind skips it. The two negatives are not gated on the feature: a deployment that has not adopted the kind passes both.
 - `@noblecloak/client`: the generated `Continuation.kind` type gains `"claude_agent_sdk"`.

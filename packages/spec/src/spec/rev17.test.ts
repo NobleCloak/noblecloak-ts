@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { FEATURES } from './families.js';
 import { loadSpec } from './load.js';
 import type { JsonObject } from './load.js';
 import { PUBLIC_SOURCE } from './paths.js';
@@ -84,5 +85,14 @@ describe('the claude_agent_sdk continuation kind (rev 17)', () => {
     expect(text).toContain('a missing `agent_id` means the main agent');
     expect(text).toContain('The server reads none of it');
     expect(text).toContain('used with `pull` only');
+  });
+
+  it('names the feature in Capabilities.features and in the features a scenario may require', () => {
+    const features = flat(
+      (obj(schemas.Capabilities, 'Capabilities').properties as Record<string, JsonObject>).features
+        ?.description
+    );
+    expect(features).toContain('`continuations.claude_agent_sdk`');
+    expect(FEATURES).toContain('continuations.claude_agent_sdk');
   });
 });
