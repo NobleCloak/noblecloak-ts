@@ -4327,6 +4327,32 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     });
 
   /**
+   * Rev 18: the modes of the published `tool_invocation` policies that govern `toolRef` and whose subject a holder of
+   * `subject` holds (for a role: the role itself, `everyone` and the organisation).
+   */
+  const heldModes = (org: string, toolRef: string, subject: Obj): string[] => {
+    const holds = subjectHolder(org, subject);
+    return [...state.policies.values()].flatMap((row) => {
+      const version = row.org === org ? inForce(String(row.id)) : undefined;
+      return version?.kind === 'tool_invocation' &&
+        targetsCover(version.targets, toolRef) &&
+        version.subjects.some(holds)
+        ? [String(version.config.mode)]
+        : [];
+    });
+  };
+
+  /** The mode tightest-wins composes from `modes`, or `fallback` (the tool's default) when there are none. */
+  const composedMode = (modes: readonly string[], fallback: string): string =>
+    modes.reduce<string | undefined>(
+      (tightest, mode) =>
+        tightest === undefined || tightnessOfMode(mode) < tightnessOfMode(tightest)
+          ? mode
+          : tightest,
+      undefined
+    ) ?? fallback;
+
+  /**
    * The checks of a proposal against the state now (opening runs them, and so does approving): the agent, the
    * principal, the tools, the targets, the baselines and the tightenings. The first that fails is the refusal.
    * The defects skip the baseline check, or the tightening check.
@@ -4436,8 +4462,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
 
   /**
    * What approving a proposal would change (`Approval.preview`): for each tool its policies govern, the decision
-   * composed for the agent with every proposed body beside the policies in force, and the baselines that are
-   * looser than the mode the tool has by default. The defect leaves the loosening out.
+   * composed for the agent with every proposed body beside the policies in force; the baselines that are looser
+   * than the mode the tool has by default, and (rev 18) the role rows that loosen what their role gets; the role rows
+   * a policy of `everyone` shadows; and the grants. The defects leave the loosening out, or only its role rows.
    */
   const previewOf = async (c: Ctx, proposal: Proposal): Promise<Obj> => {
     const org = principalOf(c).org;
@@ -4465,13 +4492,30 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     }
     const loosening: Obj[] = [];
     for (const { role, policy } of proposal.policies) {
-      if (role !== 'baseline') continue;
+      if (role === 'tightening') continue;
       const ref = targetOf(policy) ?? '';
       const registered = [...state.tools.values()].find((t) => t.org === org && t.tool_ref === ref);
       // The mode the tool has by default: its own, or `ask` for one this proposal registers.
-      const from = registered?.mode ?? 'ask';
+      const fallback = registered?.mode ?? 'ask';
       const to = String((policy.config as Obj).mode);
-      if (tightnessOfMode(to) > tightnessOfMode(from)) loosening.push({ tool_ref: ref, from, to });
+      if (role === 'baseline') {
+        if (tightnessOfMode(to) > tightnessOfMode(fallback))
+          loosening.push({ tool_ref: ref, from: fallback, to });
+        continue;
+      }
+      // Rev 18: a role row against what its role gets now, composed from the published policies it holds (of the
+      // role, of everyone, of the organisation) or else the default, and what it gets with the proposal's baseline
+      // and this row beside them. The rules allow one row per role and tool, so each row is its own entry.
+      if (broken('preview_role_loosening_missing')) continue;
+      const subject = (policy.subjects as Obj[])[0] ?? {};
+      const held = heldModes(org, ref, subject);
+      const proposed = proposal.policies
+        .filter((other) => other.role === 'baseline' && targetOf(other.policy) === ref)
+        .map((other) => String((other.policy.config as Obj).mode));
+      const from = composedMode(held, fallback);
+      const after = composedMode([...held, ...proposed, to], fallback);
+      if (tightnessOfMode(after) > tightnessOfMode(from))
+        loosening.push({ tool_ref: ref, from, to: after, subject });
     }
     // Rev 18: each role row whose mode is looser than the tightest mode `everyone` has for its tool, published or
     // proposed here: tightest-wins makes it change nothing for the role. The defect leaves it out.

@@ -577,3 +577,76 @@
         path: '/v1/approvals/${approval_id}/deny'
         body: { expected_action_digest: '${digest}', reason: 'preview only' }
       expect: { status: 200 }
+- id: rev18-preview-names-a-loosening-role-row
+  title: The preview lists, in loosening with its subject, a role row that lets its role call a tool no policy governs without asking, and nothing in ineffective
+  tags: [hosted]
+  only: hosted
+  requires: [approvals, policies]
+  advertises: [deployment_applied, proposals]
+  serves_row_kind: role
+  arguments_bytes: 4096
+  needs: [admin, entitled]
+  steps:
+    - name: a tool of the organisation that no policy governs
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:rl:${uniq}:refund'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: external
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a role row that lets members refund without asking, and no baseline
+      as: entitled
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              policies:
+                - role: role
+                  rationale: Members refund without asking.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: member }]
+                    targets: { tools: ['ext:rl:${uniq}:refund'] }
+                    config: { mode: always_allow }
+          continuation: { kind: mcp_held, delivery: held }
+      expect: { status: 201 }
+      save: { approval_id: data.id }
+    - name: the administrator reads the loosening for members in the preview
+      as: admin
+      request: { method: GET, path: '/v1/approvals/${approval_id}' }
+      expect:
+        status: 200
+        body:
+          - path: data.preview.loosening
+            contains_members:
+              {
+                tool_ref: 'ext:rl:${uniq}:refund',
+                to: always_allow,
+                subject: { type: role, id: member },
+              }
+          - { path: data.preview.ineffective, lacks_key: tool_ref }
+      save: { digest: data.action_digest }
+  cleanup:
+    - name: the proposal is denied, so that it is not left pending
+      as: admin
+      request:
+        method: POST
+        path: '/v1/approvals/${approval_id}/deny'
+        body: { expected_action_digest: '${digest}', reason: 'preview only' }
+      expect: { status: 200 }

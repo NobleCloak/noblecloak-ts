@@ -1187,7 +1187,11 @@ export const MATRIX: readonly Flip[] = [
     // Rev 14: the preview leaves out the baselines that loosen a tool.
     flip: 'preview_loosening_missing',
     deployment: 'hosted',
-    fails: ['proposal-applied-on-approval', 'proposal-preview-is-for-approvers'],
+    fails: [
+      'proposal-applied-on-approval',
+      'proposal-preview-is-for-approvers',
+      'rev18-preview-names-a-loosening-role-row',
+    ],
   },
   {
     // Rev 14: the preview is shown to every reader of the approval.
@@ -1277,6 +1281,12 @@ export const MATRIX: readonly Flip[] = [
     flip: 'preview_ineffective_missing',
     deployment: 'hosted',
     fails: ['rev18-role-rows-applied-without-an-agent', 'rev18-preview-names-a-shadowed-role-row'],
+  },
+  {
+    // Rev 18: the preview leaves out the role rows that loosen a tool for their role.
+    flip: 'preview_role_loosening_missing',
+    deployment: 'hosted',
+    fails: ['rev18-preview-names-a-loosening-role-row'],
   },
   {
     // Rev 18: the preview leaves out the tool grants.

@@ -1,7 +1,7 @@
 /**
  * What rev 18 of the document says, as assertions: a `PolicySetProposal` may carry `role` rows, may leave out `agent`
- * and may carry `tool_grants`; `proposal_refused` gains the code `not_entitled`; `ApprovalPreview` gains `grants` and
- * `ineffective`; `Capabilities` gains `proposals` and documents its entitlement keys as known values. Each addition is
+ * and may carry `tool_grants`; `proposal_refused` gains the code `not_entitled`; `ApprovalPreview` gains `grants`,
+ * `ineffective` and a `subject` on the `loosening` entry of a role row; `Capabilities` gains `proposals` and documents its entitlement keys as known values. Each addition is
  * optional on the wire, so a rev 17 response that lacks it still validates.
  */
 import { describe, expect, it } from 'vitest';
@@ -134,6 +134,26 @@ describe('ApprovalPreview (rev 18)', () => {
     expect(
       previewFits({ simulations: [], loosening: [], ineffective: [{ tool_ref: 'ext:crm:update' }] })
     ).toBe(false);
+  });
+
+  it('gives a loosening entry an optional subject for a role row, and says that an empty list loosens nothing for any caller', () => {
+    const entry = { tool_ref: 'ext:crm:update', from: 'ask', to: 'always_allow' };
+    expect(previewFits({ simulations: [], loosening: [entry] })).toBe(true);
+    expect(
+      previewFits({
+        simulations: [],
+        loosening: [{ ...entry, subject: { type: 'role', id: 'member' } }],
+      })
+    ).toBe(true);
+    expect(
+      previewFits({ simulations: [], loosening: [{ ...entry, subject: { type: 'nobody' } }] })
+    ).toBe(false);
+    const text = flat(props('ApprovalPreview').loosening?.description);
+    expect(text).toContain('one entry, with `subject`, for each `role` row that loosens');
+    expect(text).toContain('an empty list says that approving loosens nothing for any caller');
+    expect(flat(props('ApprovalPreview').simulations?.description)).toContain(
+      '`loosening` and `ineffective` report the `role` rows'
+    );
   });
 });
 

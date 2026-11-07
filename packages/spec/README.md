@@ -664,7 +664,9 @@ agent's. A **`role` row** (a new value of `PolicySetEntry.role`) is a `tool_invo
 organisation, `{ type: role, id: <key> }`, with a bare role key that is never `everyone` (a policy of `everyone` is a
 `baseline`), one tool and `mode` only. No check compares it with the baseline; instead `Approval.preview.ineffective` lists a
 role row whose mode is looser than a policy of `everyone` gives the same tool (published, or a baseline of the same set),
-because tightest-wins makes it change nothing while that policy stands. A role row needs the entitlement
+because tightest-wins makes it change nothing while that policy stands, and `Approval.preview.loosening` gains an entry with
+`subject` for a role row that loosens what its role gets (where no published policy the role holds governs the tool, against
+the default), so an empty `loosening` still says that approving loosens nothing. A role row needs the entitlement
 `policies.role_subjects`: without it the proposal is refused `proposal_refused` with the new code `not_entitled` (naming the
 first role row), at open and again at approval (`proposal_refused:not_entitled`). The entitlement keys are now documented as
 known values of `Capabilities.entitlements`. **`agent` is optional**: a proposal without it carries `baseline` and `role` rows
@@ -684,16 +686,17 @@ opener's token (the `entitled` token holds `policies.role_subjects`, `creator_us
 approval; at approval an approving token that carries an `entitlements` claim stands for the organisation's current set, and
 one without the claim leaves the recorded set in force. That token model is the mock's stand-in for the organisation's
 entitlement, which is what the contract speaks of. It records grants in its state and changes no tool's visibility.
-`35-rev18-proposal-role-rows-and-grants.yaml` has seven scenarios (the entitled set applied without an agent, its refusal for
-`creator_user`, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, and a shadowed role row in the
-preview). Five new breaks fail them, as do the existing `proposal_refusal_code_missing` (every refusal) and
-`proposal_not_consumed` (the two that apply).
+`35-rev18-proposal-role-rows-and-grants.yaml` has eight scenarios (the entitled set applied without an agent, its refusal for
+`creator_user`, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, a shadowed role row in the
+preview, and a role row that loosens in the preview). Six new breaks fail them, as do the existing
+`proposal_refusal_code_missing` (every refusal), `proposal_not_consumed` (the two that apply) and `preview_loosening_missing`
+(the loosening role row).
 
 ## Versioning
 
 This version implements **contract revision 18**, released as `contract-v1-rev18`; the CHANGELOG head names it. Rev 18 adds a
 value to the closed `PolicySetEntry.role` enum (`role`), the optional members `PolicySetProposal.tool_grants`,
-`ApprovalPreview.grants` and `ApprovalPreview.ineffective` and `Capabilities.proposals`, the `proposal_refused` code
+`ApprovalPreview.grants`, `ApprovalPreview.ineffective`, `ApprovalPreview.loosening[].subject` and `Capabilities.proposals`, the `proposal_refused` code
 `not_entitled`, and known values on `Capabilities.entitlements`, and it makes `PolicySetProposal.agent` optional. That last one
 widens what a request may send: a reader of a proposal's `arguments` may now find no `agent`, and such an approval names no
 agent. Rev 17 adds one value to the closed `Continuation.kind` enum (`claude_agent_sdk`) and one optional member, `Capabilities.continuation_kinds`. The widening keeps a rev 16 server's responses valid: the full `continuation` is read only by the creating principal, and every other reader sees `continuation_kind`, a free string. Rev 16 added optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The

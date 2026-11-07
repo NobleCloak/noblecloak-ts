@@ -1,7 +1,8 @@
 /**
  * The mock's rev 18 behaviour: `role` rows and the entitlement they need (read from the opener's token, and again at
  * approval from the approving token's claim or else the set recorded at open), proposals without an agent, tool
- * grants (refused, previewed, recorded in the mock's state and rolled back with the rest), the `ineffective` preview,
+ * grants (refused, previewed, recorded in the mock's state and rolled back with the rest), the `ineffective` preview
+ * and the `loosening` entries of role rows,
  * and the `proposals` advertisement with the refusals of a deployment that does not serve a row kind or a member.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -395,6 +396,116 @@ describe('the mock, rev 18', () => {
       { tool_ref: published, subject: { type: 'role', id: 'member' } },
     ]);
     await call(tokens.admin, 'POST', `/v1/policies/${String(everyone.id)}/retire`);
+  });
+
+  it('lists in loosening, with its subject, a role row that loosens the default for its role, and the role gets it once approved', async () => {
+    const tool = `ext:r:${unique()}`;
+    await register(tool);
+    const simulateAs = async (key: string): Promise<string> =>
+      String(
+        (
+          await data(
+            await call(tokens.admin, 'POST', '/v1/policies/simulate', {
+              // The route needs one body; this one is for a role the simulated holder does not hold.
+              policies: [
+                {
+                  kind: 'tool_invocation',
+                  subjects: [{ type: 'role', id: 'nobody_here' }],
+                  targets: { tools: [tool] },
+                  config: { mode: 'deny' },
+                },
+              ],
+              action: { tool_ref: tool, arguments: {} },
+              subject: { type: 'role', id: key },
+            })
+          )
+        ).decision
+      );
+    const handle = await data(
+      await open(tokens.entitled, {
+        policies: [roleRow('member', tool, 'always_allow'), roleRow('auditor', tool, 'deny')],
+      })
+    );
+    const preview = (await read(String(handle.id))).preview as Json;
+    expect(preview.loosening).toEqual([
+      { tool_ref: tool, from: 'ask', to: 'always_allow', subject: { type: 'role', id: 'member' } },
+    ]);
+    expect(preview.ineffective).toEqual([]);
+    expect(await simulateAs('member')).toBe('step_up');
+    expect((await approve(String(handle.id))).state).toBe('consumed');
+    expect(await simulateAs('member')).toBe('allow');
+    for (const policy of await policiesFor(tool))
+      await call(tokens.admin, 'POST', `/v1/policies/${String(policy.id)}/retire`);
+  });
+
+  it('lists no loosening for a role row where a published policy the role holds already decides as tight or looser', async () => {
+    const tool = `ext:r:${unique()}`;
+    await register(tool);
+    const published: string[] = [];
+    // `ask` keeps the row from loosening under tightest-wins; `always_allow` already gives the role what the row does.
+    for (const [subject, mode] of [
+      [{ type: 'role', id: 'member' }, 'ask'],
+      [{ type: 'organization' }, 'ask'],
+      [{ type: 'role', id: 'member' }, 'always_allow'],
+    ] as const) {
+      const policy = await data(
+        await call(tokens.admin, 'POST', '/v1/policies', {
+          kind: 'tool_invocation',
+          subjects: [subject],
+          targets: { tools: [tool] },
+          config: { mode },
+        })
+      );
+      await call(tokens.admin, 'POST', `/v1/policies/${String(policy.id)}/publish`);
+      published.push(String(policy.id));
+      const handle = await data(
+        // A rationale of its own, so that each open is a new approval and not the pending one of the same arguments.
+        await open(tokens.entitled, {
+          policies: [
+            { ...roleRow('member', tool, 'always_allow'), rationale: `${subject.type} ${mode}` },
+          ],
+        })
+      );
+      expect(handle.created, `${subject.type} ${mode}`).toBe(true);
+      expect(
+        ((await read(String(handle.id))).preview as Json).loosening,
+        `${subject.type} ${mode}`
+      ).toEqual([]);
+      await call(tokens.admin, 'POST', `/v1/policies/${String(policy.id)}/retire`);
+    }
+    expect(published).toHaveLength(3);
+  });
+
+  it('leaves the role rows out of loosening under the break, and keeps the baselines in it', async () => {
+    const broken = await createMock({
+      control: true,
+      spec,
+      breaks: new Set(['preview_role_loosening_missing']),
+    });
+    const brokenTokens = await broken.tokens();
+    const tool = `ext:r:${unique()}`;
+    const handle = await data(
+      await open(
+        brokenTokens.entitled,
+        {
+          tools: [registration(tool)],
+          policies: [baseline(tool, 'always_allow'), roleRow('member', tool, 'always_allow')],
+        },
+        broken
+      )
+    );
+    const preview = (
+      await data(
+        await call(
+          brokenTokens.admin,
+          'GET',
+          `/v1/approvals/${String(handle.id)}`,
+          undefined,
+          broken
+        )
+      )
+    ).preview as Json;
+    expect(preview.loosening).toEqual([{ tool_ref: tool, from: 'ask', to: 'always_allow' }]);
   });
 
   it('refuses a role row on everyone in any form, and holds a role row to mode as a baseline is', async () => {
