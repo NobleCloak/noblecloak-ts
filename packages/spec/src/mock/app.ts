@@ -3844,10 +3844,14 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           (candidate.type === 'agent' && candidate.id === subject.id) ||
           (broken('simulate_agent_holds_roles') && candidate.type === 'role')
         );
+      // A service principal. The defects leave out its own `service` policies, or add every role.
       if (subject.type === 'service')
         return (
-          (candidate.type === 'service' && candidate.id === subject.id) ||
-          (boundAgent !== undefined && candidate.type === 'agent' && candidate.id === boundAgent)
+          (!broken('simulate_service_ignores_own_rows') &&
+            candidate.type === 'service' &&
+            candidate.id === subject.id) ||
+          (boundAgent !== undefined && candidate.type === 'agent' && candidate.id === boundAgent) ||
+          (broken('simulate_service_holds_roles') && candidate.type === 'role')
         );
       return false;
     };

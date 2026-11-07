@@ -1296,6 +1296,18 @@ export const MATRIX: readonly Flip[] = [
     fails: ['rev18-simulate-as-a-service-principal'],
   },
   {
+    // Rev 18: a simulation as a service principal leaves out the principal's own `service` policies.
+    flip: 'simulate_service_ignores_own_rows',
+    deployment: 'hosted',
+    fails: ['rev18-simulate-as-a-service-principal-own-policies'],
+  },
+  {
+    // Rev 18: a simulation as a service principal also matches role policies.
+    flip: 'simulate_service_holds_roles',
+    deployment: 'hosted',
+    fails: ['rev18-simulate-as-a-service-principal-own-policies'],
+  },
+  {
     // Rev 18: the preview leaves out the tool grants.
     flip: 'preview_grants_missing',
     deployment: 'hosted',

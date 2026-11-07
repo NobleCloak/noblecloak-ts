@@ -13,8 +13,9 @@
 # published and unbinds any agent it bound in `cleanup`. A tool a proposal registers stays registered, under a
 # reference no other run uses. What a tool grant does to the tools a service principal sees is the deployment's, so no
 # scenario reads it: they read the open, the preview, the approval and the refusals. Rev 18 also simulates as a
-# `service` subject (`POST /v1/policies/{id}/simulate`); its scenario binds the principal with a proposal, so it is
-# gated as the proposal scenarios are.
+# `service` subject (`POST /v1/policies/{id}/simulate`). One scenario binds the principal with a proposal; the other
+# publishes `service` policies and so needs `service` in `policy_forms.subject_types`. Both are gated on `proposals`
+# advertised, which says rev 18, as the proposal scenarios are.
 - id: rev18-role-rows-applied-without-an-agent
   title: A proposal without an agent, of a baseline and a role row, opened by an entitled person, previews as the baseline every caller holds and is applied on approval - both policies are published and the approval is consumed
   tags: [hosted]
@@ -848,4 +849,113 @@
       expect: { status: 200 }
     - as: admin
       request: { method: POST, path: '/v1/policies/${everyone_policy}/retire' }
+      expect: { status: 200 }
+- id: rev18-simulate-as-a-service-principal-own-policies
+  title: An administrator simulates as a service principal - its own service policy decides, while the policy of another service principal and the policy of a role are not composed
+  tags: [hosted]
+  only: hosted
+  requires: policies
+  advertises: [proposals]
+  serves_policy_subject_type: [service, role]
+  needs: [admin, other_service]
+  fixtures: [admin_role]
+  steps:
+    - name: the service principal simulated, and another of the same organisation
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'so:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - as: other_service
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'so:other:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { other_sp: data.actor.id }
+    - name: a tool
+      as: admin
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:so:${uniq}:lookup'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: org
+      expect: { status: 201 }
+    - name: a policy of the simulated service principal that denies
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: service, id: '${sp}' }]
+          targets: { tools: ['ext:so:${uniq}:lookup'] }
+          config: { mode: deny }
+      expect: { status: 201 }
+      save: { own_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${own_policy}/publish' }
+      expect: { status: 200 }
+    - name: a policy of the other service principal, which the simulated one does not hold
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: service, id: '${other_sp}' }]
+          targets: { tools: ['ext:so:${uniq}:lookup'] }
+          config: { mode: always_allow }
+      expect: { status: 201 }
+      save: { other_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${other_policy}/publish' }
+      expect: { status: 200 }
+    - name: a role policy, which a simulation as a service principal does not hold
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies
+        body:
+          kind: tool_invocation
+          subjects: [{ type: role, id: '${admin_role}' }]
+          targets: { tools: ['ext:so:${uniq}:lookup'] }
+          config: { mode: always_allow }
+      expect: { status: 201 }
+      save: { role_policy: data.id }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${role_policy}/publish' }
+      expect: { status: 200 }
+    - name: as the service principal, its own policy decides, and neither the other principal's nor the role's is considered
+      as: admin
+      request:
+        method: POST
+        path: /v1/policies/${own_policy}/simulate
+        body:
+          subject: { type: service, id: '${sp}' }
+          action: { tool_ref: 'ext:so:${uniq}:lookup', arguments: { q: 'as own ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: deny }
+          - path: data.considered.policies
+            contains_members: { id: '${own_policy}', result: deny }
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${other_policy}' } }
+          - { path: data.considered.policies, lacks_where: { key: id, equals: '${role_policy}' } }
+  cleanup:
+    - name: the policies are retired
+      as: admin
+      request: { method: POST, path: '/v1/policies/${own_policy}/retire' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${other_policy}/retire' }
+      expect: { status: 200 }
+    - as: admin
+      request: { method: POST, path: '/v1/policies/${role_policy}/retire' }
       expect: { status: 200 }
