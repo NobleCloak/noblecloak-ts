@@ -677,9 +677,9 @@ the default), so an empty `loosening` still says that approving loosens nothing.
 first role row), at open and again at approval (`proposal_refused:not_entitled`). The entitlement keys are now documented as
 known values of `Capabilities.entitlements`. **`agent` is optional**: a proposal without it carries `baseline` and `role` rows
 (and `tools`) only, and its preview simulates as `{ type: role, id: everyone }`; a tightening or `tool_grants` without an agent is
-`shape`. **`tool_grants`** lists tools the organisation already holds, granted on approval to the service principal in
+`shape`. **`tool_grants`** lists tools the organisation already owns, granted on approval to the service principal in
 `agent.principal_id` (required for them) in the same all-or-nothing step, after the binding and before the policies; a reference
-that is no tool of the organisation, or a withdrawn one, is `target_unknown`, and one of the proposal's own `tools` or in the
+that is no tool the organisation owns (a tool a principal owns included), or a withdrawn one, is `target_unknown`, and one of the proposal's own `tools` or in the
 `tool:noblecloak:` namespace is `shape`. `Approval.preview.grants` lists them. A grant is a deployment-applied instruction: the
 visibility rule of `GET /v1/tools` is unchanged, and what a grant does beyond it is the deployment's.
 

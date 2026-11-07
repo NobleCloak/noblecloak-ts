@@ -288,6 +288,19 @@ describe('the mock, rev 18', () => {
       code: 'shape',
       member: 'action.arguments.tool_grants[0]',
     });
+    // A tool a principal owns is no tool the organisation holds, for a colleague or for its owner, so its existence
+    // is not told either.
+    for (const owner of [tokens.member, tokens.creator_user]) {
+      const mine = `ext:r:${unique()}`;
+      expect(
+        (await call(owner, 'POST', '/v1/tools', { ...registration(mine), owner_kind: 'principal' }))
+          .status
+      ).toBe(201);
+      expect(await refusal(tokens.creator_user, args([held, mine]))).toMatchObject({
+        code: 'target_unknown',
+        member: 'action.arguments.tool_grants[1]',
+      });
+    }
   });
 
   it('previews the grants, records them for the bound principal on approval beside the ones it holds, and keeps an existing one as it is', async () => {

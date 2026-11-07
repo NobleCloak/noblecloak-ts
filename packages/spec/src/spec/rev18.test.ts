@@ -103,6 +103,9 @@ describe('PolicySetProposal (rev 18)', () => {
     ).toBe(false);
     const text = flat(schemas.PolicySetProposal?.description);
     expect(text).toContain('`tool_grants` is present only when `agent.principal_id` is');
+    expect(text).toContain(
+      '`target_unknown` also for a reference of `tool_grants` that is no tool the organisation owns (`owner_kind` `org`: a tool a principal owns is refused as unknown'
+    );
     expect(text).toContain('The visibility rule of `GET /v1/tools` (`Owner`) is unchanged');
   });
 

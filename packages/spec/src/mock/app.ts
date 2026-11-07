@@ -4404,18 +4404,24 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           detail: `${ref} is neither a registered tool nor in the proposal's tools.`,
         };
     }
-    // Rev 18: a grant names a tool the organisation holds now, not one this proposal registers. The defect skips it.
+    // Rev 18: a grant names a tool the organisation holds now, not one this proposal registers: one it owns
+    // (`owner_kind` `org`), so a tool a principal owns is refused as unknown, as for its owner, and the refusal tells
+    // no proposer that it exists. The defect skips it.
     for (const [i, ref] of proposal.tool_grants.entries())
       if (
         !broken('proposal_unknown_grant_accepted') &&
         ![...state.tools.values()].some(
-          (t) => t.org === org && t.tool_ref === ref && t.status !== 'withdrawn'
+          (t) =>
+            t.org === org &&
+            t.tool_ref === ref &&
+            t.owner.kind === 'org' &&
+            t.status !== 'withdrawn'
         )
       )
         return {
           code: 'target_unknown',
           member: proposalMember(`tool_grants[${String(i)}]`),
-          detail: `${ref} is no tool of the organisation.`,
+          detail: `${ref} is no tool the organisation owns.`,
         };
     const pending = pendingToolsOf(org, proposal);
     for (const [i, { role, policy }] of proposal.policies.entries()) {

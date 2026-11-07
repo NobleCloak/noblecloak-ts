@@ -227,7 +227,7 @@ export const ruleRefusal = (
       return {
         code: 'shape',
         member: at(`tool_grants[${String(i)}]`),
-        detail: `${ref} is a tool of this proposal; a grant names a tool the organisation already holds.`,
+        detail: `${ref} is a tool of this proposal; a grant names a tool the organisation already owns.`,
       };
   }
   const seen = new Set<string>();
