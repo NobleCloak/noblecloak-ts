@@ -218,3 +218,35 @@ describe('the scenario corpus declares the administrator it registers origins an
     expect(undeclared).toEqual([]);
   });
 });
+
+/** Every `delivery` value a scenario's steps send inside a `continuation`, wherever it nests. */
+function continuationDeliveries(node: unknown, found = new Set<string>()): Set<string> {
+  if (Array.isArray(node)) for (const item of node) continuationDeliveries(item, found);
+  else if (node !== null && typeof node === 'object') {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'continuation' && value !== null && typeof value === 'object') {
+        const delivery = (value as { delivery?: unknown }).delivery;
+        if (typeof delivery === 'string') found.add(delivery);
+      }
+      continuationDeliveries(value, found);
+    }
+  }
+  return found;
+}
+
+describe('the rev 17 scenarios declare the delivery they open', () => {
+  it('every scenario in 34-rev17-claude-agent-sdk.yaml that sends a continuation declares serves_delivery for it, so a deployment without that delivery skips it', () => {
+    const rev17 = loadScenarios().filter((s) => s.id.startsWith('rev17-'));
+    expect(rev17.length).toBeGreaterThanOrEqual(2);
+    const undeclared = rev17
+      .filter((s) => {
+        const sent = continuationDeliveries(s.steps);
+        return (
+          sent.size > 0 &&
+          (s.serves_delivery === undefined || !sent.has(s.serves_delivery) || sent.size > 1)
+        );
+      })
+      .map((s) => s.id);
+    expect(undeclared).toEqual([]);
+  });
+});
