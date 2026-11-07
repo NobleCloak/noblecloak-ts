@@ -202,7 +202,7 @@ unwrapped `data` or a `Problem`, so a 4xx is a value you branch on, not an excep
 not import it.
 
 ```ts
-import { GovernanceApi, ModuleApiError, isTransient } from '@noblecloak/client/governance-api';
+import { GovernanceApi, isTransient } from '@noblecloak/client/governance-api';
 
 const api = new GovernanceApi({ baseUrl: 'https://govern.example.com', getToken: () => token });
 
@@ -215,7 +215,8 @@ try {
   use(answer.data);
 } catch (error) {
   // A network failure, a 5xx or a body that is not an answer: ModuleApiError with code 'unreachable'.
-  if (error instanceof ModuleApiError && isTransient(error)) return 'try again';
+  // isTransient alone, not `instanceof`, so an error from another installed copy of the client still counts.
+  if (isTransient(error)) return 'try again';
   throw error;
 }
 ```
