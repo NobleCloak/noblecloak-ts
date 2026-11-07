@@ -305,6 +305,20 @@ describe('transient classification, one case per status', () => {
     const answer: Answer<number> = { ok: true, data: 1 };
     expect(isTransient(answer)).toBe(false);
   });
+
+  it('reads an unreachable ModuleApiError from another copy of the client by name and code', () => {
+    const foreign = (name: string, code: string): Error =>
+      Object.assign(new Error('unreachable'), { name, code });
+    const copy = foreign('ModuleApiError', 'unreachable');
+    expect(copy instanceof ModuleApiError).toBe(false);
+    expect(isTransient(copy)).toBe(true);
+    expect(isTransient(foreign('ModuleApiError', 'other'))).toBe(false);
+    expect(isTransient(foreign('SomeOtherError', 'unreachable'))).toBe(false);
+  });
+
+  it('sets the name the cross-copy check reads', () => {
+    expect(new ModuleApiError('unreachable', 'x').name).toBe('ModuleApiError');
+  });
 });
 
 describe('isPassThrough', () => {
