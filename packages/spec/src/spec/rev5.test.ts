@@ -199,6 +199,7 @@ describe('registering tools as an administrator', () => {
       'negative-hidden-tool-clash-is-one-refusal',
       'tools-principal-owned-seen-by-administrator-users-only',
       'negative-service-principal-does-not-see-a-users-private-tool',
+      'rev18-tool-grant-unknown-tool',
     ]);
     const missing: string[] = [];
     for (const scenario of scenarios) {

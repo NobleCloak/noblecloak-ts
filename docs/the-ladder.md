@@ -130,7 +130,8 @@ request (for example `policies[2].subjects[0].type`). Nothing is stored, opened 
 ## Effective access: what a holder of a role would get
 
 An administrator may simulate as a subject: `subject` names a role (that role plus the organisation), a user (the
-deployment's view of that user, roles included) or the organisation alone. Anyone else is refused with 403, and a
+deployment's view of that user, roles included), a service principal (rev 18: its own policies, the bound agent's,
+`everyone` and the organisation's, as its gateway would compose them except for any role its token carries) or the organisation alone. Anyone else is refused with 403, and a
 subject type the deployment cannot simulate with 422 `unsupported_policy_form`, whose `member` is `subject`. An agent
 is its own policies, `everyone` and the organisation's, and no user's or other role's; `{ type: role, id: everyone }`
 gives the baseline on its own. Every holder of a subject other than the organisation also holds `everyone`: the

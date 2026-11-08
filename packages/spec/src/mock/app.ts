@@ -28,8 +28,11 @@ import type { SigningKey } from './jws.js';
 import {
   ARGUMENTS_AT,
   DEPLOYMENT_APPLIED_PREFIX,
+  PROPOSAL_MEMBERS,
   PROPOSAL_SCHEMA,
   PROPOSE_POLICY_SET,
+  ROLE_SUBJECTS_ENTITLEMENT,
+  ROW_KINDS,
   isDeploymentApplied,
   ruleRefusal,
   schemaRefusal,
@@ -37,7 +40,7 @@ import {
   tightnessOfDecision,
   tightnessOfMode,
 } from './proposal.js';
-import type { Proposal, Refusal } from './proposal.js';
+import type { Proposal, ProposalsServed, Refusal, RowKind } from './proposal.js';
 import { approversInForce, pathSegments, readFacts, refusedCondition, walkRules } from './rules.js';
 import type {
   Approver,
@@ -109,6 +112,12 @@ export interface MockOptions {
    * `invalid_request`. Absent: no bound.
    */
   readonly approvalArgumentsMaxBytes?: number;
+  /**
+   * Rev 18: what the mock accepts in a policy-set proposal, advertised as `proposals`. A row kind or an optional
+   * member it does not list is refused `proposal_refused` with `code` `shape`. Absent: every row kind and member of
+   * the contract (`baseline`, `tightening`, `role`; `tool_grants`).
+   */
+  readonly proposals?: ProposalsServed;
   /**
    * The continuation deliveries the mock serves, advertised as `continuation_deliveries`. A continuation
    * whose delivery is not listed is 400 `invalid_continuation`. Absent: all three, and nothing advertised.
@@ -2312,7 +2321,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       scope,
       continuation,
       // A proposal names its agent for the approvers; any other approval opened here names none.
-      agentId: proposed?.proposal.agent.id,
+      agentId: proposed?.proposal.agent?.id,
       arguments: isObj(action.arguments) ? action.arguments : undefined,
       door: 'approvals',
       ...(ruled?.requirements === undefined
@@ -2333,6 +2342,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     if (proposed !== undefined && opened.created) {
       opened.obligation.proposal = proposed.proposal;
       opened.obligation.preview = proposed.preview;
+      opened.obligation.entitlementsAtOpen = proposed.entitlements;
     }
     return ok(c, handleOf(opened.obligation, opened.created), opened.created ? 201 : 200);
   });
@@ -3799,11 +3809,18 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
    * mock's view of that user, its own id with the roles of its latest token here and the organisation (a user the
    * mock has never seen holds no role); an agent is that agent and the organisation, never a user or another
    * role; the organisation is the organisation subject alone. Rev 13: every holder of a subject but the
-   * organisation also holds the reserved role `everyone`.
+   * organisation also holds the reserved role `everyone`. Rev 18: a service principal is its own `service` policies,
+   * the policies of the agent `state.agents` binds it to (none when unbound) and the organisation, never a user or
+   * another role, as `callerHolder` would hold for that principal without the roles of its token.
    */
   const subjectHolder = (org: string, subject: Obj): Holder => {
     const roles =
       subject.type === 'user' ? (scopesSeen.get(`${org}|${String(subject.id)}`) ?? []) : [];
+    // The defect leaves the bound agent's policies out of a simulation as its service principal.
+    const boundAgent =
+      subject.type === 'service' && !broken('simulate_service_ignores_binding')
+        ? (agentBoundTo(org, String(subject.id))?.id as string | undefined)
+        : undefined;
     return (candidate) => {
       if (candidate.type === 'organization') return true;
       // The defect takes `everyone` from an agent.
@@ -3827,11 +3844,26 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           (candidate.type === 'agent' && candidate.id === subject.id) ||
           (broken('simulate_agent_holds_roles') && candidate.type === 'role')
         );
+      // A service principal. The defects leave out its own `service` policies, or add every role.
+      if (subject.type === 'service')
+        return (
+          (!broken('simulate_service_ignores_own_rows') &&
+            candidate.type === 'service' &&
+            candidate.id === subject.id) ||
+          (boundAgent !== undefined && candidate.type === 'agent' && candidate.id === boundAgent) ||
+          (broken('simulate_service_holds_roles') && candidate.type === 'role')
+        );
       return false;
     };
   };
-  /** The subject types the mock simulates as (rev 11). */
-  const SIMULATED_SUBJECT_TYPES: readonly string[] = ['role', 'user', 'agent', 'organization'];
+  /** The subject types the mock simulates as (rev 11; `service` since rev 18). */
+  const SIMULATED_SUBJECT_TYPES: readonly string[] = [
+    'role',
+    'user',
+    'agent',
+    'service',
+    'organization',
+  ];
   /** The decision a `tool_invocation` mode gives, with the reason `decide` would give it. */
   const decisionOfMode = (mode: string): { decision: string; reason?: string } =>
     mode === 'always_allow'
@@ -4232,13 +4264,39 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
 
   /** The members of a proposal that fits `PolicySetProposal`, in the shape the checks read. */
   const proposalOf = (args: Obj): Proposal => ({
-    agent: args.agent as Proposal['agent'],
+    ...(args.agent === undefined ? {} : { agent: args.agent as NonNullable<Proposal['agent']> }),
     tools: (args.tools as Obj[] | undefined) ?? [],
     policies: (args.policies as Obj[]).map((entry) => ({
-      role: entry.role as 'baseline' | 'tightening',
+      role: entry.role as RowKind,
       policy: entry.policy as Obj,
     })),
+    tool_grants: (args.tool_grants as string[] | undefined) ?? [],
   });
+  /** Rev 18: what the mock accepts in a proposal, as `Capabilities.proposals` advertises it. */
+  const proposalsServed = (): ProposalsServed =>
+    options.proposals ?? { row_kinds: ROW_KINDS, members: PROPOSAL_MEMBERS };
+  /**
+   * Rev 18: the refusal of a proposal whose `role` row the organisation is not entitled to, from `entitlements`, the
+   * mock's stand-in for the organisation's (see `vetProposal` and `applyProposal`). It names the first such row.
+   * The defect accepts it.
+   */
+  const entitlementRefusal = (
+    proposal: Proposal,
+    entitlements: readonly string[]
+  ): Refusal | undefined => {
+    const first = proposal.policies.findIndex((entry) => entry.role === 'role');
+    if (
+      first < 0 ||
+      entitlements.includes(ROLE_SUBJECTS_ENTITLEMENT) ||
+      broken('proposal_role_unentitled_accepted')
+    )
+      return undefined;
+    return {
+      code: 'not_entitled',
+      member: proposalMember(`policies[${String(first)}]`),
+      detail: `The organisation is not entitled to policies with a role subject (${ROLE_SUBJECTS_ENTITLEMENT}).`,
+    };
+  };
   /** The rows the proposal's `tools` would register, for the simulations and the checks that read them. */
   const pendingToolsOf = (org: string, proposal: Proposal): ToolRow[] =>
     proposal.tools.map((tool) => registeredTool(org, tool, { kind: 'org', id: org }));
@@ -4279,22 +4337,72 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       );
     });
 
+  /** Rev 18: the modes of the published `tool_invocation` policies of the role `everyone` that govern `toolRef`. */
+  const everyoneModes = (org: string, toolRef: string): string[] =>
+    [...state.policies.values()].flatMap((row) => {
+      const version = row.org === org ? inForce(String(row.id)) : undefined;
+      return version?.kind === 'tool_invocation' &&
+        targetsCover(version.targets, toolRef) &&
+        version.subjects.some((subject) => subject.type === 'role' && subject.id === EVERYONE_ROLE)
+        ? [String(version.config.mode)]
+        : [];
+    });
+
+  /**
+   * Rev 18: the modes of the published `tool_invocation` policies that govern `toolRef` and whose subject a holder of
+   * `subject` holds (for a role: the role itself, `everyone` and the organisation).
+   */
+  const heldModes = (org: string, toolRef: string, subject: Obj): string[] => {
+    const holds = subjectHolder(org, subject);
+    return [...state.policies.values()].flatMap((row) => {
+      const version = row.org === org ? inForce(String(row.id)) : undefined;
+      return version?.kind === 'tool_invocation' &&
+        targetsCover(version.targets, toolRef) &&
+        version.subjects.some(holds)
+        ? [String(version.config.mode)]
+        : [];
+    });
+  };
+
+  /**
+   * The one subject of a proposed row. Precondition: `ruleRefusal` has passed, which refuses a row without exactly
+   * one subject; a row that gets here without one is a defect in the mock, so this throws rather than previewing `{}`.
+   */
+  const onlySubject = (policy: Obj): Obj => {
+    const subjects = policy.subjects as Obj[];
+    const [only] = subjects;
+    if (subjects.length !== 1 || only === undefined)
+      throw new Error('a proposed row has exactly one subject once ruleRefusal has passed');
+    return only;
+  };
+
+  /** The mode tightest-wins composes from `modes`, or `fallback` (the tool's default) when there are none. */
+  const composedMode = (modes: readonly string[], fallback: string): string =>
+    modes.reduce<string | undefined>(
+      (tightest, mode) =>
+        tightest === undefined || tightnessOfMode(mode) < tightnessOfMode(tightest)
+          ? mode
+          : tightest,
+      undefined
+    ) ?? fallback;
+
   /**
    * The checks of a proposal against the state now (opening runs them, and so does approving): the agent, the
-   * principal, the tools, the targets, the baselines and the tightenings. The first that fails is the refusal.
-   * The defects skip the baseline check, or the tightening check.
+   * principal, the tools, the targets, the tool grants (rev 18), the baselines and the tightenings. The first that
+   * fails is the refusal. The defects skip the baseline check, the tightening check, or the check that a grant
+   * names a tool the organisation owns.
    */
   const stateRefusal = async (c: Ctx, proposal: Proposal): Promise<Refusal | undefined> => {
     const org = principalOf(c).org;
-    const agent = state.agents.get(proposal.agent.id);
-    if (agent?.org !== org)
+    const agent = proposal.agent === undefined ? undefined : state.agents.get(proposal.agent.id);
+    if (proposal.agent !== undefined && agent?.org !== org)
       return {
         code: 'unknown_agent',
         member: proposalMember('agent.id'),
         detail: 'agent.id is not an agent of the organisation.',
       };
-    const principalId = proposal.agent.principal_id;
-    if (principalId !== undefined) {
+    const principalId = proposal.agent?.principal_id;
+    if (agent !== undefined && principalId !== undefined) {
       const holder = agentBoundTo(org, principalId);
       if (holder !== undefined && holder.id !== agent.id)
         return {
@@ -4331,6 +4439,25 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           detail: `${ref} is neither a registered tool nor in the proposal's tools.`,
         };
     }
+    // Rev 18: a grant names a tool the organisation holds now, not one this proposal registers: one it owns
+    // (`owner_kind` `org`), so a tool a principal owns is refused as unknown, as for its owner, and the refusal tells
+    // no proposer that it exists. The defect skips it.
+    for (const [i, ref] of proposal.tool_grants.entries())
+      if (
+        !broken('proposal_unknown_grant_accepted') &&
+        ![...state.tools.values()].some(
+          (t) =>
+            t.org === org &&
+            t.tool_ref === ref &&
+            t.owner.kind === 'org' &&
+            t.status !== 'withdrawn'
+        )
+      )
+        return {
+          code: 'target_unknown',
+          member: proposalMember(`tool_grants[${String(i)}]`),
+          detail: `${ref} is no tool the organisation owns.`,
+        };
     const pending = pendingToolsOf(org, proposal);
     for (const [i, { role, policy }] of proposal.policies.entries()) {
       const ref = targetOf(policy) ?? '';
@@ -4344,6 +4471,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
           };
         continue;
       }
+      // Rev 18: no check compares a role row with the baseline; the preview reports one it shadows.
+      if (role === 'role' || proposal.agent === undefined) continue;
       if (broken('tightening_looser_accepted')) continue;
       // What the agent gets without this tightening: the policies in force and the proposal's baselines.
       const baselines = proposal.policies
@@ -4374,8 +4503,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
 
   /**
    * What approving a proposal would change (`Approval.preview`): for each tool its policies govern, the decision
-   * composed for the agent with every proposed body beside the policies in force, and the baselines that are
-   * looser than the mode the tool has by default. The defect leaves the loosening out.
+   * composed for the agent with every proposed body beside the policies in force; the baselines that are looser
+   * than the mode the tool has by default, and (rev 18) the role rows that loosen what their role gets; the role rows
+   * a policy of `everyone` shadows; and the grants. The defects leave the loosening out, or only its role rows.
    */
   const previewOf = async (c: Ctx, proposal: Proposal): Promise<Obj> => {
     const org = principalOf(c).org;
@@ -4384,11 +4514,16 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       writtenVersion(c, entry.policy, 0, `proposed ${String(at)}`)
     );
     const refs = [...new Set(proposal.policies.map((entry) => targetOf(entry.policy) ?? ''))];
+    // Rev 18: a proposal without an agent is simulated as the baseline every caller holds.
+    const subject =
+      proposal.agent === undefined
+        ? { type: 'role', id: EVERYONE_ROLE }
+        : { type: 'agent', id: proposal.agent.id };
     const simulations: Obj[] = [];
     for (const ref of refs) {
       const result = await simulate(
         c,
-        { action: { tool_ref: ref }, subject: { type: 'agent', id: proposal.agent.id } },
+        { action: { tool_ref: ref }, subject },
         '',
         undefined,
         bodies,
@@ -4398,28 +4533,71 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     }
     const loosening: Obj[] = [];
     for (const { role, policy } of proposal.policies) {
-      if (role !== 'baseline') continue;
+      if (role === 'tightening') continue;
       const ref = targetOf(policy) ?? '';
       const registered = [...state.tools.values()].find((t) => t.org === org && t.tool_ref === ref);
       // The mode the tool has by default: its own, or `ask` for one this proposal registers.
-      const from = registered?.mode ?? 'ask';
+      const fallback = registered?.mode ?? 'ask';
       const to = String((policy.config as Obj).mode);
-      if (tightnessOfMode(to) > tightnessOfMode(from)) loosening.push({ tool_ref: ref, from, to });
+      if (role === 'baseline') {
+        if (tightnessOfMode(to) > tightnessOfMode(fallback))
+          loosening.push({ tool_ref: ref, from: fallback, to });
+        continue;
+      }
+      // Rev 18: a role row against what its role gets now, composed from the published policies it holds (of the
+      // role, of everyone, of the organisation) or else the default, and what it gets with the proposal's baseline
+      // and this row beside them. The rules allow one row per role and tool, so each row is its own entry.
+      if (broken('preview_role_loosening_missing')) continue;
+      const subject = onlySubject(policy);
+      const held = heldModes(org, ref, subject);
+      const proposed = proposal.policies
+        .filter((other) => other.role === 'baseline' && targetOf(other.policy) === ref)
+        .map((other) => String((other.policy.config as Obj).mode));
+      const from = composedMode(held, fallback);
+      const after = composedMode([...held, ...proposed, to], fallback);
+      if (tightnessOfMode(after) > tightnessOfMode(from))
+        loosening.push({ tool_ref: ref, from, to: after, subject });
     }
-    return { simulations, loosening: broken('preview_loosening_missing') ? [] : loosening };
+    // Rev 18: each role row whose mode is looser than the tightest mode `everyone` has for its tool, published or
+    // proposed here: tightest-wins makes it change nothing for the role. The defect leaves it out.
+    const ineffective: Obj[] = [];
+    for (const { role, policy } of proposal.policies) {
+      if (role !== 'role') continue;
+      const ref = targetOf(policy) ?? '';
+      const everyone = [
+        ...everyoneModes(org, ref),
+        ...proposal.policies
+          .filter((other) => other.role === 'baseline' && targetOf(other.policy) === ref)
+          .map((other) => String((other.policy.config as Obj).mode)),
+      ];
+      const mode = String((policy.config as Obj).mode);
+      if (everyone.some((other) => tightnessOfMode(other) < tightnessOfMode(mode)))
+        ineffective.push({ tool_ref: ref, subject: onlySubject(policy) });
+    }
+    return {
+      simulations,
+      loosening: broken('preview_loosening_missing') ? [] : loosening,
+      ...(broken('preview_ineffective_missing') ? {} : { ineffective }),
+      // Rev 18: the grants approving records, where the proposal carries any. The defect leaves them out.
+      ...(proposal.tool_grants.length === 0 || broken('preview_grants_missing')
+        ? {}
+        : { grants: proposal.tool_grants.map((ref) => ({ tool_ref: ref })) }),
+    };
   };
 
   /**
    * Opens a proposal: the reference must be one this deployment applies; the caller must be a person; the body
    * must fit its schema and the rules beyond it, and pass the checks against the state. A refusal is 422
    * `proposal_refused` with `code`, and `member` where it names a part of the body. The answer is the fixed tool
-   * row the approval is for, the proposal, and its preview. The defects: a service principal may propose, and the
-   * refusal carries no `code`.
+   * row the approval is for, the proposal, its preview, and the opener's entitlements, which the approval records
+   * (rev 18). The defects: a service principal may propose, and the refusal carries no `code`.
    */
   const vetProposal = async (
     c: Ctx,
     action: Obj
-  ): Promise<Response | { tool: ToolRow; proposal: Proposal; preview: Obj }> => {
+  ): Promise<
+    Response | { tool: ToolRow; proposal: Proposal; preview: Obj; entitlements: readonly string[] }
+  > => {
     const ref = String(action.tool_ref);
     if (ref !== PROPOSE_POLICY_SET || !deploymentApplies())
       return problem(
@@ -4457,24 +4635,33 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     const fits = index.schema(PROPOSAL_SCHEMA);
     if (!fits(action.arguments)) return refuse(schemaRefusal(fits.errors));
     const proposal = proposalOf(action.arguments);
+    // Rev 18: the opener's entitlements stand in for the organisation's (the mock keeps none per organisation).
+    const entitlements = principalOf(c).entitlements;
     const refused =
       ruleRefusal(proposal, {
         modeOnly: !broken('proposal_config_beyond_mode_accepted'),
         baselineModeOnly: !broken('proposal_baseline_config_beyond_mode_accepted'),
+        grantsNeedPrincipal: !broken('proposal_grants_without_principal_accepted'),
+        roleKeyRules: !broken('proposal_role_everyone_accepted'),
+        served: proposalsServed(),
       }) ??
       policyFormRefusal(proposal) ??
+      entitlementRefusal(proposal, entitlements) ??
       (await stateRefusal(c, proposal));
     if (refused !== undefined) return refuse(refused);
     return {
       tool: appliedTool(principalOf(c).org),
       proposal,
       preview: await previewOf(c, proposal),
+      entitlements,
     };
   };
 
   /**
-   * Applies an approved proposal, all or nothing, as the approver: registers the tools, binds the principal,
-   * then creates and publishes each policy in order. The checks run again first, against the state now. Any
+   * Applies an approved proposal, all or nothing, as the approver: registers the tools, binds the principal, records
+   * the tool grants (rev 18), then creates and publishes each policy in order. The checks run again first, against
+   * the state now; the entitlement check (rev 18) reads the approving token's `entitlements` claim when it carries
+   * one, and otherwise the entitlements recorded when the proposal was opened. Any
    * failure restores what was there and is the refusal (`policy_conflict` when a policy to publish meets a
    * published one of the same tool and subject); nothing is emitted until all of it is applied. The defects
    * leave what the steps before a failure did, and skip the checks.
@@ -4484,16 +4671,24 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     o: Obligation,
     proposal: Proposal
   ): Promise<Refusal | undefined> => {
+    const p = principalOf(c);
+    const entitlements =
+      p.entitlementsClaimed === true ? p.entitlements : (o.entitlementsAtOpen ?? []);
     const refused = broken('proposal_recheck_skipped')
       ? undefined
-      : await stateRefusal(c, proposal);
+      : (entitlementRefusal(proposal, entitlements) ?? (await stateRefusal(c, proposal)));
     if (refused !== undefined) return refused;
-    const p = principalOf(c);
+    const agentId = proposal.agent?.id;
+    const grantee =
+      proposal.agent?.principal_id === undefined
+        ? undefined
+        : `${o.org}|${proposal.agent.principal_id}`;
     const before = {
       tools: new Map(state.tools),
       policies: new Map(state.policies),
       versions: new Map(state.policyVersions),
-      principal: state.agents.get(proposal.agent.id)?.principal_id,
+      principal: agentId === undefined ? undefined : state.agents.get(agentId)?.principal_id,
+      grants: grantee === undefined ? undefined : state.toolGrants.get(grantee),
     };
     const restore = (): void => {
       state.tools.clear();
@@ -4502,16 +4697,23 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       for (const [key, row] of before.policies) state.policies.set(key, row);
       state.policyVersions.clear();
       for (const [key, versions] of before.versions) state.policyVersions.set(key, versions);
-      const agent = state.agents.get(proposal.agent.id);
+      const agent = agentId === undefined ? undefined : state.agents.get(agentId);
       if (agent !== undefined) agent.principal_id = before.principal ?? null;
+      if (grantee !== undefined) {
+        if (before.grants === undefined) state.toolGrants.delete(grantee);
+        else state.toolGrants.set(grantee, before.grants);
+      }
     };
     for (const tool of proposal.tools) {
       const row = registeredTool(o.org, tool, { kind: 'org', id: o.org });
       state.tools.set(toolKey(row.org, row.tool_ref), row);
     }
-    const agent = state.agents.get(proposal.agent.id);
-    if (agent !== undefined && proposal.agent.principal_id !== undefined)
+    const agent = agentId === undefined ? undefined : state.agents.get(agentId);
+    if (agent !== undefined && proposal.agent?.principal_id !== undefined)
       agent.principal_id = proposal.agent.principal_id;
+    // Rev 18: the grants, kept beside the ones the principal already holds (a grant that exists stays as it is).
+    if (grantee !== undefined && proposal.tool_grants.length > 0)
+      state.toolGrants.set(grantee, new Set([...(before.grants ?? []), ...proposal.tool_grants]));
     const published: Obj[] = [];
     for (const { policy } of proposal.policies) {
       const id = `pol_${crypto.randomUUID().slice(0, 8)}`;
@@ -5576,6 +5778,11 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
             deployment_applied: [
               { tool_ref: PROPOSE_POLICY_SET, arguments_schema_ref: PROPOSAL_SCHEMA },
             ],
+            // Rev 18: the rows and members of a proposal it accepts.
+            proposals: {
+              row_kinds: [...proposalsServed().row_kinds],
+              members: [...proposalsServed().members],
+            },
           }
         : {}),
       // The mock has an approver surface (see `MockOptions.approverSurfaceClient`).
@@ -5638,7 +5845,12 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       approver: await mint('user_approver'),
       other_org: await mint('user_elsewhere', { org: OTHER_ORG }),
       entitled: await mint('user_entitled', {
-        entitlements: ['records.verify', 'evidence.export', 'policies.suggested'],
+        entitlements: [
+          'records.verify',
+          'evidence.export',
+          'policies.suggested',
+          ROLE_SUBJECTS_ENTITLEMENT,
+        ],
       }),
       wrong_audience: await mint('svc_adapter', {
         aud: 'https://api.elsewhere.test',

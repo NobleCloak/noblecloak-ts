@@ -5,6 +5,11 @@
  */
 import type { ErrorObject } from 'ajv/dist/2020.js';
 
+import {
+  PROPOSAL_MEMBERS as CONTRACT_PROPOSAL_MEMBERS,
+  PROPOSAL_ROW_KINDS,
+  type ProposalRowKind,
+} from '../conformance/types.js';
 import type { Obj } from './store.js';
 
 /** The namespace the deployment reserves to the references it applies itself. */
@@ -25,7 +30,17 @@ export type RefusalCode =
   | 'tool_ref_in_use'
   | 'target_unknown'
   | 'baseline_exists'
-  | 'tightening_looser';
+  | 'tightening_looser'
+  | 'not_entitled';
+
+/** The kinds of row a proposal carries (`PolicySetEntry.role`); `role` is rev 18. */
+export type RowKind = ProposalRowKind;
+/** The same list the conformance kit names (`conformance/types.ts`), so that the two cannot drift. */
+export const ROW_KINDS: readonly RowKind[] = PROPOSAL_ROW_KINDS;
+/** The optional members of a proposal beyond those of rev 14 (`Capabilities.proposals.members`); the kit's list. */
+export const PROPOSAL_MEMBERS: readonly string[] = CONTRACT_PROPOSAL_MEMBERS;
+/** Rev 18: the entitlement key a `role` row needs (`Capabilities.entitlements`). */
+export const ROLE_SUBJECTS_ENTITLEMENT = 'policies.role_subjects';
 
 export interface Refusal {
   readonly code: RefusalCode | 'policy_conflict';
@@ -35,16 +50,68 @@ export interface Refusal {
 }
 
 export interface ProposedPolicy {
-  readonly role: 'baseline' | 'tightening';
+  readonly role: RowKind;
   readonly policy: Obj;
 }
 
 /** The members of a `PolicySetProposal` the mock reads, once it fits the schema. */
 export interface Proposal {
-  readonly agent: { readonly id: string; readonly principal_id?: string };
+  /** Absent on a proposal of organisation policies alone (rev 18). */
+  readonly agent?: { readonly id: string; readonly principal_id?: string };
   readonly tools: readonly Obj[];
   readonly policies: readonly ProposedPolicy[];
+  /** Rev 18: the tools to grant to `agent.principal_id` on approval; empty when the member is absent. */
+  readonly tool_grants: readonly string[];
 }
+
+/** What a deployment accepts in a proposal (`Capabilities.proposals`). */
+export interface ProposalsServed {
+  readonly row_kinds: readonly string[];
+  readonly members: readonly string[];
+}
+
+/**
+ * Whether a role key names `everyone`, the reserved role a `baseline` is for: the bare key in any case, or a form
+ * that ends in `:everyone` or `/everyone`, compared after Unicode compatibility normalisation (NFKC), so that a
+ * full-width `ｅveryone` names it too.
+ */
+export const namesEveryone = (key: string): boolean => {
+  const lower = key.normalize('NFKC').toLowerCase();
+  return lower === 'everyone' || lower.endsWith(':everyone') || lower.endsWith('/everyone');
+};
+
+/**
+ * Whether a role row may name `key` (rev 18): a key that is not empty, has no whitespace before or after it (a
+ * deployment that trims keys would read another role, or `everyone`), and does not name `everyone`.
+ */
+export const isRoleRowKey = (key: string): boolean =>
+  key.length > 0 && key.trim() === key && !namesEveryone(key);
+
+/**
+ * Whether `subject` is the one a row of kind `role` may have. A row kind added to `RowKind` without a case here
+ * fails to compile (`satisfies never`) rather than defaulting to the rule of another kind.
+ */
+const subjectFits = (
+  role: RowKind,
+  subject: Obj,
+  agentId: string | undefined,
+  roleKeyRules: boolean
+): boolean => {
+  switch (role) {
+    case 'baseline':
+      return subject.type === 'role' && subject.id === 'everyone';
+    case 'role':
+      return (
+        subject.type === 'role' &&
+        typeof subject.id === 'string' &&
+        (!roleKeyRules || isRoleRowKey(subject.id))
+      );
+    case 'tightening':
+      return subject.type === 'agent' && subject.id === agentId;
+    default:
+      return role satisfies never;
+  }
+};
 
 /** Where `action.arguments` sits in the body of `POST /v1/approvals`. */
 export const ARGUMENTS_AT = 'action.arguments';
@@ -105,6 +172,13 @@ export const schemaRefusal = (errors: readonly ErrorObject[] | null | undefined)
 
 const at = (path: string): string => `${ARGUMENTS_AT}.${path}`;
 
+/** What the one subject of each kind of row is, as the refusal of a row that breaks it says. */
+const SUBJECT_RULE: Readonly<Record<RowKind, string>> = {
+  baseline: 'A baseline is for the subject { type: role, id: everyone }.',
+  tightening: "A tightening is for the proposal's agent, { type: agent, id: <agent.id> }.",
+  role: 'A role row is for one role of the organisation, { type: role, id: <key> }, with a key that is not empty and has no whitespace before or after it, and never everyone: a policy of everyone is a baseline.',
+};
+
 /** The tool a policy of the proposal targets, when it targets exactly one. */
 export const targetOf = (policy: Obj): string | undefined => {
   const targets = policy.targets;
@@ -114,19 +188,83 @@ export const targetOf = (policy: Obj): string | undefined => {
 };
 
 /**
- * The rules of `PolicySetProposal` beyond its schema: no two tools of one reference; a baseline is a
- * `tool_invocation` policy on the subject `{ role, everyone }`, a tightening one on `{ agent, <agent.id> }`, each
- * with exactly one subject and exactly one target tool; no target is a deployment-applied reference; no two
- * policies have the same target tool and subject; a policy's `config` carries only `mode` and it has no `origin`
- * (`modeOnly: false` is the break that lets the rest through, `baselineModeOnly: false` the one that lets a baseline's through). The first that breaks is `shape`.
+ * The rules of `PolicySetProposal` beyond its schema: a row kind and an optional member the deployment serves
+ * (`served`, rev 18); no two tools of one reference; without an agent no tightening and no tool grants (rev 18);
+ * tool grants only with `agent.principal_id`, none in the deployment-applied namespace or among the proposal's own
+ * tools (rev 18); a baseline is a `tool_invocation` policy on the subject `{ role, everyone }`, a tightening one on
+ * `{ agent, <agent.id> }`, a role row one on `{ role, <key> }` where the key is not `everyone` (rev 18), each with
+ * exactly one subject and exactly one target tool; no target is a deployment-applied reference; no two policies
+ * have the same target tool and subject; a policy's `config` carries only `mode` and it has no `origin`
+ * (`modeOnly: false` is the break that lets the rest through, `baselineModeOnly: false` the one that lets a baseline's
+ * through; `grantsNeedPrincipal: false` the one that lets tool grants through when the agent names no principal,
+ * though never when there is no agent; `roleKeyRules: false` the one that lets a role row name `everyone`, or a key
+ * with whitespace around it). The first that breaks is `shape`.
  */
 export const ruleRefusal = (
   proposal: Proposal,
   {
     modeOnly = true,
     baselineModeOnly = true,
-  }: { readonly modeOnly?: boolean; readonly baselineModeOnly?: boolean } = {}
+    grantsNeedPrincipal = true,
+    roleKeyRules = true,
+    served = { row_kinds: ROW_KINDS, members: PROPOSAL_MEMBERS },
+  }: {
+    readonly modeOnly?: boolean;
+    readonly baselineModeOnly?: boolean;
+    readonly grantsNeedPrincipal?: boolean;
+    readonly roleKeyRules?: boolean;
+    readonly served?: ProposalsServed;
+  } = {}
 ): Refusal | undefined => {
+  for (const [i, { role }] of proposal.policies.entries())
+    if (!served.row_kinds.includes(role))
+      return {
+        code: 'shape',
+        member: at(`policies[${String(i)}].role`),
+        detail: `This deployment does not accept ${role} rows.`,
+      };
+  const grants = proposal.tool_grants;
+  if (grants.length > 0 && !served.members.includes('tool_grants'))
+    return {
+      code: 'shape',
+      member: at('tool_grants'),
+      detail: 'This deployment does not apply tool grants.',
+    };
+  if (proposal.agent === undefined) {
+    const tightening = proposal.policies.findIndex((entry) => entry.role === 'tightening');
+    if (tightening >= 0)
+      return {
+        code: 'shape',
+        member: at(`policies[${String(tightening)}].role`),
+        detail: 'A tightening is for the agent of the proposal, and this proposal names none.',
+      };
+  }
+  if (
+    grants.length > 0 &&
+    proposal.agent?.principal_id === undefined &&
+    (grantsNeedPrincipal || proposal.agent === undefined)
+  )
+    return {
+      code: 'shape',
+      member: at('tool_grants'),
+      detail:
+        'Tool grants are for the service principal in agent.principal_id, and this proposal names none.',
+    };
+  const own = new Set(proposal.tools.map((tool) => String(tool.tool_ref)));
+  for (const [i, ref] of grants.entries()) {
+    if (isDeploymentApplied(ref))
+      return {
+        code: 'shape',
+        member: at(`tool_grants[${String(i)}]`),
+        detail: `${ref} is a deployment-applied reference; it is granted to no one.`,
+      };
+    if (own.has(ref))
+      return {
+        code: 'shape',
+        member: at(`tool_grants[${String(i)}]`),
+        detail: `${ref} is a tool of this proposal; a grant names a tool the organisation already owns.`,
+      };
+  }
   const seen = new Set<string>();
   for (const [i, tool] of proposal.tools.entries()) {
     const ref = String(tool.tool_ref);
@@ -155,18 +293,12 @@ export const ruleRefusal = (
         detail: `A ${role} has exactly one subject.`,
       };
     const subject = subjects[0] ?? {};
-    const wanted =
-      role === 'baseline'
-        ? subject.type === 'role' && subject.id === 'everyone'
-        : subject.type === 'agent' && subject.id === proposal.agent.id;
+    const wanted = subjectFits(role, subject, proposal.agent?.id, roleKeyRules);
     if (!wanted)
       return {
         code: 'shape',
         member: at(`${where}.subjects[0]`),
-        detail:
-          role === 'baseline'
-            ? 'A baseline is for the subject { type: role, id: everyone }.'
-            : "A tightening is for the proposal's agent, { type: agent, id: <agent.id> }.",
+        detail: SUBJECT_RULE[role],
       };
     const target = targetOf(policy);
     if (target === undefined)
@@ -181,7 +313,7 @@ export const ruleRefusal = (
         member: at(`${where}.targets.tools[0]`),
         detail: `${target} is a deployment-applied reference; no policy targets it.`,
       };
-    if (modeOnly && (role === 'tightening' || baselineModeOnly)) {
+    if (modeOnly && (role !== 'baseline' || baselineModeOnly)) {
       if (policy.origin !== undefined)
         return {
           code: 'shape',

@@ -489,6 +489,7 @@ describe('the rules of a proposal', () => {
     agent: { id: 'agent_1' },
     tools: [],
     policies: [{ role: 'baseline', policy: baseline('ext:t', 'ask').policy as Json }],
+    tool_grants: [],
     ...patch,
   });
 

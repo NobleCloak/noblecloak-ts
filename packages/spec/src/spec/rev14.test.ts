@@ -152,10 +152,10 @@ describe('deployment-applied proposals (rev 14)', () => {
 });
 
 describe('PolicySetProposal (rev 14)', () => {
-  it('is closed, and needs an agent and 1 to 50 policies; at most 50 tools', () => {
+  it('is closed, and needs 1 to 50 policies; at most 50 tools (rev 18 makes the agent optional)', () => {
     const schema = obj(schemas.PolicySetProposal, 'PolicySetProposal');
     expect(schema.additionalProperties).toBe(false);
-    expect(schema.required).toEqual(['agent', 'policies']);
+    expect(schema.required).toEqual(['policies']);
     expect(fits(proposal())).toBe(true);
     expect(fits({ ...proposal(), extra: 1 })).toBe(false);
     expect(fits({ ...proposal(), policies: [] })).toBe(false);

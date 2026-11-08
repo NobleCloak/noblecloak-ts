@@ -127,6 +127,12 @@ capability skip, and with the member but without the token it is an `unconfigure
 deployment that restricts approving to some users, a user outside them): the scenarios that show such a user
 reads an approval's digest and never its arguments, and sees no available actions (rev 15), need it. Absent, those scenarios are skipped as
 unconfigured, so a run exits 1 unless it passes `--allow-skips` or the token, as for `--other-service-token`.
+`--entitled-token` is a user whose organisation holds the paid entitlements (`hosted-paid-routes` calls the paid routes with it).
+The rev 18 scenarios that open a `role` row as `entitled` and approve it as `admin` need it to be a user of the
+organisation of `--token` and `--admin-token`, an organisation that holds `policies.role_subjects`, and the rev 18 refusal
+`rev18-role-row-not-entitled` needs `--other-org-token`'s organisation not to hold that entitlement. Each of those scenarios
+first reads `GET /v1/capabilities` with that token, and fails at that step, naming the entitlement, when the organisation
+is not the one it needs, so a full run needs both organisations set up that way.
 `--reserved-tool-ref` and `--system-tool-ref` name a tool reference in a namespace the deployment reserves
 and the reference of one of its system tools, which `POST /v1/tools` must refuse (`reserved_tool_ref`,
 `system_tool_ref`). `--tool-ref-in-use` names a reference already in use in the caller's organisation
@@ -179,14 +185,17 @@ checks leave out the routes of such a family. The floor is never skipped.
 **Restrictions a deployment advertises (rev 6).** `GET /v1/capabilities` may say that a deployment restricts
 what the rest of the document allows: `limits.approval_arguments_max_bytes`, `continuation_deliveries` and
 `tool_registration`, besides `resolutions` and `limits.resolutions_batch_max_items`; rev 17 adds `continuation_kinds`, the
-continuation kinds the deployment accepts, whose absence means the seven kinds of rev 16 rather than no restriction. A scenario that
+continuation kinds the deployment accepts, whose absence means the seven kinds of rev 16 rather than no restriction, and rev 18
+`proposals`, the rows and members of a policy-set proposal it accepts, whose absence means those of rev 14. A scenario that
 declares `advertises: [...]` (a list of those members), `unserved_delivery: <delivery>` or
 `unserved_resolution: <resolution>` (about what the deployment does _not_ serve), or `tool_registration:
 administrators`, runs only against a deployment that says so; against any other it is printed `skipped:
 capability` (not served), never `unconfigured`, and does not affect the exit code. The converse is also a capability skip:
 `serves_delivery` and `serves_resolution` name what a scenario's success needs (the public-callback check needs
 `push`; the stream scenario that escalates needs `escalated`), `serves_kind` (rev 17) names a continuation kind it
-needs (skipped where `continuation_kinds` lacks it, or is absent and the kind is not one of rev 16's), and `tool_registration: any` marks a scenario
+needs (skipped where `continuation_kinds` lacks it, or is absent and the kind is not one of rev 16's), `serves_row_kind` and
+`serves_proposal_member` (rev 18) name a row kind or an optional member of a proposal it needs (skipped where `proposals` lacks
+it, or is absent and it is not one of rev 14's), and `tool_registration: any` marks a scenario
 that registers a tool as a principal that is not an administrator (another organisation's user). Where a deployment
 lets only administrators register tools and the run has no `--admin-token`, a scenario that says `as: admin`
 is skipped as `unconfigured` (the exit code is 1 unless `--allow-skips`), because the creator token that stands in
@@ -291,7 +300,8 @@ names the simulated policy as the decision's `policy` when it contributed, and f
 default only when nothing matched; the mock's decide still answers from the tool's mode, so the agent binding and the
 `everyone` role below are shown through simulate without `subject`, which is scoped as a decision would be. As a subject (rev 11, the
 `admin` token only) it evaluates a role as that role and the organisation, the organisation alone, or a user with the
-roles of the latest token the mock saw for that user (a user it never saw holds none). It retires a published policy
+roles of the latest token the mock saw for that user (a user it never saw holds none); since rev 18 a service principal
+as its own `service` policies, those of the agent it is bound to, `everyone` and the organisation. It retires a published policy
 and discards a draft (rev 11), and keeps each version's `origin`.
 
 The mock's connections (rev 11) keep a status, a credential tier and a write-only organisation credential; a server's
@@ -654,9 +664,66 @@ kind and refuses an unknown one. The mock advertises `continuation_kinds` on eit
 consume) and the negatives `rev17-unknown-continuation-kind-is-refused` (the kind `foo` on a decision and on
 `POST /v1/approvals`, and nothing else, so it passes on any deployment that keeps the enum closed, whether its kinds are rev 16's or rev 17's) and `rev17-claude-agent-sdk-is-pull-only` (`claude_agent_sdk` with `held` on both routes; `push` is covered by the document and mock tests only, because a scenario declares one delivery). The existing `skip_request_validation` break fails both negatives. Each scenario declares `serves_delivery` for the one delivery it sends (`pull`, `pull`, `held`), so a deployment that does not serve that delivery skips it. The lifecycle also declares `serves_kind: claude_agent_sdk`, so a deployment that has not adopted the kind skips it rather than failing at step 2 (`POST /v1/decisions`, 400 `invalid_request`). The two negatives are not gated on the kind and run on any deployment that serves their delivery: an unknown kind, and `claude_agent_sdk` with `held`, are refused whether or not the kind is adopted. The lifecycle's correlation uses `mode: retry`, the mode the Claude Agent SDK adapter's v1 sends; the server does not read it, and the spec tests validate `defer` too.
 
+## Role rows, proposals without an agent and tool grants (rev 18)
+
+Rev 18 widens `PolicySetProposal` three ways so that a set of starter policies is proposed through the same reference as an
+agent's. A **`role` row** (a new value of `PolicySetEntry.role`) is a `tool_invocation` policy for one role of the
+organisation, `{ type: role, id: <key> }`, with a bare role key that is not empty, has no whitespace before or after it
+and is never `everyone` in any form (a policy of `everyone` is a `baseline`), one tool and `mode` only. No check compares it with the baseline; instead `Approval.preview.ineffective` lists a
+role row whose mode is looser than a policy of `everyone` gives the same tool (published, or a baseline of the same set),
+because tightest-wins makes it change nothing while that policy stands, and `Approval.preview.loosening` gains an entry with
+`subject` for a role row that loosens what its role gets (where no published policy the role holds governs the tool, against
+the default), so an empty `loosening` still says that approving loosens nothing. A role row needs the entitlement
+`policies.role_subjects`: without it the proposal is refused `proposal_refused` with the new code `not_entitled` (naming the
+first role row), at open and again at approval (`proposal_refused:not_entitled`). The entitlement keys are now documented as
+known values of `Capabilities.entitlements`. **`agent` is optional**: a proposal without it carries `baseline` and `role` rows
+(and `tools`) only, and its preview simulates as `{ type: role, id: everyone }`; a tightening or `tool_grants` without an agent is
+`shape`. **`tool_grants`** lists tools the organisation already owns, granted on approval to the service principal in
+`agent.principal_id` (required for them) in the same all-or-nothing step, after the binding and before the policies; a reference
+that is no tool the organisation owns (a tool a principal owns included), or a withdrawn one, is `target_unknown`, and one of the proposal's own `tools` or in the
+`tool:noblecloak:` namespace is `shape`. `Approval.preview.grants` lists them. A grant is a deployment-applied instruction: the
+visibility rule of `GET /v1/tools` is unchanged, and what a grant does beyond it is the deployment's.
+
+A deployment says what it accepts in `Capabilities.proposals` (`row_kinds`, `members`); absent means `baseline` and
+`tightening` and no member, and a row kind or member it does not list is `shape`.
+
+**Simulating as a service principal.** `POST /v1/policies/{id}/simulate`, and the set form that defers to it, take
+`subject: { type: service, id: <service principal id> }` (the `AgentPrincipalWrite.principal_id` string). The deployment
+composes what that principal's gateway would: the policies whose subject is the principal, the policies of the agent it is
+bound to (none while it is unbound), `everyone` and the organisation, and no user's or other role's: a role the principal's
+token carries, which its gateway would compose, is not simulated. A deployment whose
+`policy_forms.subject_types` lacks `service` still accepts it and composes as if no `service` policy existed. This is a text
+change: `PolicySubject` already took `service`, which rev 17 refused 422 `unsupported_policy_form`; `group` is still
+refused so. No capability advertises it beyond the revision; the kit gates its scenarios on `proposals`, the member that
+says rev 18.
+
+**The mock and the scenarios.** The mock implements all of it on the hosted deployment and advertises every row kind and
+`tool_grants` (`MockOptions.proposals` starts it with less). The mock keeps no entitlements per organisation: it reads the
+opener's token (the `entitled` token holds `policies.role_subjects`; `creator_user` and `other_org` do not) and records that
+set on the approval; at approval an approving token that carries an `entitlements` claim stands for the organisation's current set, and
+one without the claim leaves the recorded set in force. That token model is the mock's stand-in for the organisation's
+entitlement, which is what the contract speaks of. It records grants in its state and changes no tool's visibility.
+`35-rev18-proposal-role-rows-and-grants.yaml` has eleven scenarios (the entitled set applied without an agent, which also shows that a service principal composes none of its role rows, its refusal for
+a person of another organisation that does not hold the entitlement, the refusal of a role row's key that names `everyone` or has whitespace around it, the agentless refusals, the two tool-grant refusals (the second also for a tool an administrator registered as their own), a grant previewed and applied, a shadowed role row in the
+preview, a role row that loosens in the preview, a simulation as a service principal before and after a proposal binds it, and a
+simulation as a service principal whose own `service` policy decides while another principal's and a role's are not composed).
+The two simulations as a service principal run on hosted only, as the other simulations as a subject do, and are gated on
+`proposals` like the rest, and on `policy_forms.subject_types`: the first needs `role` and `agent`, the second `service` and `role`. The two negatives that asserted a `service` subject is 422 (`negative-simulate-as-a-subject`,
+`unsupported-policy-form-names-member`) now send a `group` subject. Ten new breaks fail them, as do the existing
+`proposal_refusal_code_missing` (every refusal), `proposal_not_consumed` (the two that apply) and `preview_loosening_missing`
+(the loosening role row). The re-check of the entitlement at approval (`proposal_refused:not_entitled`) has no scenario
+and no break: the kit cannot take an entitlement away from an organisation between the open and the approval, so only the
+mock's own tests (`src/mock/rev18.test.ts`) show it, and a deployment that skips that re-check still passes the kit.
+
 ## Versioning
 
-This version implements **contract revision 17**, released as `contract-v1-rev17`; the CHANGELOG head names it. Rev 17 adds one value to the closed `Continuation.kind` enum (`claude_agent_sdk`) and one optional member, `Capabilities.continuation_kinds`. The widening keeps a rev 16 server's responses valid: the full `continuation` is read only by the creating principal, and every other reader sees `continuation_kind`, a free string. Rev 16 added optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
+This version implements **contract revision 18**, released as `contract-v1-rev18`; the CHANGELOG head names it. Rev 18 adds a
+value to the closed `PolicySetEntry.role` enum (`role`), the optional members `PolicySetProposal.tool_grants`,
+`ApprovalPreview.grants`, `ApprovalPreview.ineffective`, `ApprovalPreview.loosening[].subject` and `Capabilities.proposals`, the `proposal_refused` code
+`not_entitled`, and known values on `Capabilities.entitlements`, lists `service` among the subject types a simulation takes
+(text only: `PolicySubject` already had it), and it makes `PolicySetProposal.agent` optional. That last one
+widens what a request may send: a reader of a proposal's `arguments` may now find no `agent`, and such an approval names no
+agent. Rev 17 adds one value to the closed `Continuation.kind` enum (`claude_agent_sdk`) and one optional member, `Capabilities.continuation_kinds`. The widening keeps a rev 16 server's responses valid: the full `continuation` is read only by the creating principal, and every other reader sees `continuation_kind`, a free string. Rev 16 added optional members only (tool facts, policy rules, approvers and `exclude`, the `approval_routing` kind, `Approval.requirements`, and the features `tools.facts`, `policies.rules` and `approvals.requirements`), as rev 15 did (`Approval.available_actions` and the feature `approvals.available_actions`). Rev 14 made a narrowing, which still holds, and added optional members; its CHANGELOG entry names both. The narrowing: a tool registration or a policy target in the namespace `tool:noblecloak:` is refused (422 `reserved_tool_ref`, 422 `policy_immutable`). The behaviour rev 13 changed still holds: `actor.agent_id` does not select an agent's policies (the binding does), and so do the narrowings rev 12 made: `Webhook.secret` is removed, a registered origin must be exact, and origin writes and the webhook routes are administrator-only. The
 revision is the contract's. `info.version` in the document (1.0.0) is **not** the revision. A revision only adds optional members, or values to a closed enum, unless its CHANGELOG entry names a narrowing, as rev 6 does
 for the listing of a tool owned by a principal.
 

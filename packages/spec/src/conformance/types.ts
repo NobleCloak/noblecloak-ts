@@ -29,6 +29,8 @@ export const CAPABILITY_MEMBERS = [
   'deployment_applied',
   // Rev 17: the continuation kinds the deployment accepts.
   'continuation_kinds',
+  // Rev 18: what the deployment accepts in a policy-set proposal; a deployment that lists it accepts one without an agent.
+  'proposals',
 ] as const;
 export type CapabilityMember = (typeof CAPABILITY_MEMBERS)[number];
 
@@ -50,6 +52,28 @@ export const CONTINUATION_KINDS = [
   'claude_agent_sdk',
 ] as const;
 export type ContinuationKind = (typeof CONTINUATION_KINDS)[number];
+
+/** The row kinds of a policy-set proposal (rev 18), in the order of the document's `PolicySetEntry.role` enum. */
+export const PROPOSAL_ROW_KINDS = ['baseline', 'tightening', 'role'] as const;
+export type ProposalRowKind = (typeof PROPOSAL_ROW_KINDS)[number];
+/** The optional members of a policy-set proposal a deployment lists in `Capabilities.proposals.members` (rev 18). */
+export const PROPOSAL_MEMBERS = ['tool_grants'] as const;
+export type ProposalMember = (typeof PROPOSAL_MEMBERS)[number];
+
+/** `Capabilities.proposals` (rev 18): what a deployment accepts in a policy-set proposal. */
+export interface ProposalsAccepted {
+  readonly row_kinds: readonly string[];
+  readonly members: readonly string[];
+}
+
+/**
+ * What a deployment that does not advertise `proposals` accepts: the rows of rev 14 and no optional member, because
+ * one that predates rev 18 cannot advertise the member.
+ */
+export const REV14_PROPOSALS: ProposalsAccepted = {
+  row_kinds: ['baseline', 'tightening'],
+  members: [],
+};
 
 /**
  * The kinds of rev 16: what a deployment that does not advertise `continuation_kinds` accepts, because one that
@@ -87,6 +111,11 @@ export interface AdvertisedRestrictions {
   readonly connection_transports?: readonly ConnectionTransport[];
   /** `Capabilities.deployment_applied` (rev 14): the references the deployment applies; undefined when the member is absent. */
   readonly deployment_applied?: readonly DeploymentApplied[];
+  /**
+   * `Capabilities.proposals` (rev 18); undefined when the member is absent (`REV14_PROPOSALS`). Strings: the member is
+   * open-ended, so a later revision's deployment may list a row kind or a member this kit does not know.
+   */
+  readonly proposals?: ProposalsAccepted;
 }
 
 /** An entry of `Capabilities.deployment_applied` (rev 14). */
@@ -468,6 +497,17 @@ export interface Scenario {
    * kind is not one of the seven of rev 16.
    */
   readonly serves_kind?: ContinuationKind;
+  /**
+   * Rev 18: a scenario whose success needs the deployment to accept this row kind in a policy-set proposal is skipped
+   * (a capability skip, not a failure) where `proposals.row_kinds` lacks it, or `proposals` is absent and the kind is
+   * not one of rev 14 (`baseline`, `tightening`).
+   */
+  readonly serves_row_kind?: ProposalRowKind;
+  /**
+   * Rev 18: the same for an optional member of a policy-set proposal: skipped where `proposals.members` lacks it, or
+   * `proposals` is absent.
+   */
+  readonly serves_proposal_member?: ProposalMember;
   /** The converse of `unserved_resolution`: skipped where the deployment advertises approvals and cannot produce this resolution. */
   readonly serves_resolution?: string;
   /**

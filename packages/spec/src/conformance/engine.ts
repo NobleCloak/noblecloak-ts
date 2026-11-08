@@ -39,7 +39,7 @@ import type {
   VerifySpec,
   VerifyStep,
 } from './types.js';
-import { REV16_CONTINUATION_KINDS } from './types.js';
+import { REV14_PROPOSALS, REV16_CONTINUATION_KINDS } from './types.js';
 import { verifyDeliverySignature } from './verify-delivery.js';
 
 type Vars = Record<string, unknown>;
@@ -620,6 +620,30 @@ export async function runScenario(scenario: Scenario, deps: EngineDeps): Promise
       outcome: 'skipped',
       failures: [],
       skipReason: `the deployment does not accept the ${scenario.serves_kind} continuation kind`,
+      skipKind: 'capability',
+    };
+  // Rev 18: an absent `proposals` is what rev 14 accepts: baseline and tightening rows, no optional member.
+  const proposals = restrictions?.proposals ?? REV14_PROPOSALS;
+  if (
+    scenario.serves_row_kind !== undefined &&
+    !proposals.row_kinds.includes(scenario.serves_row_kind)
+  )
+    return {
+      ...base,
+      outcome: 'skipped',
+      failures: [],
+      skipReason: `the deployment does not accept ${scenario.serves_row_kind} rows in a proposal`,
+      skipKind: 'capability',
+    };
+  if (
+    scenario.serves_proposal_member !== undefined &&
+    !proposals.members.includes(scenario.serves_proposal_member)
+  )
+    return {
+      ...base,
+      outcome: 'skipped',
+      failures: [],
+      skipReason: `the deployment does not accept ${scenario.serves_proposal_member} in a proposal`,
       skipKind: 'capability',
     };
   if (

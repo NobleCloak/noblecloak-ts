@@ -300,7 +300,7 @@
       request: { method: GET, path: '/v1/policies/${policy_id}' }
       expect: { status: 200, body: [{ path: data.state, equals: published }] }
 - id: negative-simulate-as-a-subject
-  title: An administrator simulates as a role and as the organisation and gets that holder's result; a member is 403, and a service subject is 422 unsupported_policy_form
+  title: An administrator simulates as a role and as the organisation and gets that holder's result; a member is 403, and a group subject is 422 unsupported_policy_form
   tags: [hosted, negative]
   only: hosted
   requires: policies
@@ -370,13 +370,14 @@
           subject: { type: role, id: '${admin_role}' }
           action: { tool_ref: 'ext:ss:${uniq}', arguments: {} }
       expect: { status: 403, problem: forbidden }
-    - name: a service is not a subject a simulation takes
+    # A group is a subject type of the schema that no deployment simulates (a type outside the schema is 400).
+    - name: a group is not a subject a simulation takes
       as: admin
       request:
         method: POST
         path: /v1/policies/${policy_id}/simulate
         body:
-          subject: { type: service, id: '00000000-0000-4000-8000-0000000005e5' }
+          subject: { type: group, id: '00000000-0000-4000-8000-00000000969e' }
           action: { tool_ref: 'ext:ss:${uniq}', arguments: {} }
       expect: { status: 422, problem: unsupported_policy_form }
 - id: simulate-as-an-agent
