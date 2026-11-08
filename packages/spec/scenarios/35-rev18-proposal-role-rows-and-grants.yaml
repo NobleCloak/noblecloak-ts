@@ -531,7 +531,7 @@
           - { path: code, equals: shape }
           - { path: member, equals: action.arguments.tool_grants }
 - id: rev18-tool-grant-unknown-tool
-  title: A tool grant for a tool the organisation does not own - none by that reference, or one a person registered as their own - is refused with code target_unknown, naming the grant
+  title: A tool grant for a tool the organisation does not own - none by that reference, or one an administrator registered as their own - is refused with code target_unknown, naming the grant
   tags: [hosted, negative]
   only: hosted
   requires: [agents, approvals]
@@ -597,8 +597,8 @@
         body:
           - { path: code, equals: target_unknown }
           - { path: member, equals: 'action.arguments.tool_grants[1]' }
-    - name: a tool a person registered as their own is no tool the organisation owns, so a grant for it is refused as unknown
-      as: creator_user
+    - name: a tool an administrator registered as their own is no tool the organisation owns, so a grant for it is refused as unknown
+      as: admin
       request:
         method: POST
         path: /v1/tools

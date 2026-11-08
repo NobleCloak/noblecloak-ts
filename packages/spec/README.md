@@ -704,7 +704,7 @@ set on the approval; at approval an approving token that carries an `entitlement
 one without the claim leaves the recorded set in force. That token model is the mock's stand-in for the organisation's
 entitlement, which is what the contract speaks of. It records grants in its state and changes no tool's visibility.
 `35-rev18-proposal-role-rows-and-grants.yaml` has eleven scenarios (the entitled set applied without an agent, which also shows that a service principal composes none of its role rows, its refusal for
-a person of another organisation that does not hold the entitlement, the refusal of a role row's key that names `everyone` or has whitespace around it, the agentless refusals, the two tool-grant refusals (the second also for a tool a person registered as their own), a grant previewed and applied, a shadowed role row in the
+a person of another organisation that does not hold the entitlement, the refusal of a role row's key that names `everyone` or has whitespace around it, the agentless refusals, the two tool-grant refusals (the second also for a tool an administrator registered as their own), a grant previewed and applied, a shadowed role row in the
 preview, a role row that loosens in the preview, a simulation as a service principal before and after a proposal binds it, and a
 simulation as a service principal whose own `service` policy decides while another principal's and a role's are not composed).
 The two simulations as a service principal run on hosted only, as the other simulations as a subject do, and are gated on
