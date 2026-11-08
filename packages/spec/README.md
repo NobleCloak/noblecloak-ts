@@ -703,13 +703,13 @@ opener's token (the `entitled` token holds `policies.role_subjects`; `creator_us
 set on the approval; at approval an approving token that carries an `entitlements` claim stands for the organisation's current set, and
 one without the claim leaves the recorded set in force. That token model is the mock's stand-in for the organisation's
 entitlement, which is what the contract speaks of. It records grants in its state and changes no tool's visibility.
-`35-rev18-proposal-role-rows-and-grants.yaml` has ten scenarios (the entitled set applied without an agent, its refusal for
-a person of another organisation that does not hold the entitlement, the agentless refusals, the two tool-grant refusals, a grant previewed and applied, a shadowed role row in the
+`35-rev18-proposal-role-rows-and-grants.yaml` has eleven scenarios (the entitled set applied without an agent, which also shows that a service principal composes none of its role rows, its refusal for
+a person of another organisation that does not hold the entitlement, the refusal of a role row's key that names `everyone` or has whitespace around it, the agentless refusals, the two tool-grant refusals (the second also for a tool a person registered as their own), a grant previewed and applied, a shadowed role row in the
 preview, a role row that loosens in the preview, a simulation as a service principal before and after a proposal binds it, and a
 simulation as a service principal whose own `service` policy decides while another principal's and a role's are not composed).
 The two simulations as a service principal run on hosted only, as the other simulations as a subject do, and are gated on
-`proposals` like the rest; the second also needs `service` and `role` in `policy_forms.subject_types`. The two negatives that asserted a `service` subject is 422 (`negative-simulate-as-a-subject`,
-`unsupported-policy-form-names-member`) now send a `group` subject. Nine new breaks fail them, as do the existing
+`proposals` like the rest, and on `policy_forms.subject_types`: the first needs `role` and `agent`, the second `service` and `role`. The two negatives that asserted a `service` subject is 422 (`negative-simulate-as-a-subject`,
+`unsupported-policy-form-names-member`) now send a `group` subject. Ten new breaks fail them, as do the existing
 `proposal_refusal_code_missing` (every refusal), `proposal_not_consumed` (the two that apply) and `preview_loosening_missing`
 (the loosening role row). The re-check of the entitlement at approval (`proposal_refused:not_entitled`) has no scenario
 and no break: the kit cannot take an entitlement away from an organisation between the open and the approval, so only the
