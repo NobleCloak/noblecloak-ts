@@ -223,6 +223,15 @@ What the preview adds:
   "action": {
     "tool_ref": "tool:noblecloak:propose-policy-set",
     "arguments": {
+      "tools": [
+        {
+          "tool_ref": "ext:crm:refund",
+          "transport": "external",
+          "input_schema": { "type": "object" },
+          "side_effect_level": "external",
+          "owner_kind": "org"
+        }
+      ],
       "policies": [
         {
           "role": "baseline",
