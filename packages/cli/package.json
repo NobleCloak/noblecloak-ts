@@ -1,6 +1,6 @@
 {
   "name": "@noblecloak/cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "The noblecloak command line: create, list, rotate and revoke an organisation's service principals and write the credential file an agent loads.",
   "license": "Apache-2.0",
   "author": "NobleCloak",
