@@ -4364,6 +4364,18 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
     });
   };
 
+  /**
+   * The one subject of a proposed row. Precondition: `ruleRefusal` has passed, which refuses a row without exactly
+   * one subject; a row that gets here without one is a defect in the mock, so this throws rather than previewing `{}`.
+   */
+  const onlySubject = (policy: Obj): Obj => {
+    const subjects = policy.subjects as Obj[];
+    const [only] = subjects;
+    if (subjects.length !== 1 || only === undefined)
+      throw new Error('a proposed row has exactly one subject once ruleRefusal has passed');
+    return only;
+  };
+
   /** The mode tightest-wins composes from `modes`, or `fallback` (the tool's default) when there are none. */
   const composedMode = (modes: readonly string[], fallback: string): string =>
     modes.reduce<string | undefined>(
@@ -4376,8 +4388,9 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
 
   /**
    * The checks of a proposal against the state now (opening runs them, and so does approving): the agent, the
-   * principal, the tools, the targets, the baselines and the tightenings. The first that fails is the refusal.
-   * The defects skip the baseline check, or the tightening check.
+   * principal, the tools, the targets, the tool grants (rev 18), the baselines and the tightenings. The first that
+   * fails is the refusal. The defects skip the baseline check, the tightening check, or the check that a grant
+   * names a tool the organisation owns.
    */
   const stateRefusal = async (c: Ctx, proposal: Proposal): Promise<Refusal | undefined> => {
     const org = principalOf(c).org;
@@ -4535,7 +4548,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       // role, of everyone, of the organisation) or else the default, and what it gets with the proposal's baseline
       // and this row beside them. The rules allow one row per role and tool, so each row is its own entry.
       if (broken('preview_role_loosening_missing')) continue;
-      const subject = (policy.subjects as Obj[])[0] ?? {};
+      const subject = onlySubject(policy);
       const held = heldModes(org, ref, subject);
       const proposed = proposal.policies
         .filter((other) => other.role === 'baseline' && targetOf(other.policy) === ref)
@@ -4559,7 +4572,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
       ];
       const mode = String((policy.config as Obj).mode);
       if (everyone.some((other) => tightnessOfMode(other) < tightnessOfMode(mode)))
-        ineffective.push({ tool_ref: ref, subject: (policy.subjects as Obj[])[0] ?? {} });
+        ineffective.push({ tool_ref: ref, subject: onlySubject(policy) });
     }
     return {
       simulations,
@@ -4576,8 +4589,8 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
    * Opens a proposal: the reference must be one this deployment applies; the caller must be a person; the body
    * must fit its schema and the rules beyond it, and pass the checks against the state. A refusal is 422
    * `proposal_refused` with `code`, and `member` where it names a part of the body. The answer is the fixed tool
-   * row the approval is for, the proposal, and its preview. The defects: a service principal may propose, and the
-   * refusal carries no `code`.
+   * row the approval is for, the proposal, its preview, and the opener's entitlements, which the approval records
+   * (rev 18). The defects: a service principal may propose, and the refusal carries no `code`.
    */
   const vetProposal = async (
     c: Ctx,

@@ -114,7 +114,7 @@ export class MockIssuer {
         kind: claims.principal_kind,
         scopes: (claims.scope ?? '').split(/\s+/).filter((scope) => scope !== ''),
         dpopBound: typeof claims.cnf?.jkt === 'string',
-        entitlements: claims.entitlements ?? [],
+        entitlements: Array.isArray(claims.entitlements) ? claims.entitlements : [],
         entitlementsClaimed: Array.isArray(claims.entitlements),
         ...(typeof claims.client_id === 'string' ? { clientId: claims.client_id } : {}),
       };

@@ -5,6 +5,11 @@
  */
 import type { ErrorObject } from 'ajv/dist/2020.js';
 
+import {
+  PROPOSAL_MEMBERS as CONTRACT_PROPOSAL_MEMBERS,
+  PROPOSAL_ROW_KINDS,
+  type ProposalRowKind,
+} from '../conformance/types.js';
 import type { Obj } from './store.js';
 
 /** The namespace the deployment reserves to the references it applies itself. */
@@ -29,10 +34,11 @@ export type RefusalCode =
   | 'not_entitled';
 
 /** The kinds of row a proposal carries (`PolicySetEntry.role`); `role` is rev 18. */
-export type RowKind = 'baseline' | 'tightening' | 'role';
-export const ROW_KINDS: readonly RowKind[] = ['baseline', 'tightening', 'role'];
-/** The optional members of a proposal beyond those of rev 14 (`Capabilities.proposals.members`). */
-export const PROPOSAL_MEMBERS: readonly string[] = ['tool_grants'];
+export type RowKind = ProposalRowKind;
+/** The same list the conformance kit names (`conformance/types.ts`), so that the two cannot drift. */
+export const ROW_KINDS: readonly RowKind[] = PROPOSAL_ROW_KINDS;
+/** The optional members of a proposal beyond those of rev 14 (`Capabilities.proposals.members`); the kit's list. */
+export const PROPOSAL_MEMBERS: readonly string[] = CONTRACT_PROPOSAL_MEMBERS;
 /** Rev 18: the entitlement key a `role` row needs (`Capabilities.entitlements`). */
 export const ROLE_SUBJECTS_ENTITLEMENT = 'policies.role_subjects';
 
@@ -80,6 +86,11 @@ export const namesEveryone = (key: string): boolean => {
  */
 export const isRoleRowKey = (key: string): boolean =>
   key.length > 0 && key.trim() === key && !namesEveryone(key);
+
+/** A row kind this code does not handle fails to compile, and throws if it is ever reached. */
+const unreachable = (value: never): never => {
+  throw new Error(`unhandled row kind ${String(value)}`);
+};
 
 /** Where `action.arguments` sits in the body of `POST /v1/approvals`. */
 export const ARGUMENTS_AT = 'action.arguments';
@@ -263,7 +274,9 @@ export const ruleRefusal = (
         ? subject.type === 'role' && subject.id === 'everyone'
         : role === 'role'
           ? subject.type === 'role' && typeof subject.id === 'string' && isRoleRowKey(subject.id)
-          : subject.type === 'agent' && subject.id === proposal.agent?.id;
+          : role === 'tightening'
+            ? subject.type === 'agent' && subject.id === proposal.agent?.id
+            : unreachable(role);
     if (!wanted)
       return {
         code: 'shape',
