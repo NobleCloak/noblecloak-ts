@@ -85,7 +85,7 @@ describe('PolicySetProposal (rev 18)', () => {
 
   it('says a role row key is not empty, has no surrounding whitespace, and is never everyone in any form', () => {
     expect(flat(schemas.PolicySetProposal?.description)).toContain(
-      'a bare role key of the organisation as `PolicySubject` describes it, not empty and with no whitespace before or after it, and never `everyone` (in any case, compared after Unicode NFKC normalisation,'
+      'a bare role key of the organisation as `PolicySubject` describes it, not empty and with no whitespace before or after it, and never `everyone`, nor a key ending in `:everyone` or `/everyone`, each compared case-insensitively after Unicode NFKC normalisation'
     );
   });
 
