@@ -1,5 +1,14 @@
 # @noblecloak/policy-formats
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [20a6b38]
+- Updated dependencies [da6bdc6]
+- Updated dependencies [2276872]
+  - @noblecloak/client@0.13.0
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@noblecloak/cards",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "One approval card model, built from a NobleCloak approval read and rendered to Slack Block Kit and Adaptive Cards, with the click payload helpers.",
   "license": "Apache-2.0",
   "author": "NobleCloak",
