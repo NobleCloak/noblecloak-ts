@@ -87,9 +87,30 @@ export const namesEveryone = (key: string): boolean => {
 export const isRoleRowKey = (key: string): boolean =>
   key.length > 0 && key.trim() === key && !namesEveryone(key);
 
-/** A row kind this code does not handle fails to compile, and throws if it is ever reached. */
-const unreachable = (value: never): never => {
-  throw new Error(`unhandled row kind ${String(value)}`);
+/**
+ * Whether `subject` is the one a row of kind `role` may have. A row kind added to `RowKind` without a case here
+ * fails to compile (`satisfies never`) rather than defaulting to the rule of another kind.
+ */
+const subjectFits = (
+  role: RowKind,
+  subject: Obj,
+  agentId: string | undefined,
+  roleKeyRules: boolean
+): boolean => {
+  switch (role) {
+    case 'baseline':
+      return subject.type === 'role' && subject.id === 'everyone';
+    case 'role':
+      return (
+        subject.type === 'role' &&
+        typeof subject.id === 'string' &&
+        (!roleKeyRules || isRoleRowKey(subject.id))
+      );
+    case 'tightening':
+      return subject.type === 'agent' && subject.id === agentId;
+    default:
+      return role satisfies never;
+  }
 };
 
 /** Where `action.arguments` sits in the body of `POST /v1/approvals`. */
@@ -272,16 +293,7 @@ export const ruleRefusal = (
         detail: `A ${role} has exactly one subject.`,
       };
     const subject = subjects[0] ?? {};
-    const wanted =
-      role === 'baseline'
-        ? subject.type === 'role' && subject.id === 'everyone'
-        : role === 'role'
-          ? subject.type === 'role' &&
-            typeof subject.id === 'string' &&
-            (!roleKeyRules || isRoleRowKey(subject.id))
-          : role === 'tightening'
-            ? subject.type === 'agent' && subject.id === proposal.agent?.id
-            : unreachable(role);
+    const wanted = subjectFits(role, subject, proposal.agent?.id, roleKeyRules);
     if (!wanted)
       return {
         code: 'shape',

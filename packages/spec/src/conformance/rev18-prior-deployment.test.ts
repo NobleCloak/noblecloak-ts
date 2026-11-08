@@ -79,7 +79,10 @@ describe('the rev 18 scenarios on a deployment of rev 17, which advertises no pr
       'rev18-simulate-as-a-service-principal',
       'rev18-simulate-as-a-service-principal-own-policies',
     ])
-      expect(results.find((r) => r.id === id), id).toMatchObject({
+      expect(
+        results.find((r) => r.id === id),
+        id
+      ).toMatchObject({
         skipReason: 'the deployment does not advertise proposals',
       });
   });
