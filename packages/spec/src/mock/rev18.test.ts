@@ -384,9 +384,12 @@ describe('the mock, rev 18', () => {
         ],
       })
     );
-    expect(((await read(String(handle.id))).preview as Json).ineffective).toEqual([
+    const preview = (await read(String(handle.id))).preview as Json;
+    expect(preview.ineffective).toEqual([
       { tool_ref: tool, subject: { type: 'role', id: 'member' } },
     ]);
+    // A shadowed row loosens nothing: the empty list says so.
+    expect(preview.loosening).toEqual([]);
     const published = `ext:r:${unique()}`;
     await register(published);
     const everyone = await data(

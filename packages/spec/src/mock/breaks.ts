@@ -206,6 +206,7 @@ export const BREAKS = [
   'proposal_role_unentitled_accepted',
   'proposal_grants_without_principal_accepted',
   'proposal_unknown_grant_accepted',
+  'proposal_role_everyone_accepted',
   'preview_ineffective_missing',
   'preview_grants_missing',
   'preview_role_loosening_missing',

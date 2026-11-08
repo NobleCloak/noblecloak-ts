@@ -124,6 +124,27 @@
           - path: data
             contains_where: { key: subjects.0.id, equals: member }
       save: { first: data.0.id, second: data.1.id }
+    - name: a service principal of the organisation
+      as: creator
+      request:
+        method: POST
+        path: /v1/records
+        body: { tool_ref: 'rr:${uniq}', decision: allow, enforced: false }
+      expect: { status: 201, body: [{ path: data.actor.id, exists: true }] }
+      save: { sp: data.actor.id }
+    - name: simulated as that principal, the baseline asks and the role row is not composed - a service principal holds no role the directory gives
+      as: admin
+      request:
+        method: POST
+        path: '/v1/policies/${first}/simulate'
+        body:
+          subject: { type: service, id: '${sp}' }
+          action: { tool_ref: 'ext:rr:${uniq}:refund', arguments: { q: 'as service ${uniq}' } }
+      expect:
+        status: 200
+        body:
+          - { path: data.decision, equals: step_up }
+          - { path: data.considered.policies, lacks_where: { key: result, equals: deny } }
   cleanup:
     - name: the policies the approval published are retired
       as: admin
@@ -201,6 +222,168 @@
         body:
           - { path: code, equals: not_entitled }
           - { path: member, equals: 'action.arguments.policies[1]' }
+- id: rev18-role-row-key-rules
+  title: A role row that names everyone, in any case or in a form ending :everyone, or a key with whitespace around it, is refused with code shape, naming the subject - before the entitlement is asked
+  tags: [hosted, negative]
+  only: hosted
+  requires: [approvals]
+  advertises: [deployment_applied, proposals]
+  serves_row_kind: role
+  arguments_bytes: 4096
+  needs: [creator_user]
+  steps:
+    - name: the bare key everyone is the role a baseline is for
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rk:${uniq}:refund'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: role
+                  rationale: A row for a role.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: everyone }]
+                    targets: { tools: ['ext:rk:${uniq}:refund'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[0].policy.subjects[0]' }
+    - name: everyone in another case names it too
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rk:${uniq}:refund'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: role
+                  rationale: A row for a role.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: Everyone }]
+                    targets: { tools: ['ext:rk:${uniq}:refund'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[0].policy.subjects[0]' }
+    - name: a form ending :everyone names it too
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rk:${uniq}:refund'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: role
+                  rationale: A row for a role.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: 'admins:everyone' }]
+                    targets: { tools: ['ext:rk:${uniq}:refund'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[0].policy.subjects[0]' }
+    - name: a key with whitespace before it may be read as another role
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              tools:
+                - tool_ref: 'ext:rk:${uniq}:refund'
+                  transport: external
+                  input_schema: { type: object }
+                  side_effect_level: external
+                  owner_kind: org
+              policies:
+                - role: role
+                  rationale: A row for a role.
+                  assessment:
+                    {
+                      side_effect_level: external,
+                      blast_radius: one_record,
+                      reversible: false,
+                      external_party: true,
+                      financial: true,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: role, id: ' member' }]
+                    targets: { tools: ['ext:rk:${uniq}:refund'] }
+                    config: { mode: deny }
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: shape }
+          - { path: member, equals: 'action.arguments.policies[0].policy.subjects[0]' }
 - id: rev18-no-agent-no-tightening-no-grants
   title: A proposal without an agent that carries a tightening, or tool grants, is refused with code shape, naming the row or the member
   tags: [hosted, negative]
@@ -348,7 +531,7 @@
           - { path: code, equals: shape }
           - { path: member, equals: action.arguments.tool_grants }
 - id: rev18-tool-grant-unknown-tool
-  title: A tool grant for a tool the organisation does not hold is refused with code target_unknown, naming the grant
+  title: A tool grant for a tool the organisation does not own - none by that reference, or one a person registered as their own - is refused with code target_unknown, naming the grant
   tags: [hosted, negative]
   only: hosted
   requires: [agents, approvals]
@@ -407,6 +590,51 @@
                     targets: { tools: ['ext:gu:${uniq}:lookup'] }
                     config: { mode: ask }
               tool_grants: ['ext:gu:${uniq}:lookup', 'ext:gu:${uniq}:nowhere']
+          continuation: { kind: mcp_held, delivery: held }
+      expect:
+        status: 422
+        problem: proposal_refused
+        body:
+          - { path: code, equals: target_unknown }
+          - { path: member, equals: 'action.arguments.tool_grants[1]' }
+    - name: a tool a person registered as their own is no tool the organisation owns, so a grant for it is refused as unknown
+      as: creator_user
+      request:
+        method: POST
+        path: /v1/tools
+        body:
+          tool_ref: 'ext:gu:${uniq}:private'
+          transport: external
+          input_schema: { type: object }
+          side_effect_level: read
+          owner_kind: principal
+      expect: { status: 201 }
+    - as: creator_user
+      request:
+        method: POST
+        path: /v1/approvals
+        body:
+          action:
+            tool_ref: 'tool:noblecloak:propose-policy-set'
+            arguments:
+              agent: { id: '${agent}', principal_id: '${sp}' }
+              policies:
+                - role: tightening
+                  rationale: The agent asks before it looks a record up.
+                  assessment:
+                    {
+                      side_effect_level: read,
+                      blast_radius: one_record,
+                      reversible: true,
+                      external_party: false,
+                      financial: false,
+                    }
+                  policy:
+                    kind: tool_invocation
+                    subjects: [{ type: agent, id: '${agent}' }]
+                    targets: { tools: ['ext:gu:${uniq}:lookup'] }
+                    config: { mode: ask }
+              tool_grants: ['ext:gu:${uniq}:lookup', 'ext:gu:${uniq}:private']
           continuation: { kind: mcp_held, delivery: held }
       expect:
         status: 422
@@ -589,6 +817,7 @@
       expect:
         status: 200
         body:
+          - { path: data.preview.loosening, length: 0 }
           - { path: data.preview.ineffective, length: 1 }
           - path: data.preview.ineffective
             contains_members:

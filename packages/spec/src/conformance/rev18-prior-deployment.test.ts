@@ -19,7 +19,7 @@ const REV18 = loadScenarios()
 
 describe('the rev 18 scenarios on a deployment that lists only the rows of rev 14', () => {
   it('skips every scenario that needs role rows or tool grants, and passes the rest', async () => {
-    expect(REV18.length).toBeGreaterThanOrEqual(9);
+    expect(REV18).toHaveLength(11);
     const run = await runAgainstMock({
       deployment: 'hosted',
       spec: loadCommittedDocument(),
@@ -37,6 +37,7 @@ describe('the rev 18 scenarios on a deployment that lists only the rows of rev 1
       'rev18-role-row-not-entitled',
       'rev18-preview-names-a-shadowed-role-row',
       'rev18-preview-names-a-loosening-role-row',
+      'rev18-role-row-key-rules',
     ])
       expect(byId.get(id), id).toMatchObject(
         skipped('the deployment does not accept role rows in a proposal')
@@ -68,8 +69,19 @@ describe('the rev 18 scenarios on a deployment of rev 17, which advertises no pr
       capabilities: { proposals: undefined },
       restrictions: { proposals: { row_kinds: ['baseline', 'tightening'], members: [] } },
     });
-    for (const result of run.results.filter((r) => r.id.startsWith('rev18-')))
+    const results = run.results.filter((r) => r.id.startsWith('rev18-'));
+    expect(results).toHaveLength(REV18.length);
+    for (const result of results)
       expect(result, result.id).toMatchObject({ outcome: 'skipped', skipKind: 'capability' });
+    // The three that name no row kind or member are skipped for the advertisement alone.
+    for (const id of [
+      'rev18-no-agent-no-tightening-no-grants',
+      'rev18-simulate-as-a-service-principal',
+      'rev18-simulate-as-a-service-principal-own-policies',
+    ])
+      expect(results.find((r) => r.id === id), id).toMatchObject({
+        skipReason: 'the deployment does not advertise proposals',
+      });
   });
 });
 

@@ -4642,6 +4642,7 @@ export async function createMock(options: MockOptions = {}): Promise<Mock> {
         modeOnly: !broken('proposal_config_beyond_mode_accepted'),
         baselineModeOnly: !broken('proposal_baseline_config_beyond_mode_accepted'),
         grantsNeedPrincipal: !broken('proposal_grants_without_principal_accepted'),
+        roleKeyRules: !broken('proposal_role_everyone_accepted'),
         served: proposalsServed(),
       }) ??
       policyFormRefusal(proposal) ??

@@ -176,7 +176,8 @@ export const targetOf = (policy: Obj): string | undefined => {
  * have the same target tool and subject; a policy's `config` carries only `mode` and it has no `origin`
  * (`modeOnly: false` is the break that lets the rest through, `baselineModeOnly: false` the one that lets a baseline's
  * through; `grantsNeedPrincipal: false` the one that lets tool grants through when the agent names no principal,
- * though never when there is no agent). The first that breaks is `shape`.
+ * though never when there is no agent; `roleKeyRules: false` the one that lets a role row name `everyone`, or a key
+ * with whitespace around it). The first that breaks is `shape`.
  */
 export const ruleRefusal = (
   proposal: Proposal,
@@ -184,11 +185,13 @@ export const ruleRefusal = (
     modeOnly = true,
     baselineModeOnly = true,
     grantsNeedPrincipal = true,
+    roleKeyRules = true,
     served = { row_kinds: ROW_KINDS, members: PROPOSAL_MEMBERS },
   }: {
     readonly modeOnly?: boolean;
     readonly baselineModeOnly?: boolean;
     readonly grantsNeedPrincipal?: boolean;
+    readonly roleKeyRules?: boolean;
     readonly served?: ProposalsServed;
   } = {}
 ): Refusal | undefined => {
@@ -273,7 +276,9 @@ export const ruleRefusal = (
       role === 'baseline'
         ? subject.type === 'role' && subject.id === 'everyone'
         : role === 'role'
-          ? subject.type === 'role' && typeof subject.id === 'string' && isRoleRowKey(subject.id)
+          ? subject.type === 'role' &&
+            typeof subject.id === 'string' &&
+            (!roleKeyRules || isRoleRowKey(subject.id))
           : role === 'tightening'
             ? subject.type === 'agent' && subject.id === proposal.agent?.id
             : unreachable(role);

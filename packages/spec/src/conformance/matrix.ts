@@ -1277,6 +1277,12 @@ export const MATRIX: readonly Flip[] = [
     fails: ['rev18-tool-grant-unknown-tool'],
   },
   {
+    // Rev 18: a role row may name `everyone` (in any case or form), or a key with whitespace around it.
+    flip: 'proposal_role_everyone_accepted',
+    deployment: 'hosted',
+    fails: ['rev18-role-row-key-rules'],
+  },
+  {
     // Rev 18: the preview leaves out the role rows a policy of everyone shadows.
     flip: 'preview_ineffective_missing',
     deployment: 'hosted',
@@ -1305,7 +1311,10 @@ export const MATRIX: readonly Flip[] = [
     // Rev 18: a simulation as a service principal also matches role policies.
     flip: 'simulate_service_holds_roles',
     deployment: 'hosted',
-    fails: ['rev18-simulate-as-a-service-principal-own-policies'],
+    fails: [
+      'rev18-simulate-as-a-service-principal-own-policies',
+      'rev18-role-rows-applied-without-an-agent',
+    ],
   },
   {
     // Rev 18: the preview leaves out the tool grants.
