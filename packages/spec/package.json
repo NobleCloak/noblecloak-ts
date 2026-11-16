@@ -47,18 +47,18 @@
     "generate:fixtures": "bun src/cli/generate-fixtures.ts"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.8",
     "@noblecloak/client": "workspace:*",
     "@rocksolidknowledge/authzen-client": "1.0.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "hono": "4.13.14",
+    "hono": "4.13.18",
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@stoplight/spectral-core": "1.24.0",
-    "@stoplight/spectral-functions": "1.11.0",
+    "@stoplight/spectral-core": "1.24.1",
+    "@stoplight/spectral-functions": "1.11.1",
     "@stoplight/spectral-parsers": "1.0.5",
-    "@stoplight/spectral-rulesets": "1.23.0"
+    "@stoplight/spectral-rulesets": "1.23.1"
   }
 }
