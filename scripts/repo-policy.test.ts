@@ -48,6 +48,7 @@ interface Job {
   steps?: Step[];
 }
 interface Workflow {
+  on?: unknown;
   permissions?: Permissions;
   jobs: Record<string, Job>;
 }
@@ -835,6 +836,19 @@ describe('workflows', () => {
     if (action?.env?.GITHUB_TOKEN === '${{ github.token }}') {
       expect(releases).toContain('gh pr close <n> && gh pr reopen <n>');
     }
+  });
+
+  it('stranger-install runs at release time only: manifest pushes to main, the Version Packages pull request, dispatch', () => {
+    const workflow = loadWorkflow('stranger-install.yml');
+    const on = workflow.on as Record<string, { branches?: string[]; paths?: string[] } | null>;
+    expect(Object.keys(on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch']);
+    expect(on.push?.branches).toEqual(['main']);
+    expect(on.push?.paths).toEqual(
+      expect.arrayContaining(['package.json', '**/package.json', 'bun.lock'])
+    );
+    expect(workflow.jobs['stranger-install']?.if).toBe(
+      "github.event_name != 'pull_request' || github.head_ref == 'changeset-release/main'"
+    );
   });
 
   it('stranger-install runs with read-only permissions and every token emptied', () => {

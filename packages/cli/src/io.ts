@@ -17,6 +17,12 @@ export interface Io {
   /** How long one request may take before it is abandoned. Default 30 seconds. */
   readonly requestTimeoutMs?: number;
   /**
+   * The least time between two long polls of one approval: a poll that returns still pending sooner than
+   * this is followed by a pause for the rest of it, so a server that answers at once is not hammered.
+   * Default 1000.
+   */
+  readonly pollFloorMs?: number;
+  /**
    * Aborted when the user interrupts the command (Ctrl-C). Every request and the revoke prompt observe it;
    * the command then exits 3 after ending the session. */
   readonly signal: AbortSignal;

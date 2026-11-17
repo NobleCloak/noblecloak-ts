@@ -196,8 +196,9 @@ Messages never contain the key or an assertion, and never echo a credential sour
 ## Governance API
 
 `@noblecloak/client/governance-api` wraps the operations a governed runtime calls: `capabilities`, `jwks`,
-`createRun`, `decide`, `getApproval`, `waitApproval`, `listApprovals`, `stream`, `getResumption`, `consume`,
-`withdraw` and `appendRecord` (`createRun` and `appendRecord` take an idempotency key). Each returns the
+`createRun`, `decide`, `createApproval`, `createAgent`, `getApproval`, `waitApproval`, `listApprovals`, `stream`,
+`getResumption`, `consume`, `withdraw` and `appendRecord` (`createRun`, `createApproval`, `createAgent` and
+`appendRecord` take an idempotency key; on `createRun` and `appendRecord` it is required). Each returns the
 unwrapped `data` or a `Problem`, so a 4xx is a value you branch on, not an exception. The main entry does
 not import it.
 

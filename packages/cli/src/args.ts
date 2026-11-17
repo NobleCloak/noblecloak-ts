@@ -1,4 +1,4 @@
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { CliError, EXIT } from './errors.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,6 +33,23 @@ const OPTIONS = {
   revoke: { ...COMMON, org: { type: 'string' }, sp: { type: 'string' }, yes: { type: 'boolean' } },
 } as const;
 
+/** The flags of `noblecloak starter`. */
+const STARTER_OPTIONS = {
+  credentials: { type: 'string' },
+  agent: { type: 'string' },
+  'skip-setup': { type: 'boolean' },
+  wait: { type: 'string' },
+  deployment: { type: 'string' },
+  'auth-url': { type: 'string' },
+  'govern-url': { type: 'string' },
+  'mcp-url': { type: 'string' },
+  'gateway-audience': { type: 'string' },
+  'user-token-file': { type: 'string' },
+  'no-open': { type: 'boolean' },
+  json: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+} as const;
+
 export type SpCommand = keyof typeof OPTIONS;
 
 export function isSpCommand(value: string | undefined): value is SpCommand {
@@ -45,17 +62,25 @@ export type ParsedFlags = Readonly<
 >;
 
 export function parseCommandFlags(command: SpCommand, argv: readonly string[]): ParsedFlags {
+  return parseFlags(OPTIONS[command], argv);
+}
+
+export function parseStarterFlags(argv: readonly string[]): ParsedFlags {
+  return parseFlags(STARTER_OPTIONS, argv);
+}
+
+function parseFlags(options: ParseArgsConfig['options'], argv: readonly string[]): ParsedFlags {
   try {
     const { values, positionals } = parseArgs({
       args: [...argv],
-      options: OPTIONS[command],
+      options,
       allowPositionals: true,
       strict: true,
     });
     if (positionals.length > 0) {
       throw new CliError(EXIT.usage, `Unexpected argument "${positionals[0] ?? ''}".`);
     }
-    return values as ParsedFlags;
+    return values;
   } catch (error) {
     if (error instanceof CliError) throw error;
     throw new CliError(EXIT.usage, error instanceof Error ? error.message : 'Invalid arguments.');

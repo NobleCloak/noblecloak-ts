@@ -7,8 +7,9 @@
 #
 # Grouping follows the private template: one pull
 # request per ecosystem per week, so a weekly run costs at most three CI builds, not one build per
-# dependency. Every pull request here starts four workflows (ci, preview, stranger-install,
-# private-dep-guard), which is why a run per dependency was a CI storm.
+# dependency. Every pull request here starts three workflows (ci, preview, private-dep-guard;
+# stranger-install runs once after the merge, on the push to main), which is why a run per dependency
+# was a CI storm.
 #
 # Security updates are a separate Dependabot feature with no bun support: they arrive as
 # `npm_and_yarn` pull requests that edit package.json and cannot write bun.lock, so they always
