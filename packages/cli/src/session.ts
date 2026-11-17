@@ -18,10 +18,32 @@ interface Endpoints {
 const base64url = (bytes: Buffer): string => bytes.toString('base64url');
 
 /**
+ * What a sign-in asks for. `resource` is the audience the token is bound to (RFC 8707). `scope` is sent on
+ * the authorize request when set. `requiredScope` is a scope the authorization server's metadata must
+ * offer (when it lists `scopes_supported` at all), or the sign-in is refused before a browser opens.
+ */
+export interface SignInTarget {
+  readonly resource: string;
+  readonly scope: string | undefined;
+  readonly requiredScope: string | undefined;
+}
+
+/** The sign-in of the `sp` commands: the admin API's audience and its `service_principals:manage` scope. */
+export const adminTarget = (config: Config): SignInTarget => ({
+  resource: config.adminAudience,
+  scope: ADMIN_SCOPE,
+  requiredScope: ADMIN_SCOPE,
+});
+
+/**
  * Reads the authorization server metadata and checks that it names the configured issuer and offers what
  * the sign-in needs.
  */
-async function discover(config: Config, io: Io): Promise<Endpoints> {
+async function discover(
+  config: Pick<Config, 'authUrl'>,
+  io: Io,
+  requiredScope: string | undefined
+): Promise<Endpoints> {
   const url = `${config.authUrl}/.well-known/oauth-authorization-server`;
   let response: Response;
   // Built outside the try: a fault here is not a network failure.
@@ -63,10 +85,10 @@ async function discover(config: Config, io: Io): Promise<Endpoints> {
     );
   }
   const scopes = meta.scopes_supported;
-  if (Array.isArray(scopes) && !scopes.includes(ADMIN_SCOPE)) {
+  if (requiredScope !== undefined && Array.isArray(scopes) && !scopes.includes(requiredScope)) {
     throw new CliError(
       EXIT.failed,
-      `The deployment does not offer the ${ADMIN_SCOPE} scope: its admin API is not enabled.`
+      `The deployment does not offer the ${requiredScope} scope: its admin API is not enabled.`
     );
   }
   assertSecureUrl(authorization, 'The authorization endpoint');
@@ -167,7 +189,7 @@ interface Tokens {
 
 async function exchangeCode(
   io: Io,
-  config: Config,
+  resource: string,
   endpoints: Endpoints,
   form: { code: string; redirectUri: string; verifier: string }
 ): Promise<Tokens> {
@@ -179,7 +201,7 @@ async function exchangeCode(
     code_verifier: form.verifier,
     // RFC 8707 lets the request name the resource again. The audience is bound at /authorize; a
     // server that ignores the parameter here still issues the same token.
-    resource: config.adminAudience,
+    resource,
   });
   let response: Response;
   const signal = requestSignal(io);
@@ -255,8 +277,13 @@ interface Session {
   end(): Promise<void>;
 }
 
-async function interactiveSignIn(io: Io, config: Config, open: boolean): Promise<Session> {
-  const endpoints = await discover(config, io);
+async function interactiveSignIn(
+  io: Io,
+  config: Pick<Config, 'authUrl'>,
+  target: SignInTarget,
+  open: boolean
+): Promise<Session> {
+  const endpoints = await discover(config, io, target.requiredScope);
   const verifier = base64url(randomBytes(48));
   const challenge = base64url(createHash('sha256').update(verifier).digest());
   const state = base64url(randomBytes(24));
@@ -271,8 +298,8 @@ async function interactiveSignIn(io: Io, config: Config, open: boolean): Promise
     authorize.searchParams.set('code_challenge', challenge);
     authorize.searchParams.set('code_challenge_method', 'S256');
     authorize.searchParams.set('state', state);
-    authorize.searchParams.set('resource', config.adminAudience);
-    authorize.searchParams.set('scope', ADMIN_SCOPE);
+    authorize.searchParams.set('resource', target.resource);
+    if (target.scope !== undefined) authorize.searchParams.set('scope', target.scope);
     io.stderr(`Sign in to continue. Open this URL in your browser:\n${authorize.href}\n`);
     if (open) {
       try {
@@ -282,7 +309,11 @@ async function interactiveSignIn(io: Io, config: Config, open: boolean): Promise
       }
     }
   });
-  const tokens = await exchangeCode(io, config, endpoints, { code, redirectUri, verifier });
+  const tokens = await exchangeCode(io, target.resource, endpoints, {
+    code,
+    redirectUri,
+    verifier,
+  });
   const refresh = tokens.refreshToken;
   const end = async (): Promise<void> => {
     if (refresh !== undefined) await revokeRefreshToken(io, endpoints, refresh);
@@ -331,22 +362,34 @@ export interface SessionOptions {
 }
 
 /**
- * Signs in (or reads the token file), runs `use` with the access token, then ends the session: the
- * refresh token is revoked whether `use` returned or threw. The session is never written to disk.
+ * Signs in for `target` (or reads the token file), runs `use` with the access token, then ends the
+ * session: the refresh token is revoked whether `use` returned or threw. The session is never written to
+ * disk.
  */
-export async function withSession<T>(
+export async function withTargetSession<T>(
   io: Io,
-  config: Config,
+  config: Pick<Config, 'authUrl'>,
+  target: SignInTarget,
   options: SessionOptions,
   use: (accessToken: string) => Promise<T>
 ): Promise<T> {
   const session =
     options.userTokenFile === undefined
-      ? await interactiveSignIn(io, config, options.open)
+      ? await interactiveSignIn(io, config, target, options.open)
       : await tokenFromFile(io, options.userTokenFile);
   try {
     return await use(session.accessToken);
   } finally {
     await session.end();
   }
+}
+
+/** {@link withTargetSession} for the admin API: the sign-in of the `sp` commands. */
+export function withSession<T>(
+  io: Io,
+  config: Config,
+  options: SessionOptions,
+  use: (accessToken: string) => Promise<T>
+): Promise<T> {
+  return withTargetSession(io, config, adminTarget(config), options, use);
 }

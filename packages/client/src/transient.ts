@@ -5,6 +5,10 @@ export interface Problem {
   readonly status: number;
   readonly code: string;
   readonly detail?: string;
+  /** The body's `reason` member when it has one: on `service_unavailable` the cause (`eligibility_lookup`). */
+  readonly reason?: string;
+  /** The body's `code` member when it has one: on `proposal_refused` why (`principal_bound`, `policy_conflict`, ...). Not `code`, which is the problem type. */
+  readonly refusalCode?: string;
 }
 
 export type Answer<T> =

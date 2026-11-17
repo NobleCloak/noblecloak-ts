@@ -4,7 +4,7 @@ The `noblecloak` command line. An organisation administrator uses it to create, 
 organisation's **service principals**, and to write the credential file an agent loads.
 
 - **Install**, **Configuration**
-- **Commands**: `sp create`, `sp list`, `sp rotate`, `sp revoke`
+- **Commands**: `sp create`, `sp list`, `sp rotate`, `sp revoke`, `starter`
 - **The credential file**, **Sign-in**, **Exit codes**, **Security notes**
 
 ## Install
@@ -14,12 +14,13 @@ npm install --global @noblecloak/cli   # needs Node 20.3 or later
 noblecloak --help
 ```
 
-Or run it without installing: `npx @noblecloak/cli sp list --org <uuid>`.
+Or run it without installing: `npx @noblecloak/cli sp list --org <uuid>`, or the starter agent,
+`npx @noblecloak/cli starter` (see [`noblecloak starter`](#noblecloak-starter)).
 
 ## Configuration
 
-The command has no built-in defaults. You give it the deployment, with a flag or an environment variable
-(the flag wins):
+The `sp` commands have no built-in defaults (`starter` has: see below). You give them the deployment, with a flag
+or an environment variable (the flag wins):
 
 | Flag                       | Variable                    | Meaning                                                                                                |
 | -------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -104,6 +105,54 @@ unless you pass `--yes`. After a revoke the principal's next token request fails
 holds works until it expires, at most 15 minutes. The command does not delete any local file: delete the
 credential file yourself.
 
+### `noblecloak starter`
+
+A starter agent that needs no model and no key but a service principal's. It does two things, and a person decides
+both in Approvals: it proposes the setup of an agent, then it makes one write to the sandbox.
+
+```sh
+noblecloak sp create --org <uuid> --name "starter" \
+  --audience https://govern.noblecloak.com --audience https://mcp-agents.noblecloak.com \
+  --out ./sp-credential.json
+npx @noblecloak/cli starter --credentials ./sp-credential.json
+```
+
+1. **Credential check.** It reads the credential and gets a token for each of the two audiences before anything
+   is opened, so a principal that lacks one fails at once (exit code 11) and not while you wait on an approval.
+   The principal needs the govern origin (for `/v1`) and the gateway audience (for the MCP gateway), so
+   create it with both `--audience` flags, as above.
+2. **Setup, as you.** It signs you in (loopback sign-in as above, for the govern audience; it needs no
+   administrator scope), declares an agent named "NobleCloak starter" (or uses `--agent`), and opens one
+   `propose-policy-set` approval: the agent is bound to the service principal, granted the sandbox's
+   `tool:sandbox:create-note`, and given an `ask` policy for it. **Approve it in Approvals.** The command waits.
+3. **Write, as the principal.** It opens an external run and an approval for one `tool:sandbox:create-note` call
+   with its exact arguments, and waits. **Approve or deny it in Approvals.** Only if you approve does it send one
+   MCP `tools/call` (`int_sandbox_create_note`) to the gateway, with the run named in `x-noblecloak-external-run-id`.
+   An approval admits one call: the command never repeats it.
+
+The two approvals are decided by a person with the Approvals module, never with the token that opened them.
+
+| Flag                         | Variable                      | Meaning                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--credentials <path>`       | `NOBLECLOAK_SP_CREDENTIALS`   | The credential file `sp create` wrote (or its JSON). Exit code 10 without one.                                                                                                                                                                                                                                                   |
+| `--deployment <name>`        | `NOBLECLOAK_DEPLOYMENT`       | `production` (default) or `beta`: the defaults for the four hosts below.                                                                                                                                                                                                                                                         |
+| `--auth-url <url>`           | `NOBLECLOAK_AUTH_URL`         | The authorization server where you sign in. Production `https://auth.noblecloak.com`, beta `https://api.beta.shared.bianoble.com`.                                                                                                                                                                                               |
+| `--govern-url <url>`         | `NOBLECLOAK_GOVERN_URL`       | The governance API origin, and the audience of your token and the principal's. Production `https://govern.noblecloak.com`.                                                                                                                                                                                                       |
+| `--mcp-url <url>`            | `NOBLECLOAK_MCP_URL`          | The MCP gateway origin; the call goes to `<url>/v1/mcp`. Production `https://mcp.noblecloak.com`.                                                                                                                                                                                                                                |
+| `--gateway-audience <value>` | `NOBLECLOAK_GATEWAY_AUDIENCE` | The audience of the principal's gateway token (an identifier, not an address). Production `https://mcp-agents.noblecloak.com`.                                                                                                                                                                                                   |
+| `--agent <id>`               |                               | Use this agent instead of declaring one, to retry a setup that was not applied. A setup already applied for it is refused (`policy_conflict`): use `--skip-setup`.                                                                                                                                                               |
+| `--skip-setup`               |                               | Make the write only, after a setup you already approved. Takes neither `--agent` nor `--user-token-file`.                                                                                                                                                                                                                        |
+| `--wait <seconds>`           |                               | How long to wait for each approval, 1 to 3600. Default 600. The setup wait is cut to 840 seconds, because a freshly issued access token lasts 15 minutes (an older `--user-token-file` token may expire sooner); a setup approved after that is followed by `--skip-setup`. A setup or write still open stays open in Approvals. |
+| `--user-token-file <path>`   |                               | A govern-audience access token (mode 600) for the setup, instead of signing in.                                                                                                                                                                                                                                                  |
+| `--no-open`, `--json`        |                               | As for the `sp` commands. `--json` prints `agent_id`, `setup_approval_id`, `run_id`, `write_approval_id`, `outcome` and `result`.                                                                                                                                                                                                |
+
+A host is taken from its flag, then its variable, then the `--deployment` default. An explicit `--deployment` flag ignores the host variables (`NOBLECLOAK_AUTH_URL` and the rest), so one left over from the `sp` commands cannot mix two deployments; `NOBLECLOAK_DEPLOYMENT` does not. To run against beta, create
+the principal there with `--audience https://govern.beta.shared.bianoble.com --audience
+https://mcp-agents.beta.shared.bianoble.com`, then pass `--deployment beta`.
+
+Running it twice: the setup binds the principal to one agent and publishes that agent's policy, so it is
+applied once. After you approved it, run `starter --skip-setup` for another write, with the same credential.
+
 ## The credential file
 
 `sp create` writes one self-contained JSON file, mode 0600:
@@ -140,7 +189,7 @@ hand the file to a CI system, store its text as a secret and set `NOBLECLOAK_SP_
 
 ## Sign-in
 
-Each command signs you in and ends the session when it finishes. It uses the `noblecloak-cli` public client
+Each command that needs you (all but `starter --skip-setup`) signs you in and ends the session when it finishes. It uses the `noblecloak-cli` public client
 with OAuth 2.1 authorization code and PKCE (S256) on a loopback address:
 
 1. It reads the deployment's authorization server metadata, and stops (exit code 1) unless the metadata's
@@ -162,19 +211,31 @@ or whose connection drops gets the same answer, with exit code 1: the server may
 `create` and `rotate` the message also says what to look for in `sp list`). For those three requests, "Cannot reach
 the server" means the connection was refused or the host name did not resolve, so the request was not sent.
 
-For provisioning scripts, `--user-token-file <path>` reads an admin access token from a file instead. The file
+For provisioning scripts, `--user-token-file <path>` reads an admin access token from a file instead (for `starter` it is a govern-audience token, as above). The file
 must not be readable by its group or by others (`chmod 600`); the command refuses it otherwise. A symlink is followed and the target's mode is the one checked. Treat this as a
 stopgap for scripts: the token is short-lived and you have to obtain it yourself.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                    |
-| ---- | ---------------------------------------------------------------------------------------------------------- |
-| 0    | Done.                                                                                                      |
-| 1    | A server or unexpected error. The server's `error.code` and `error.message` are shown.                     |
-| 2    | Input refused: a bad flag, missing configuration, an existing `--out`, an unsafe token file.               |
-| 3    | Not signed in: sign-in failed, timed out or was cancelled, the server answered 401, or you pressed Ctrl-C. |
-| 4    | Forbidden: you are not an administrator of that organisation.                                              |
+| Code | Meaning                                                                                                                                                                           |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Done.                                                                                                                                                                             |
+| 1    | A server or unexpected error. The server's `error.code` and `error.message` are shown. A wait for an approval that the network or a 5xx cuts is repeated until `--wait` is out.   |
+| 2    | Input refused: a bad flag, missing configuration, an existing `--out`, an unsafe token file.                                                                                      |
+| 3    | Not signed in: sign-in failed, timed out or was cancelled, the server answered 401, or you pressed Ctrl-C.                                                                        |
+| 4    | Forbidden (403): for `sp`, you are not an administrator of that organisation; for `starter`, the person or principal is not allowed that call (for example not an administrator). |
+
+`starter` adds:
+
+| Code | Meaning                                                                                                                                                                                                                                      |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 10   | No service-principal credential was given.                                                                                                                                                                                                   |
+| 11   | The principal may not ask for a token for the govern origin or the gateway audience, or its credential is for the other deployment (pass `--deployment`).                                                                                    |
+| 12   | The sandbox is not available: the deployment has no sandbox write tool to grant (the setup was refused as `target_unknown`), or cannot route an approval for it.                                                                             |
+| 13   | The setup was denied or withdrawn, or the deployment refused to apply it; or the principal is already bound (run with `--skip-setup`); or, with `--skip-setup`, the principal was never granted the write tool (run without `--skip-setup`). |
+| 14   | The write was denied or withdrawn, the gateway refused it, or the deployment will not reopen a write it refused moments ago. Nothing was written.                                                                                            |
+| 15   | Nobody decided an approval within `--wait` seconds, or it expired. An expired approval is gone; an undecided one stays open in Approvals until it expires.                                                                                   |
+| 16   | The approval for the write was already used by an earlier call.                                                                                                                                                                              |
 
 Text goes to stdout, diagnostics and the sign-in URL to stderr. With `--json` stdout carries exactly one JSON
 object when the command succeeds.
