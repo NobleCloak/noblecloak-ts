@@ -31,8 +31,8 @@
  * preflight reset, `h2 { ... }`, `div { ... }`) do not reach them. One class and a zero-specificity list: every
  * module rule below (two classes) and every primitive rule (`.nc-root .nc-ui`) still wins over it. Only the
  * module's own markup is reset: an element with no class, a theme primitive (`nc-ui`), or an element with an
- * `nc-` class other than the ones the modules pass to a replaceable component (`nc-detail` to Card, `nc-error` to
- * Alert, `nc-tabs` to Tabs, `nc-row` and `nc-toggle` to Button). So a builder's replacement that renders its own
+ * `nc-` class other than the ones the modules pass to a replaceable component (`nc-detail` and `nc-proposal` to Card,
+ * `nc-error` to Alert, `nc-tabs` to Tabs, `nc-row` and `nc-toggle` to Button). So a builder's replacement that renders its own
  * classes, alone or merged with the class the module passes (`cn('my-card', className)`), keeps the builder's
  * rules, whichever stylesheet loads last and in a cascade layer too; an element it renders with no class at all
  * is reset like the module's own. `src/styles-reset.test.ts` fails on a class passed to a replaceable component
@@ -75,7 +75,14 @@
   ):where(
     :not([class]),
     .nc-ui,
-    :is([class^='nc-'], [class*=' nc-']):not(.nc-detail, .nc-error, .nc-tabs, .nc-row, .nc-toggle)
+    :is([class^='nc-'], [class*=' nc-']):not(
+      .nc-detail,
+      .nc-error,
+      .nc-proposal,
+      .nc-tabs,
+      .nc-row,
+      .nc-toggle
+    )
   ) {
   all: revert;
 }
@@ -106,6 +113,20 @@
     grid-column: 1;
     grid-row: auto;
   }
+}
+
+.nc-root .nc-proposal {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+}
+
+.nc-root .nc-proposal ul {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+}
+
+.nc-root .nc-proposal li {
+  overflow-wrap: anywhere;
 }
 
 .nc-root .nc-muted {

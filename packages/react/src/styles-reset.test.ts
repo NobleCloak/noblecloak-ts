@@ -28,7 +28,7 @@ function resetElements(css: string): Set<string> {
 /** The classes the reset leaves out: the `.nc-*` names in its `:not(...)` list. */
 function resetExclusions(css: string): Set<string> {
   const rule = /:where\(([^{]*)\{\s*all:\s*revert;/.exec(css);
-  const list = rule?.[1] === undefined ? undefined : /:not\((\.nc-[^)]*)\)/.exec(rule[1]);
+  const list = rule?.[1] === undefined ? undefined : /:not\(\s*(\.nc-[^)]*)\)/.exec(rule[1]);
   if (list?.[1] === undefined)
     throw new Error('the `all: revert` reset has no `:not(.nc-...)` list');
   return new Set(list[1].split(',').map((name) => name.trim().replace(/^\./, '')));
@@ -84,7 +84,14 @@ describe('the plain-element reset', () => {
       if (!name.endsWith('.tsx') || name.includes('.test.')) continue;
       for (const cls of slotClasses(readFileSync(join(COMPONENTS, name), 'utf8'))) passed.add(cls);
     }
-    expect([...passed].sort()).toEqual(['nc-detail', 'nc-error', 'nc-row', 'nc-tabs', 'nc-toggle']);
+    expect([...passed].sort()).toEqual([
+      'nc-detail',
+      'nc-error',
+      'nc-proposal',
+      'nc-row',
+      'nc-tabs',
+      'nc-toggle',
+    ]);
     expect([...passed].filter((cls) => !excluded.has(cls)).sort()).toEqual([]);
   });
 
@@ -97,6 +104,12 @@ describe('the plain-element reset', () => {
     expect(() => slotClasses('<Alert className={cls} />')).toThrow(/unreadable/);
     expect(
       resetExclusions('.nc-root :where(div):where(:is(.x):not(.nc-a, .nc-b)) { all: revert; }')
+    ).toEqual(new Set(['nc-a', 'nc-b']));
+    // A formatter may break a long list over lines.
+    expect(
+      resetExclusions(
+        '.nc-root :where(div):where(:is(.x):not(\n  .nc-a,\n  .nc-b\n)) { all: revert; }'
+      )
     ).toEqual(new Set(['nc-a', 'nc-b']));
   });
 
