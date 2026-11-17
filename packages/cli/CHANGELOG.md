@@ -1,5 +1,14 @@
 # @noblecloak/cli
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies [20a6b38]
+- Updated dependencies [da6bdc6]
+- Updated dependencies [2276872]
+  - @noblecloak/client@0.13.0
+
 ## 0.1.3
 
 ### Patch Changes

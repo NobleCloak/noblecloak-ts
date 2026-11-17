@@ -70,14 +70,14 @@
     },
     "packages/cards": {
       "name": "@noblecloak/cards",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "dependencies": {
         "@noblecloak/client": "workspace:*",
       },
     },
     "packages/cli": {
       "name": "@noblecloak/cli",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "bin": {
         "noblecloak": "./dist/noblecloak.js",
       },
@@ -87,7 +87,7 @@
     },
     "packages/client": {
       "name": "@noblecloak/client",
-      "version": "0.12.0",
+      "version": "0.13.0",
       "dependencies": {
         "canonicalize": "5.1.0",
         "openapi-fetch": "0.17.0",
@@ -99,7 +99,7 @@
     },
     "packages/policy-formats": {
       "name": "@noblecloak/policy-formats",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@noblecloak/client": "workspace:*",
         "canonicalize": "5.1.0",
@@ -118,7 +118,7 @@
     },
     "packages/react": {
       "name": "@noblecloak/react",
-      "version": "0.8.5",
+      "version": "0.9.0",
       "dependencies": {
         "@noblecloak/client": "workspace:*",
         "@noblecloak/theme": "workspace:*",
@@ -146,7 +146,7 @@
     },
     "packages/spec": {
       "name": "@noblecloak/spec",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "bin": {
         "nc-conform": "./dist/cli/nc-conform.js",
         "nc-mock": "./dist/cli/nc-mock.js",
