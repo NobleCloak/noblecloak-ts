@@ -614,7 +614,7 @@ describe('release to GitHub Packages', () => {
 
   // A public package (not `private`, so it is packed and scanned) that no publish allowlist names yet.
   // Adding a name here is a decision to hold the package back; removing it needs the allowlist entry.
-  const HELD_BACK = ['@noblecloak/cards'];
+  const HELD_BACK = ['@noblecloak/cards', '@noblecloak/setup-steps'];
 
   it('allowlists exactly the public packages, except those held back', () => {
     const publicNames = listPublicPackages(resolve(import.meta.dirname, '..')).map((p) => p.name);
