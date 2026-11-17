@@ -105,7 +105,14 @@ describe('PolicySetProposal (rev 18)', () => {
     const text = flat(schemas.PolicySetProposal?.description);
     expect(text).toContain('`tool_grants` is present only when `agent.principal_id` is');
     expect(text).toContain(
-      '`target_unknown` also for a reference of `tool_grants` that is no tool the organisation owns (`owner_kind` `org`: a tool a principal owns is refused as unknown'
+      '`target_unknown` also for a reference of `tool_grants` that is no grantable tool (see Tool grants below: a tool a principal owns is refused as unknown'
+    );
+    // Rev 18 errata: a grant may also name a tool the deployment itself provides (a built-in integration).
+    expect(text).toContain(
+      'A grant may name a tool the organisation owns (`owner_kind` `org`), or a tool the deployment itself provides to the organisation without registering it through `POST /v1/tools`'
+    );
+    expect(text).toContain(
+      'one it does not is refused `target_unknown`, as a tool a principal owns is'
     );
     expect(text).toContain('The visibility rule of `GET /v1/tools` (`Owner`) is unchanged');
   });
