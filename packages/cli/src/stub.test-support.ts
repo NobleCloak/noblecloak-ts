@@ -49,6 +49,18 @@ export interface Stub {
   scopesSupported: string[] | undefined;
   /** Status the token endpoint answers a code exchange with. */
   tokenStatus: number;
+  /**
+   * When set, the client_credentials grant refuses (400 invalid_target) a `resource` not in this list, and
+   * issues the token `sp-access|<resource>` instead of `sp-access`.
+   */
+  spAudiences: string[] | undefined;
+  /**
+   * Answers a request before the stub routes it: return true after writing the response. The starter's
+   * `/v1` and MCP routes live here (starter.test-support.ts).
+   */
+  custom:
+    | ((req: IncomingMessage, res: ServerResponse, request: Recorded) => boolean | Promise<boolean>)
+    | undefined;
   /** Public JWKs registered through create or rotate, newest last. */
   readonly registered: JsonWebKey[];
   /** The PKCE verifier the command sent at the token endpoint. */
@@ -132,6 +144,8 @@ export async function startStub(): Promise<Stub> {
     issuer: undefined,
     scopesSupported: ['module_api', 'service_principals:manage'],
     tokenStatus: 200,
+    spAudiences: undefined,
+    custom: undefined,
     registered,
     verifier: undefined,
     challenge: undefined,
@@ -164,13 +178,15 @@ export async function startStub(): Promise<Stub> {
         type.startsWith('application/json') && text !== ''
           ? (JSON.parse(text) as Record<string, unknown>)
           : undefined;
-      requests.push({
+      const recorded: Recorded = {
         method: req.method ?? 'GET',
         path,
         authorization: req.headers.authorization,
         form,
         json,
-      });
+      };
+      requests.push(recorded);
+      if (stub.custom !== undefined && (await stub.custom(req, res, recorded))) return;
 
       const hang = (key: string): boolean => {
         const onArrival = stub.hangs.get(key);
@@ -200,7 +216,16 @@ export async function startStub(): Promise<Stub> {
             send(res, 401, { error: 'invalid_client' });
             return;
           }
-          send(res, 200, { access_token: 'sp-access', token_type: 'Bearer', expires_in: 600 });
+          const resource = form.get('resource') ?? '';
+          if (stub.spAudiences !== undefined && !stub.spAudiences.includes(resource)) {
+            send(res, 400, { error: 'invalid_target' });
+            return;
+          }
+          send(res, 200, {
+            access_token: stub.spAudiences === undefined ? 'sp-access' : `sp-access|${resource}`,
+            token_type: 'Bearer',
+            expires_in: 600,
+          });
           return;
         }
         if (hang('POST token')) return;
