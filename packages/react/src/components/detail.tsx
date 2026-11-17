@@ -6,14 +6,17 @@ import type {
   ApprovalSummary,
   ApprovalsController,
 } from '../approvals-types.js';
+import { malformed } from '../approvals-errors.js';
+import { readProposal } from '../approvals-proposal.js';
 import { requirementsOf } from '../approvals-requirements.js';
 import type { ApprovalRequirementView } from '../approvals-requirements.js';
 import { Actions } from './actions.js';
 import { CallView, callIsWhole, formatCall } from './call-view.js';
-import { ErrorMessage } from './error-message.js';
+import { ErrorMessage, errorText } from './error-message.js';
 import { clipText, formatTime } from './format.js';
 import type { Translate } from './labels.js';
 import { escapeInvisible } from './format-json.js';
+import { ProposalSection } from './proposal.js';
 import { Safe } from './safe.js';
 import { useNc } from './slots.js';
 import { levelWord, obligationWord, principalText } from './words.js';
@@ -325,6 +328,20 @@ export function Detail({
     () => formatCall(detailArguments, showAll, t, argumentsSource),
     [detailArguments, argumentsSource, showAll, t]
   );
+  // Whether the call could be shown whole at all (Show all pressed): a cut first view does not make the summary
+  // disagree with the call, but a repeated key, a too-large or an inexact call does, whatever is pressed.
+  const callCanBeWhole = useMemo(
+    () => callIsWhole(showAll ? shown : formatCall(detailArguments, true, t, argumentsSource)),
+    [detailArguments, argumentsSource, showAll, shown, t]
+  );
+  // A policy-set proposal is read from the call and the preview the single read served; any other approval is not.
+  const proposal = useMemo(
+    () =>
+      approval === undefined
+        ? undefined
+        : readProposal(approval.tool_ref, detailArguments, approval.preview),
+    [approval, detailArguments]
+  );
   // The digest the person has been looking at. A later digest means the request changed under them: they are
   // told, and Approve and Deny stay off until they acknowledge it, so no decision rides on a glance at the old one.
   const [reviewedDigest, setReviewedDigest] = useState<string | undefined>(undefined);
@@ -433,6 +450,16 @@ export function Detail({
           ) : null}
           <Facts approval={detail.approval} t={t} />
           {resolved ? <Outcome approval={detail.approval} t={t} /> : null}
+          {proposal?.status === 'ok' && callCanBeWhole ? (
+            <ProposalSection proposal={proposal.proposal} t={t} />
+          ) : null}
+          {proposal?.status === 'ok' && !callCanBeWhole ? <p>{t('proposalCallNotWhole')}</p> : null}
+          {proposal?.status === 'unreadable' ? (
+            <Alert variant="danger" role="alert" className="nc-error">
+              <p>{errorText(malformed(200, 'a policy set'), t)}</p>
+              <p>{t('proposalUnreadable')}</p>
+            </Alert>
+          ) : null}
           <CallView
             arguments={detail.arguments}
             shown={shown}

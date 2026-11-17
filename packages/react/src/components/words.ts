@@ -15,7 +15,8 @@ const OBLIGATION: Readonly<Record<Approval['obligation_kind'], ApprovalsLabelKey
   spending: 'obligationSpending',
 };
 
-function lookup<K extends string>(
+/** A table lookup that never reads an inherited member; a value the table does not know is shown as it came. */
+export function lookup<K extends string>(
   table: Readonly<Record<K, ApprovalsLabelKey>>,
   value: string,
   t: Translate

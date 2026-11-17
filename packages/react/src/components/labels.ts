@@ -125,6 +125,44 @@ export const DEFAULT_LABELS = {
     'This call names the key "{key}" more than once, so the text below may differ from what is sent. It cannot be approved or denied here.',
   callTooLarge: 'This call is too large to display, so it cannot be approved or denied here.',
 
+  // A policy-set proposal (`tool:noblecloak:propose-policy-set`)
+  proposalHeading: 'What approving this does',
+  proposalPoliciesHeading: 'Policies',
+  proposalSubjectEveryone: 'Everyone',
+  proposalSubjectRole: 'Role {key}',
+  proposalSubjectAgent: 'Agent {id}',
+  proposalSubjectOrganization: 'The organisation',
+  proposalSubjectOther: '{type} {id}',
+  proposalAllTools: 'Every tool',
+  proposalToolOnServer: '{tool} on {server}',
+  proposalRow: '{tool}: {mode} ({kind})',
+  proposalModeAlwaysAllow: 'Allowed',
+  proposalModeAsk: 'Ask first',
+  proposalModeEscalate: 'Escalate to approvers',
+  proposalModeDeny: 'Denied',
+  proposalModeNotGranted: 'Not granted',
+  proposalKindBaseline: 'baseline',
+  proposalKindTightening: 'tightening',
+  proposalKindRole: 'role row',
+  proposalChangesHeading: 'What changes',
+  proposalChange: '{subject} on {tool}: {from} → {to}',
+  proposalLoosensNothing: 'Approving loosens no policy.',
+  proposalIneffectiveHeading: 'Has no effect',
+  proposalIneffective: '{subject} on {tool}: a tighter policy for everyone already applies.',
+  proposalGrantsHeading: 'Tools granted',
+  proposalGrantsFor: 'For {agent}',
+  proposalToolsHeading: 'New tools to register',
+  proposalTool: '{tool} ({level} level)',
+  proposalToolNoLevel: '{tool}',
+  proposalAgentHeading: 'Agent',
+  proposalAgentBound: '{agent} is bound to service principal {principal}.',
+  proposalAgentKept: '{agent} keeps its current binding.',
+  proposalUnreadable:
+    'This request could not be read as a policy set, so only the full call is shown.',
+
+  proposalCallNotWhole:
+    'The call below cannot be shown whole, so this page does not summarise it. Read the call itself.',
+
   // Times
   timeUtc: '{time} UTC',
 
