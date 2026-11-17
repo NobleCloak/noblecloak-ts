@@ -19,6 +19,10 @@ export type Approval = Schemas['Approval'];
 export type Resumption = Schemas['Resumption'];
 export type RecordCreate = Schemas['RecordCreate'];
 export type ContinuationBody = Schemas['Continuation'];
+export type CreateApprovalRequest = Schemas['CreateApprovalRequest'];
+export type ApprovalHandle = Schemas['ApprovalHandle'];
+export type PolicySetProposal = Schemas['PolicySetProposal'];
+export type Agent = Schemas['Agent'];
 
 export interface ApiOptions {
   readonly baseUrl: string;
@@ -48,10 +52,14 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 function problemOf(status: number, error: unknown): Problem {
   const type = isObject(error) && typeof error.type === 'string' ? error.type : '';
   const detail = isObject(error) && typeof error.detail === 'string' ? error.detail : undefined;
+  const reason = isObject(error) && typeof error.reason === 'string' ? error.reason : undefined;
+  const refusalCode = isObject(error) && typeof error.code === 'string' ? error.code : undefined;
   return {
     status,
     code: type.slice(type.lastIndexOf('/') + 1),
     ...(detail === undefined ? {} : { detail }),
+    ...(reason === undefined ? {} : { reason }),
+    ...(refusalCode === undefined ? {} : { refusalCode }),
   };
 }
 
@@ -141,6 +149,40 @@ export class GovernanceApi {
     return this.#call(
       () => this.#client.POST('/v1/decisions', { body }),
       (data) => data as Decision
+    );
+  }
+
+  /**
+   * Opens an approval for an action (`POST /v1/approvals`): the data is the handle, `created` telling a new
+   * obligation from an open one the same call already had. The idempotency key is optional.
+   */
+  createApproval(
+    body: CreateApprovalRequest,
+    idempotencyKey?: string
+  ): Promise<Answer<ApprovalHandle>> {
+    return this.#call(
+      () =>
+        this.#client.POST('/v1/approvals', {
+          body,
+          ...(idempotencyKey === undefined
+            ? {}
+            : { params: { header: { 'Idempotency-Key': idempotencyKey } } }),
+        }),
+      (data) => data as ApprovalHandle
+    );
+  }
+
+  /** Declares an agent of the organisation (`POST /v1/agents`). The idempotency key is optional. */
+  createAgent(name: string, idempotencyKey?: string): Promise<Answer<Agent>> {
+    return this.#call(
+      () =>
+        this.#client.POST('/v1/agents', {
+          body: { name },
+          ...(idempotencyKey === undefined
+            ? {}
+            : { params: { header: { 'Idempotency-Key': idempotencyKey } } }),
+        }),
+      (data) => data as Agent
     );
   }
 

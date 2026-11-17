@@ -19,6 +19,8 @@ export interface HarnessOptions {
   /** The interrupt signal. Default: one that is never aborted, as the bin always passes a signal. */
   signal?: AbortSignal;
   requestTimeoutMs?: number;
+  /** The least time between two polls of one approval; default 0, so a test never sleeps. */
+  pollFloorMs?: number;
   /** Called when the revoke prompt is shown; the prompt then never answers (the user is thinking). */
   onPrompt?: () => void;
   platform?: NodeJS.Platform;
@@ -110,6 +112,7 @@ export async function run(
       }
       return Promise.resolve(answers.shift() ?? '');
     },
+    pollFloorMs: options.pollFloorMs ?? 0,
     platform: options.platform ?? 'linux',
     signInTimeoutMs: options.signInTimeoutMs ?? 5_000,
     ...(options.requestTimeoutMs === undefined

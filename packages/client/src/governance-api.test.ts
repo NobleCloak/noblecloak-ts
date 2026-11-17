@@ -92,6 +92,63 @@ describe('GovernanceApi requests', () => {
   });
 });
 
+describe('GovernanceApi createApproval and createAgent', () => {
+  const request = {
+    action: { tool_ref: 'tool:x', arguments: { q: 1 } },
+    continuation: { kind: 'mcp_held', delivery: 'held' },
+    run_id: 'run-1',
+  } as const;
+
+  it('createApproval posts the body to /v1/approvals and returns the handle, with the key only when given', async () => {
+    const { api, seen } = harness(() => ok({ id: 'ap1', state: 'pending', created: true }));
+    expect(await api.createApproval(request, 'key-3')).toEqual({
+      ok: true,
+      data: { id: 'ap1', state: 'pending', created: true },
+    });
+    await api.createApproval(request);
+    expect(seen.map((s) => `${s.method} ${s.url.pathname}`)).toEqual([
+      'POST /v1/approvals',
+      'POST /v1/approvals',
+    ]);
+    expect(seen[0]?.body).toEqual(request);
+    expect(seen[0]?.headers.get('idempotency-key')).toBe('key-3');
+    expect(seen[1]?.headers.has('idempotency-key')).toBe(false);
+    expect(seen[0]?.headers.get('authorization')).toBe('Bearer tok');
+  });
+
+  it('createApproval returns a refusal as a Problem and a 5xx as unreachable', async () => {
+    const refused = harness(() =>
+      problem(422, 'approval_unroutable', 'the deployment cannot route it')
+    );
+    expect(await refused.api.createApproval(request)).toEqual({
+      ok: false,
+      problem: {
+        status: 422,
+        code: 'approval_unroutable',
+        detail: 'the deployment cannot route it',
+      },
+    });
+    const down = harness(() => status(503));
+    await expect(down.api.createApproval(request)).rejects.toMatchObject({ code: 'unreachable' });
+  });
+
+  it('createAgent posts the name to /v1/agents and returns the agent, with the key only when given', async () => {
+    const { api, seen } = harness(() => ok({ id: 'agent_1', name: 'n' }));
+    expect(await api.createAgent('n', 'key-4')).toEqual({
+      ok: true,
+      data: { id: 'agent_1', name: 'n' },
+    });
+    await api.createAgent('n');
+    expect(seen.map((s) => `${s.method} ${s.url.pathname}`)).toEqual([
+      'POST /v1/agents',
+      'POST /v1/agents',
+    ]);
+    expect(seen[0]?.body).toEqual({ name: 'n' });
+    expect(seen[0]?.headers.get('idempotency-key')).toBe('key-4');
+    expect(seen[1]?.headers.has('idempotency-key')).toBe(false);
+  });
+});
+
 describe('GovernanceApi answers', () => {
   it('unwraps data from the envelope', async () => {
     const { api } = harness(() => ok({ id: 'a1', state: 'pending' }));
@@ -103,6 +160,27 @@ describe('GovernanceApi answers', () => {
     expect(await api.getApproval('a1')).toEqual({
       ok: false,
       problem: { status: 409, code: 'consume-conflict', detail: 'already consumed' },
+    });
+  });
+
+  it("returns the body's `code` member as refusalCode and its `reason` member as reason, each under its own name", async () => {
+    const { api } = harness(() =>
+      status(422, {
+        type: 'https://govern.test/problems/proposal_refused',
+        title: 'proposal_refused',
+        status: 422,
+        code: 'principal_bound',
+        reason: 'eligibility_lookup',
+      })
+    );
+    expect(await api.getApproval('a1')).toEqual({
+      ok: false,
+      problem: {
+        status: 422,
+        code: 'proposal_refused',
+        reason: 'eligibility_lookup',
+        refusalCode: 'principal_bound',
+      },
     });
   });
 
