@@ -6,10 +6,22 @@
 # with the token variables emptied (job-level env) and the job has contents: read only.
 name: stranger-install
 
+# Release-time only (David, 2026-11-17): the repository is public, and the private-dependency guard
+# runs on every commit, so this full fresh-runner install runs only where a release can change what a
+# stranger installs: a push to main that changes a manifest or the lockfile (a Version Packages merge,
+# a dependency update), the Version Packages pull request itself (once a maintainer reopens it, see
+# CONTRIBUTING.md), and a manual dispatch. Every other pull request skips the job.
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+    paths:
+      - 'package.json'
+      - '**/package.json'
+      - 'bun.lock'
+      - '.github/workflows/stranger-install.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,6 +34,7 @@ concurrency:
 jobs:
   stranger-install:
     name: stranger-install
+    if: github.event_name != 'pull_request' || github.head_ref == 'changeset-release/main'
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ''
