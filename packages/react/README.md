@@ -86,8 +86,8 @@ export function Inbox({ getToken }: { getToken: () => Promise<string> }) {
   Inside `.nc-root` the module's own plain elements are reset to the browser's defaults, so a host's element
   rules (`h2 { ... }`, `* { all: unset }`) do not reach them; nothing outside `.nc-root` is touched. Only the
   module's markup is reset: an element with no class, a theme primitive, or one with an `nc-` class other than
-  the classes the modules pass to a replaceable component (`nc-detail`, `nc-error`, `nc-tabs`, `nc-row`,
-  `nc-toggle`). So an element a replacement component renders with its own classes keeps your rules, also when
+  the classes the modules pass to a replaceable component (`nc-detail`, `nc-error`, `nc-proposal`, `nc-tabs`,
+  `nc-row`, `nc-toggle`). So an element a replacement component renders with its own classes keeps your rules, also when
   it merges in the class the module passes (`cn('my-card', className)`) and also when your rules are in a
   cascade layer (Tailwind v4); an element it renders with no class at all is reset like the module's own.
 - `components` replaces the primitives the component renders; see "Bring your own components".
@@ -120,6 +120,26 @@ const { approvals, status, connection, detail, openDetail, approve, deny } = use
 - `approve(id, { reason })` and `deny(id, { reason })` answer `{ ok: true, approval }` or
   `{ ok: false, error }`; an API problem is returned, never thrown, and `error.requestId` is the id to quote.
   Decisions are confirmed by the server, not applied optimistically.
+
+### Open one approval by id
+
+`openDetail(id)` on the controller `useApprovals` returns opens the detail of one approval by id: it reads that
+request from the single route (`GET /v1/approvals/{id}`) whether or not the queue lists it, so it works for a
+request beyond the queue's first page, one that is already decided, and one that is not yours to decide (the
+detail then says so, as for any request). `<Approvals>` shows whatever detail the controller holds. A host that
+deep-links (a notification's `?approval=<id>`) calls it once, when it mounts:
+
+```tsx
+const controller = useApprovals({ baseUrl, getToken });
+const { openDetail } = controller;
+useEffect(() => {
+  const id = new URLSearchParams(window.location.search).get('approval');
+  if (id !== null) openDetail(id);
+}, [openDetail]);
+```
+
+`closeDetail()` closes it. There is no separate `initialApprovalId` option: the call is the one way to open a
+detail, from a row or from a link.
 
 ### One request on its own
 
@@ -392,6 +412,36 @@ The person decides on a **fresh read of that one request**, and what the read re
   **a call that cannot be shown whole (too deep, too long, a repeated key, a number that does not survive
   parsing) leaves Approve and Deny disabled**. Nothing is ever shown as a summary written by the agent.
 
+- **A policy-set proposal** (`tool:noblecloak:propose-policy-set`, contract revision 14 and later) gets a panel
+  above the full call, "What approving this does", read from the call and from the `preview` the single read
+  serves to a reader who may approve it. Any other approval has no panel, whatever it carries. The panel
+  shows, each when it has something to show:
+  - **Policies**: grouped by subject (Everyone, then each role, then agents), one line per policy, with the
+    tool, the mode (`Allowed`, `Ask first`, `Escalate to approvers`, `Denied`, `Not granted`) and the row kind
+    (baseline, role row, tightening). A tool `mcp:{server}/{surface}/{tool}` is shown as "tool on server"; the
+    full reference is the line's tooltip.
+  - **What changes**: each `loosening` entry as "subject on tool: from → to", or "Approving loosens no policy."
+    when the preview lists none. Only a reader served a preview sees this section, and the page never says
+    "loosens no policy" without one. The line is about policy modes only; tool grants and new tools are listed in their own sections.
+  - **Has no effect**: the `ineffective` rows, `role` rows a tighter policy for everyone shadows.
+  - **Tools granted**: the call's `tool_grants` (or the preview's `grants` when the call lists none), under
+    the agent's id when the proposal names one.
+  - **New tools to register** and the **agent**: the `tools` of the call, and the agent with the service
+    principal it is bound to, or "keeps its current binding" when the proposal gives none.
+
+  A reader the call is withheld from sees the generic digest-only view; a reader who is served the call but no
+  preview (the person who proposed it, or an approved request not yet used) sees the call's parts only.
+  The panel is shown only when the full call can be shown whole (not too large, no repeated key, nothing inexact);
+  a call that is merely cut on the first view still gets the panel, with Approve and Deny off until Show all. When
+  the call cannot be whole, a line says so and the panel is left out, so a summary never sits beside a call it may
+  not match. (A reader served the preview but not the call has no call to cut.)
+  The simulations of the preview are not shown. The full call stays on the page below the panel, and Approve
+  and Deny are enabled by it being whole, as for any request. Members the module does not know are ignored; a
+  call or preview that is present but not the shape the contract gives (a `loosening` that is not a list, a
+  policy without a mode) is not summarised: the page shows the full call alone, with "The service sent a reply
+  this page could not read." The panel's words are `labels` (the `proposal…` keys) and the panel is a `Card`,
+  so a replacement `Card` reaches it (class `nc-proposal`).
+
 - **Also shown**: who requested it, the agent (by name when the service gives one) and its parent, the run, the
   scope, the policy and its version (when the request carries one), what the approval is for, how the call
   continues, when it was created and when it expires, and its history. A person is shown by the name the
@@ -399,7 +449,8 @@ The person decides on a **fresh read of that one request**, and what the read re
   a name is whatever the service says, so the id is never dropped. Names are text like any other value the
   service sends.
 - **Never shown**: the continuation, the outcome record and any member the module does not list, so a field a
-  later revision adds cannot break or change what is rendered.
+  later revision adds cannot break or change what is rendered. (The `preview` is read for a policy-set
+  proposal only, as above.)
 - **Actions**: a `delete` or `admin` call asks for one more confirmation. A decision that the server refuses
   is explained in plain words, with the request id: not eligible (a person made an approver moments ago may be
   refused briefly), already decided, expired, not found, or the service is unavailable (retry; when the service
@@ -410,7 +461,7 @@ The person decides on a **fresh read of that one request**, and what the read re
 
 Every control and panel the components render is one of `@noblecloak/theme`'s primitives, named by its role:
 `Button` (every button, the queue rows and the Pending/Recent switch's toggles included), `Checkbox`,
-`Textarea`, `Alert` (the error blocks), `Card` (the open request) and `Tabs` (the Pending/Recent switch). Give
+`Textarea`, `Alert` (the error blocks), `Card` (the open request, and a policy-set proposal's panel) and `Tabs` (the Pending/Recent switch). Give
 your own component for a role, and every element of that role in every module uses it, with no other change:
 
 ```tsx
@@ -461,7 +512,7 @@ export function Inbox(props: {
   among them, plus `variant`, `size` and `loading`) and must pass on the ones that make the module work: the
   `onClick`, `disabled`, `aria-*` attributes (`aria-pressed`, `aria-current`), the `ref`, which the module uses
   to move focus, and the `className`, which the module lays out the queue rows, the Pending/Recent toggles, the
-  open request and the error blocks by (`nc-row`, `nc-toggle`, `nc-detail`, `nc-error`, `nc-tabs`). Merge it
+  open request, a proposal's panel and the error blocks by (`nc-row`, `nc-toggle`, `nc-detail`, `nc-proposal`, `nc-error`, `nc-tabs`). Merge it
   with your own classes rather than replacing it, as `MyButton` does; the module's reset leaves an element
   carrying those classes to your rules (see "Embed it"). A replacement `Alert` must pass on `role`: the modules
   give every error block `role="alert"` themselves, so a replacement that spreads its props keeps the error
