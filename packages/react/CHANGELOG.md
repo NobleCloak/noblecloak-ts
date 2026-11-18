@@ -1,5 +1,12 @@
 # @noblecloak/react
 
+## 0.10.1
+
+### Patch Changes
+
+- Updated dependencies [7ec6e0f]
+  - @noblecloak/client@0.14.0
+
 ## 0.10.0
 
 ### Minor Changes
