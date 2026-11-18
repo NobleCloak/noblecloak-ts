@@ -144,6 +144,10 @@
         "react": "^19.0.0",
       },
     },
+    "packages/setup-steps": {
+      "name": "@noblecloak/setup-steps",
+      "version": "0.0.0",
+    },
     "packages/spec": {
       "name": "@noblecloak/spec",
       "version": "0.12.1",
@@ -508,6 +512,8 @@
     "@noblecloak/react": ["@noblecloak/react@workspace:packages/react"],
 
     "@noblecloak/repo-scripts": ["@noblecloak/repo-scripts@workspace:scripts"],
+
+    "@noblecloak/setup-steps": ["@noblecloak/setup-steps@workspace:packages/setup-steps"],
 
     "@noblecloak/spec": ["@noblecloak/spec@workspace:packages/spec"],
 
