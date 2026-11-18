@@ -146,7 +146,7 @@
     },
     "packages/setup-steps": {
       "name": "@noblecloak/setup-steps",
-      "version": "0.0.0",
+      "version": "0.1.0",
     },
     "packages/spec": {
       "name": "@noblecloak/spec",

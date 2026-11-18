@@ -1,6 +1,6 @@
 {
   "name": "@noblecloak/setup-steps",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The first-run setup-step rule: which setup screens an org sees, their status, where setup opens, when the first run is complete, and the Setup n/N count. Pure TypeScript over Core's setup read.",
   "license": "Apache-2.0",
   "author": "NobleCloak",
