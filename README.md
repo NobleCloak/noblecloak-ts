@@ -16,6 +16,7 @@ Governance UI modules, the module API contract, and runtime adapters for NobleCl
 | `@noblecloak/theme`          | `packages/theme`                  | built, unpublished until the flip |
 | `@noblecloak/policy-formats` | `packages/policy-formats`         | built, unpublished until the flip |
 | `@noblecloak/cards`          | `packages/cards`                  | built, on no publish allowlist    |
+| `@noblecloak/setup-steps`    | `packages/setup-steps`            | built, on no publish allowlist    |
 | `@noblecloak/webhook`        | `packages/adapters/webhook`       | deferred (private, not in v1)     |
 | `@noblecloak/ai-sdk`         | `packages/adapters/ai-sdk`        | deferred (private, not in v1)     |
 | `@noblecloak/openai-agents`  | `packages/adapters/openai-agents` | deferred (private, not in v1)     |
