@@ -22,6 +22,7 @@
     "format": "prettier --write .",
     "gate": "turbo run format:check lint typecheck test && bun run build",
     "guard": "bun scripts/check-private-deps.ts",
+    "check:readmes": "bun scripts/check-readmes.ts",
     "check:toolchain": "bun scripts/check-toolchain.ts",
     "size": "bun run --cwd packages/theme size",
     "pack:all": "bun scripts/pack-all.ts",

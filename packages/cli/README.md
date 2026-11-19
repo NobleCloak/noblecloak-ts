@@ -3,7 +3,7 @@
 The `noblecloak` command line. An organisation administrator uses it to create, list, rotate and revoke the
 organisation's **service principals**, and to write the credential file an agent loads.
 
-- **Install**, **Configuration**
+- **Install**, **Quickstart**, **Configuration**
 - **Commands**: `sp create`, `sp list`, `sp rotate`, `sp revoke`, `starter`
 - **The credential file**, **Sign-in**, **Exit codes**, **Security notes**
 
@@ -14,8 +14,11 @@ npm install --global @noblecloak/cli   # needs Node 20.3 or later
 noblecloak --help
 ```
 
-Or run it without installing: `npx @noblecloak/cli sp list --org <uuid>`, or the starter agent,
-`npx @noblecloak/cli starter` (see [`noblecloak starter`](#noblecloak-starter)).
+## Quickstart
+
+Run it without installing: `npx @noblecloak/cli sp list --org <uuid>` (the `sp` commands need the
+[configuration](#configuration) below), or the starter agent, `npx @noblecloak/cli starter` (see
+[`noblecloak starter`](#noblecloak-starter)).
 
 ## Configuration
 
@@ -135,8 +138,8 @@ The two approvals are decided by a person with the Approvals module, never with 
 | Flag                         | Variable                      | Meaning                                                                                                                                                                                                                                                                                                                          |
 | ---------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--credentials <path>`       | `NOBLECLOAK_SP_CREDENTIALS`   | The credential file `sp create` wrote (or its JSON). Exit code 10 without one.                                                                                                                                                                                                                                                   |
-| `--deployment <name>`        | `NOBLECLOAK_DEPLOYMENT`       | `production` (default) or `beta`: the defaults for the four hosts below.                                                                                                                                                                                                                                                         |
-| `--auth-url <url>`           | `NOBLECLOAK_AUTH_URL`         | The authorization server where you sign in. Production `https://auth.noblecloak.com`, beta `https://api.beta.shared.bianoble.com`.                                                                                                                                                                                               |
+| `--deployment <name>`        | `NOBLECLOAK_DEPLOYMENT`       | `production` (default): the defaults for the four hosts below.                                                                                                                                                                                                                                                                   |
+| `--auth-url <url>`           | `NOBLECLOAK_AUTH_URL`         | The authorization server where you sign in. Production `https://auth.noblecloak.com`.                                                                                                                                                                                                                                            |
 | `--govern-url <url>`         | `NOBLECLOAK_GOVERN_URL`       | The governance API origin, and the audience of your token and the principal's. Production `https://govern.noblecloak.com`.                                                                                                                                                                                                       |
 | `--mcp-url <url>`            | `NOBLECLOAK_MCP_URL`          | The MCP gateway origin; the call goes to `<url>/v1/mcp`. Production `https://mcp.noblecloak.com`.                                                                                                                                                                                                                                |
 | `--gateway-audience <value>` | `NOBLECLOAK_GATEWAY_AUDIENCE` | The audience of the principal's gateway token (an identifier, not an address). Production `https://mcp-agents.noblecloak.com`.                                                                                                                                                                                                   |
@@ -146,9 +149,7 @@ The two approvals are decided by a person with the Approvals module, never with 
 | `--user-token-file <path>`   |                               | A govern-audience access token (mode 600) for the setup, instead of signing in.                                                                                                                                                                                                                                                  |
 | `--no-open`, `--json`        |                               | As for the `sp` commands. `--json` prints `agent_id`, `setup_approval_id`, `run_id`, `write_approval_id`, `outcome` and `result`.                                                                                                                                                                                                |
 
-A host is taken from its flag, then its variable, then the `--deployment` default. An explicit `--deployment` flag ignores the host variables (`NOBLECLOAK_AUTH_URL` and the rest), so one left over from the `sp` commands cannot mix two deployments; `NOBLECLOAK_DEPLOYMENT` does not. To run against beta, create
-the principal there with `--audience https://govern.beta.shared.bianoble.com --audience
-https://mcp-agents.beta.shared.bianoble.com`, then pass `--deployment beta`.
+A host is taken from its flag, then its variable, then the `--deployment` default. An explicit `--deployment` flag ignores the host variables (`NOBLECLOAK_AUTH_URL` and the rest), so one left over from the `sp` commands cannot mix two deployments; `NOBLECLOAK_DEPLOYMENT` does not.
 
 Running it twice: the setup binds the principal to one agent and publishes that agent's policy, so it is
 applied once. After you approved it, run `starter --skip-setup` for another write, with the same credential.

@@ -2,8 +2,7 @@
 
 The first-run setup-step rule, as one small package: which setup screens an org sees, each screen's
 status, where `/setup` opens, when the first run is complete, and the "Setup n/N" count. One copy of the
-rule, meant to be shared by noblesos-team's setup wizard, noblesos-shell's header pill and the CLI so they
-cannot disagree. Those consumers switch to it in follow-up changes; until then each still holds its own copy.
+rule, used by NobleCloak's setup wizard and its header pill so they cannot disagree.
 
 It is pure TypeScript: no React, no `fetch`, no I/O, no clock, and **zero runtime dependencies**.
 
@@ -13,6 +12,14 @@ It is pure TypeScript: no React, no `fetch`, no I/O, no clock, and **zero runtim
 - **Where setup opens:** `resolveWizardStart`, `resolveInitialStep`, `NO_ARRIVAL`, `GITHUB_ERROR_CODES`
 - **The pill:** `setupProgress`
 - **Types and keys:** `SetupState`, `SetupStepRow`, `SetupArrival`, `SETUP_STEP_KEYS`, `isSetupStepKey`
+
+## Install
+
+```sh
+npm install @noblecloak/setup-steps
+```
+
+It has no runtime dependencies.
 
 ## Use
 
@@ -29,22 +36,22 @@ if (!pill.hidden) console.log(`Setup ${pill.finished}/${pill.total}`);
 
 `wizardSteps(state, fork)` reads the statuses under a fork: `apps` (people using Claude, Cursor or
 another MCP app) or `own_agent` (something the admin builds). With no `fork` it uses `inferFork(state)`,
-a guess from Core's own-agent outcomes, because Core does not store the fork. A caller that has the
+a guess from the setup read's own-agent outcomes, because the platform does not store the fork. A caller that has the
 admin's own pick passes it.
 
 ## What "n/N" means
 
-N is the number of screens shown (Proof included; Scan only while Core reports the `discover` step
+N is the number of screens shown (Proof included; Scan only while the setup read reports the `discover` step
 `live`; Invite only for the `team` intent). n is **not** the wizard's position: it is the count of
 screens that are `done` or `skipped`, so a fresh org reads "Setup 0/4" while the wizard shows "Step 1 of
 4". The pill is `hidden` when the checklist was dismissed or the first run is complete.
 
 ## Input: validate before you call
 
-The rule takes `SetupState`, the structural subset of Core's setup read that it uses:
+The rule takes `SetupState`, the structural subset of the platform's setup read (`GET /organizations/{id}/setup`) that it uses:
 `steps[].key/state/availability`, `intent`, `app_authorized.done`, `setup_proposal_approved.done`,
 `held_action_decided.done` and `dismissed`. It does **no validation**, so a malformed object gives a
-wrong answer, not an error. Parse the response first (noblesos-team uses a zod schema) and apply the
+wrong answer, not an error. Parse the response first (NobleCloak's wizard uses a zod schema) and apply the
 degrade rules the types document:
 
 - an unknown step `state` reads `unknown`, never done;
@@ -60,7 +67,7 @@ do not cast around a missing one, because a cast turns a missing answer into a w
 
 ## What adopting it changes
 
-- **The pill counts Scan and the fork.** Scan is a screen when Core reports `discover` live, so the pill's
+- **The pill counts Scan and the fork.** Scan is a screen when the setup read reports `discover` live, so the pill's
   N includes it, and the pill reads statuses under the fork, so an own-agent org's Connect, Approve and
   Try it follow the own-agent signals.
 - **The fork is a guess until it is stored.** For an own-agent admin who has no own-agent outcome yet (no
@@ -94,13 +101,8 @@ const screens = wizardSteps(state, fork).map((step) => ({
 }));
 ```
 
-What stays in the app: that copy, the wait and poll rules (which screens poll Core, at what interval),
+What stays in the app: that copy, the wait and poll rules (which screens poll the platform, at what interval),
 and `reachable` and `mayStayOpen`, the Proof navigation helpers.
-
-## Release
-
-The first npm version of this package is published by hand by a maintainer: `scripts/release.ts`
-skips a package npm has never seen. Later versions go through the normal Changesets path.
 
 ## License
 

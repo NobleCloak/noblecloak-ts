@@ -2,7 +2,7 @@
 
 A tool policy says, for some subjects and some tools, how a call is decided. This page is for two readers: an
 **administrator**, who asks "what does this setting do to a call?", and a **builder**, who asks "what will my
-runtime see on the wire?". The rules come from the contract (`@noblecloak/spec`, `openapi.yaml`), and each section
+runtime see on the wire?". The rules come from the contract (`@noblecloak/spec`, `openapi.public.yaml`), and each section
 names where. The Permissions module (`@noblecloak/react/permissions`) shows the same mapping in its legend.
 
 ## The five modes and what they mean on the wire

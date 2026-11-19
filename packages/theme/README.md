@@ -4,8 +4,6 @@ Design tokens and a small set of primitives for NobleCloak modules, for builders
 of their own. Importing it changes nothing outside the module's root element, makes no network request, and
 can be re-skinned through `--nc-*` variables or replaced primitive by primitive.
 
-Licensed under Apache-2.0; see `LICENSE` and `NOTICE`.
-
 ## Install
 
 ```sh
@@ -13,6 +11,8 @@ bun add @noblecloak/theme
 ```
 
 `react` (^19) is a peer dependency. There are no other runtime dependencies.
+
+## Usage
 
 ```tsx
 import '@noblecloak/theme/index.css';
@@ -206,3 +206,7 @@ e2e test `build-output.spec.ts` checks this after every build.
 
 `bun run preview` (Storybook). Every primitive under default light, default dark, a hostile host, a builder's
 slot and a builder's brand, chosen in the toolbar.
+
+## License
+
+Apache-2.0; see `LICENSE` and `NOTICE`.

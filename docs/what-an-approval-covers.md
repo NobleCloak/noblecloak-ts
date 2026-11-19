@@ -2,7 +2,7 @@
 
 An approval is a narrow permission. This page says how narrow, for two readers: an **approver**, who
 asks "what am I agreeing to?", and a **builder**, who asks "what does my runtime get to do with it?".
-The rules come from the contract (`@noblecloak/spec`, `openapi.yaml`), and each section names where. For
+The rules come from the contract (`@noblecloak/spec`, `openapi.public.yaml`), and each section names where. For
 the steps themselves, see [Your first governed tool](./how-to/first-governed-tool.md). For what the five modes of a
 tool policy mean, and when a call needs an approval at all, see [The ladder](./the-ladder.md).
 
