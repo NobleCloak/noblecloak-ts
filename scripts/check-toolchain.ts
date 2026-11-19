@@ -103,7 +103,8 @@ export function makeFetchJson(
       throw new LookupError(`GET ${url} failed: ${String(error)}`);
     }
     if (!response.ok) throw new LookupError(`GET ${url} failed: ${String(response.status)}`);
-    return response.json();
+    const body: unknown = await response.json();
+    return body;
   };
 }
 
