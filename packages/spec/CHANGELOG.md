@@ -1,5 +1,20 @@
 # @noblecloak/spec
 
+## 0.12.2
+
+### Patch Changes
+
+- Updated dependencies [7ec6e0f]
+  - @noblecloak/client@0.14.0
+
+## 0.12.1
+
+### Patch Changes
+
+- 5b4b045: Contract rev 18 errata (found by hosted COO's rev 18 implementation, bianoble-coo#722; the revision stays rev 18). Rev 18 said a reference of `tool_grants` names a tool the organisation owns (`owner_kind` `org`). A deployment also dispatches tools it provides itself, without registering them through `POST /v1/tools` (built-in integrations, such as a first-run sandbox), which no principal owns and which a service principal must be granted before it may list or call them. Those are exactly the tools a first-run setup proposal grants. The text now says a grant may name an organisation-owned tool **or a tool the deployment itself provides to the organisation**. Which of its own tools a deployment lets a service principal be granted is the deployment's choice, and one it does not is refused `target_unknown`, as a principal-owned tool already is. No schema, status, `code` or `member` changes. A client that sent only `org` tools is unaffected. A deployment that grants only `org` tools still conforms, because it refuses its own tools `target_unknown`. The `tool:noblecloak:` namespace and the proposal's own `tools` stay `shape`.
+- Updated dependencies [5b4b045]
+  - @noblecloak/client@0.13.1
+
 ## 0.12.0
 
 ### Minor Changes
