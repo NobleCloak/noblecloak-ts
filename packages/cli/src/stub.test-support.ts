@@ -212,7 +212,9 @@ export async function startStub(): Promise<Stub> {
             jwk === undefined
               ? undefined
               : await verifyAssertion(form.get('client_assertion') ?? '', jwk);
-          if (claims?.iss !== `sp_${SP}`) {
+          // The client id's UUID is matched case-insensitively, as an id that is a UUID is.
+          const iss = typeof claims?.iss === 'string' ? claims.iss.toLowerCase() : undefined;
+          if (iss !== `sp_${SP}`) {
             send(res, 401, { error: 'invalid_client' });
             return;
           }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { USAGE } from './cli.js';
+import { setupAgentId } from './setup-agent-id.js';
 import { DEPLOYMENTS } from './starter-config.js';
 import { SETUP_TOKEN_WINDOW_SECONDS, setupWaitSeconds } from './starter.js';
 import { run, type HarnessOptions } from './harness.test-support.js';
@@ -10,6 +11,7 @@ import {
   AGENT_ID,
   GATEWAY_AUDIENCE,
   RUN_ID,
+  BROWSER_APPROVAL,
   SETUP_APPROVAL,
   WRITE_APPROVAL,
   installStarterRoutes,
@@ -859,5 +861,226 @@ describe('starter: interruption', () => {
     const result = await starter(['--skip-setup'], { signal: abort.signal, pollFloorMs: 100 });
     expect(result.code).toBe(3);
     expect(world.mcpCalls).toEqual([]);
+  });
+});
+
+describe('starter: a setup coo already opened for the principal', () => {
+  const ORG = '11111111-2222-4333-8444-555555555555';
+  const COO_AGENT = setupAgentId(ORG, SP);
+  let withOrg: string;
+
+  // The stub holds the keys of the principal it knows: this file's key replaces the default one's.
+  beforeEach(async () => {
+    stub.registered.length = 0;
+    withOrg = await writeCredential(stub, dir, { orgId: ORG, name: 'sp-credential-org.json' });
+  });
+
+  const setupOpens = (): { continuation?: unknown }[] =>
+    stub.requests
+      .filter((r) => r.path === '/v1/approvals' && r.method === 'POST')
+      .slice(0, -1)
+      .map((r) => r.json as { continuation?: unknown });
+
+  it('reuses the proposal coo opened for this admin: no agent is declared, no second proposal is opened, and it waits on that one', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', browser: { proposer: 'user' } };
+    const result = await starter(['--json'], {}, withOrg);
+    expect(result.code, result.stderr).toBe(0);
+    // The agent is read, then one POST /v1/approvals for the setup (answered `created: false`) and one for the write.
+    expect(apiRequests()).toEqual([
+      `GET /v1/agents/${COO_AGENT}`,
+      'POST /v1/approvals',
+      `GET /v1/approvals/${BROWSER_APPROVAL}/wait`,
+      `GET /v1/approvals/${BROWSER_APPROVAL}/wait`,
+      'POST /v1/runs',
+      'POST /v1/approvals',
+      `GET /v1/approvals/${WRITE_APPROVAL}/wait`,
+      `GET /v1/approvals/${WRITE_APPROVAL}/wait`,
+      'POST /v1/mcp',
+    ]);
+    expect(world.agents).toEqual([]);
+    expect(world.opened.map((o) => o.id)).toEqual([WRITE_APPROVAL]);
+    // coo's continuation, member for member: the correlation is what makes the re-open the same approval.
+    expect(setupOpens()).toEqual([
+      {
+        action: expect.anything() as unknown,
+        continuation: {
+          kind: 'mcp_held',
+          delivery: 'held',
+          correlation: { source: 'internal_setup_proposal', principal_id: SP },
+        },
+      },
+    ]);
+    expect(result.stderr).toContain(`Setup already open (approval ${BROWSER_APPROVAL})`);
+    expect(result.stderr).not.toContain('Setup proposed');
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      agent_id: COO_AGENT,
+      setup_approval_id: BROWSER_APPROVAL,
+    });
+  });
+
+  it('sends the principal id lower-cased in the proposal and the continuation when the credential has it upper-cased', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', browser: { proposer: 'user' } };
+    const upper = await writeCredential(stub, dir, {
+      orgId: ORG.toUpperCase(),
+      upperCaseClientId: true,
+      name: 'sp-credential-upper.json',
+    });
+    const result = await starter([], {}, upper);
+    expect(result.code, result.stderr).toBe(0);
+    expect(world.opened.map((o) => o.id)).toEqual([WRITE_APPROVAL]);
+    expect(apiRequests()[0]).toBe(`GET /v1/agents/${COO_AGENT}`);
+    expect(result.stderr).toContain(`Setup already open (approval ${BROWSER_APPROVAL})`);
+  });
+
+  it('opens one proposal for coo’s agent when it is declared and none is open', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code, result.stderr).toBe(0);
+    expect(world.agents).toEqual([]);
+    const [setup] = world.opened;
+    expect(setup?.id).toBe(SETUP_APPROVAL);
+    expect((setup?.body.action as { arguments: { agent: unknown } }).arguments.agent).toEqual({
+      id: COO_AGENT,
+      principal_id: SP,
+    });
+    expect(result.stderr).toContain(`Setup proposed (approval ${SETUP_APPROVAL})`);
+  });
+
+  it('another admin’s proposal does not match: a second one opens, and when that one is refused policy_conflict the message is already-set-up, not principal_bound', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', browser: { proposer: 'other' } };
+    world.rejectionReason = 'proposal_refused:policy_conflict';
+    world.decisions.setup = 'rejected';
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(world.opened.map((o) => o.id)).toEqual([SETUP_APPROVAL]);
+    expect(result.stderr).toContain('is already set up; run again with --skip-setup');
+    expect(result.stderr).not.toContain('principal_bound');
+    expect(world.runs).toBe(0);
+  });
+
+  it('declares its own agent and opens one proposal when coo has no such agent, without opening a probe', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'absent' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code, result.stderr).toBe(0);
+    expect(world.agents).toEqual(['NobleCloak starter']);
+    expect(apiRequests().slice(0, 4)).toEqual([
+      `GET /v1/agents/${COO_AGENT}`, // 404
+      'POST /v1/agents',
+      'POST /v1/approvals',
+      `GET /v1/approvals/${SETUP_APPROVAL}/wait`,
+    ]);
+    expect(world.opened.filter((o) => o.by === 'user')).toHaveLength(1);
+    expect(
+      (world.opened[0]?.body.action as { arguments: { agent: { id: string } } }).arguments.agent.id
+    ).toBe(AGENT_ID);
+    // The own agent's proposal keeps the plain continuation: it is nobody else's approval to match.
+    expect(setupOpens()).toEqual([
+      {
+        action: expect.anything() as unknown,
+        continuation: { kind: 'mcp_held', delivery: 'held' },
+      },
+    ]);
+  });
+
+  it('a setup already applied (the agent is bound to this principal) is exit 13 with nothing opened', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'bound' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('is already set up; run again with --skip-setup');
+    expect(apiRequests()).toEqual([`GET /v1/agents/${COO_AGENT}`]);
+    expect(world.agents).toEqual([]);
+    expect(world.opened).toEqual([]);
+    expect(world.runs).toBe(0);
+  });
+
+  it('a deployment whose agent read omits the binding opens, and the policy_conflict refusal is the same exit 13', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'bound', bindingHidden: true };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('is already set up; run again with --skip-setup');
+    expect(apiRequests()).toEqual([`GET /v1/agents/${COO_AGENT}`, 'POST /v1/approvals']);
+    expect(world.agents).toEqual([]);
+  });
+
+  it('a principal held by another agent is the same exit 13', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', holder: AGENT_ID };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('is already set up; run again with --skip-setup');
+    expect(world.agents).toEqual([]);
+  });
+
+  it('an administrator’s rejection of the browser proposal is exit 13 naming it, with no fallback agent', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', rejectedDuplicate: 'ap_rejected_9' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('ap_rejected_9');
+    expect(result.stderr).toContain('Create new credentials');
+    expect(world.agents).toEqual([]);
+    expect(apiRequests()).toEqual([`GET /v1/agents/${COO_AGENT}`, 'POST /v1/approvals']);
+    expect(world.opened).toEqual([]);
+    expect(world.runs).toBe(0);
+  });
+
+  it('a rejected_duplicate that names no approval still says to create new credentials', async () => {
+    world.refuse.setupOpen = { status: 409, type: 'rejected_duplicate' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('an earlier approval');
+    expect(result.stderr).toContain('Create new credentials');
+  });
+
+  it('a continuation_conflict says an open proposal has another continuation, and exits 13', async () => {
+    world.refuse.setupOpen = { status: 409, type: 'continuation_conflict' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('different continuation');
+    expect(result.stderr).toContain('continuation_conflict');
+  });
+
+  it('a credential whose org_id is not a UUID takes the fallback and never derives an agent', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'bound' };
+    const bad = await writeCredential(stub, dir, { orgId: 'not-a-uuid', name: 'sp-bad-org.json' });
+    const result = await starter([], {}, bad);
+    expect(result.code, result.stderr).toBe(0);
+    expect(apiRequests().slice(0, 2)).toEqual(['POST /v1/agents', 'POST /v1/approvals']);
+    expect(world.agents).toEqual(['NobleCloak starter']);
+  });
+
+  it('a credential without org_id declares its agent first, as before', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', browser: { proposer: 'user' } };
+    const noOrg = await writeCredential(stub, dir, { name: 'sp-credential-no-org.json' });
+    const result = await starter([], {}, noOrg);
+    expect(result.code, result.stderr).toBe(0);
+    expect(apiRequests().slice(0, 2)).toEqual(['POST /v1/agents', 'POST /v1/approvals']);
+    expect(world.opened.map((o) => o.id)).toEqual([SETUP_APPROVAL, WRITE_APPROVAL]);
+  });
+
+  it('--agent skips the lookup and proposes for that agent', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', browser: { proposer: 'user' } };
+    const result = await starter(['--agent', AGENT_ID], {}, withOrg);
+    expect(result.code, result.stderr).toBe(0);
+    expect(world.agents).toEqual([]);
+    expect(apiRequests()[0]).toBe('POST /v1/approvals');
+    expect(
+      (world.opened[0]?.body.action as { arguments: { agent: { id: string } } }).arguments.agent.id
+    ).toBe(AGENT_ID);
+  });
+
+  it('a reused proposal that coo refuses policy_conflict when approved (the setup was applied meanwhile) is the already-set-up message', async () => {
+    world.coo = { agentId: COO_AGENT, agent: 'declared', browser: { proposer: 'user' } };
+    world.rejectionReason = 'proposal_refused:policy_conflict';
+    world.decisions.setup = 'rejected';
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('is already set up; run again with --skip-setup');
+    expect(world.runs).toBe(0);
+  });
+
+  it('an own agent’s policy_conflict is not called already-set-up: it names the refusal', async () => {
+    world.refuse.setupOpen = { status: 422, type: 'proposal_refused', code: 'policy_conflict' };
+    const result = await starter([], {}, withOrg);
+    expect(result.code).toBe(13);
+    expect(result.stderr).toContain('proposal_refused:policy_conflict');
   });
 });

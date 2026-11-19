@@ -6,6 +6,7 @@ import {
   ModuleApiError,
   type Answer,
   type Approval,
+  type ApprovalHandle,
   type PolicySetProposal,
   type Problem,
 } from '@noblecloak/client/governance-api';
@@ -27,6 +28,7 @@ import {
   resolveStarterHosts,
   type StarterHosts,
 } from './starter-config.js';
+import { setupAgentId, setupContinuation } from './setup-agent-id.js';
 import { oneLine, jsonForTerminal } from './terminal.js';
 import { withTargetSession } from './session.js';
 
@@ -75,6 +77,8 @@ const ROUTE_MISMATCH_DETAIL = 'the gateway routes this tool_ref for this princip
 
 /** What a `proposal_refused:principal_bound` means to the person running the command. */
 const ALREADY_SET_UP = 'This service principal is already set up; run again with --skip-setup.';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const DEFAULT_WAIT_SECONDS = 600;
 
@@ -451,15 +455,89 @@ interface Setup {
   readonly approvalId: string;
 }
 
+/** The deployment has no agent under the id it was asked to set up (`proposal_refused:unknown_agent`). */
+class SetupAgentAbsent extends CliError {
+  constructor() {
+    super(
+      EXIT.proposalRejected,
+      'The setup agent is not declared (proposal_refused:unknown_agent).'
+    );
+    this.name = 'SetupAgentAbsent';
+  }
+}
+
 /**
- * As the person: declare the agent (unless `--agent` names one), open the setup proposal and wait for an
- * administrator to approve it in Approvals. The person's token is used here and nowhere else.
+ * The CliError for a refusal of the open of the setup proposal. `derived`: the agent is the one coo declares
+ * for the principal ({@link setupAgentId}). There an `unknown_agent` refusal is the {@link SetupAgentAbsent}
+ * the caller recovers from, not an exit, and a `policy_conflict` is a setup already applied (the holder is
+ * that agent, so coo's `principal_bound` check, apps/api/src/policy-set-checks.ts, never fires for it).
+ */
+function mapOpenProblem(problem: Problem, derived: boolean): CliError | undefined {
+  const refused = problem.status === 422 && problem.code === 'proposal_refused';
+  if (refused && problem.refusalCode === 'unknown_agent' && derived) {
+    return new SetupAgentAbsent();
+  }
+  if (refused && problem.refusalCode === 'policy_conflict' && derived) {
+    return new CliError(EXIT.proposalRejected, ALREADY_SET_UP);
+  }
+  if (problem.status === 409 && problem.code === 'rejected_duplicate') {
+    // coo's rejected-duplicate rule (module-api approvals.ts answers it with `rejected_approval_id`): an
+    // administrator rejected this exact proposal, so an identical open is refused. Opening it under another
+    // agent would get around that rejection, so this is an exit, not a fallback.
+    const which =
+      problem.rejectedApprovalId === undefined
+        ? 'an earlier approval'
+        : `approval ${oneLine(problem.rejectedApprovalId)}`;
+    return new CliError(
+      EXIT.proposalRejected,
+      `An administrator already rejected this setup (${which}), and the deployment does not open it again. Create new credentials to propose it afresh (rejected_duplicate).`
+    );
+  }
+  if (problem.status === 409 && problem.code === 'continuation_conflict') {
+    return new CliError(
+      EXIT.proposalRejected,
+      'The deployment already has an open setup proposal for this agent, opened with a different continuation, so this one was not opened (continuation_conflict). Withdraw or decide that proposal in Approvals, then run again.'
+    );
+  }
+  if (refused && problem.refusalCode === 'target_unknown') {
+    // The proposal names only SANDBOX_TOOL_REF (a policy target and a grant), so coo's
+    // target_unknown (policy-set-checks.ts:256-290, bianoble-coo e62bb0c7) means the row is absent.
+    return new CliError(
+      EXIT.sandboxUnavailable,
+      `The sandbox is not available here: the deployment has no ${SANDBOX_TOOL_REF} to grant (proposal_refused:target_unknown).`
+    );
+  }
+  if (refused && problem.refusalCode === 'principal_bound') {
+    return new CliError(EXIT.proposalRejected, ALREADY_SET_UP);
+  }
+  if (problem.status === 422) {
+    return new CliError(
+      EXIT.proposalRejected,
+      `The deployment refused the setup proposal (${problem.code}${problem.refusalCode === undefined ? '' : `:${oneLine(problem.refusalCode)}`}${problem.detail === undefined ? '' : `: ${oneLine(problem.detail)}`}).`
+    );
+  }
+  return undefined;
+}
+
+/**
+ * As the person: open the setup proposal and wait for an administrator to approve it in Approvals. The
+ * agent is the one `--agent` names; else, when the credential has an `org_id` that is a UUID, the agent coo
+ * declares for a principal created in the browser (`setupAgentId`), read first with `GET /v1/agents/{id}`:
+ *  - absent: the agent this command declares, as for a credential without an `org_id`;
+ *  - bound to this principal (its setup is applied): exit 13, `ALREADY_SET_UP`, nothing opened;
+ *  - else: the proposal is opened with the continuation coo stores on the one it opened for that browser
+ *    create ({@link setupContinuation}). coo answers `created: false` with that approval only for the same
+ *    proposer (the admin who created the principal in the browser), the same arguments and the same
+ *    continuation. Another admin gets a second proposal, and whichever is approved second fails
+ *    `policy_conflict`. `noblecloak sp create` has no such proposal: coo opens none for it.
+ * The person's token is used here and nowhere else.
  */
 async function setUp(
   io: Io,
   hosts: StarterHosts,
   flags: ParsedFlags,
   principalId: string,
+  orgId: string | undefined,
   seconds: number
 ): Promise<Setup> {
   const options = {
@@ -470,59 +548,75 @@ async function setUp(
   return withTargetSession(io, hosts, target, options, async (token) => {
     const startedAt = Date.now();
     const apis = apisFor(io, hosts.governUrl, () => token);
-    let agentId = agentFlag(flags);
-    if (agentId === undefined) {
-      const agent = await governed(io, hosts, 'create the agent', () =>
-        apis.api.createAgent(AGENT_NAME, randomUUID())
-      );
-      agentId = agent.id;
-      note(
+    const openSetup = (agent: string, derived: boolean): Promise<ApprovalHandle> =>
+      governed(
         io,
-        `Agent ${oneLine(agentId)} created. If its setup is not applied, retry the setup with --agent ${oneLine(agentId)}; once it is applied, make another write with --skip-setup.`
+        hosts,
+        'open the setup proposal',
+        () =>
+          apis.api.createApproval(
+            {
+              action: {
+                tool_ref: PROPOSE_POLICY_SET_REF,
+                arguments: proposalFor(agent, principalId),
+              },
+              continuation: derived ? setupContinuation(principalId) : SETUP_CONTINUATION,
+            },
+            randomUUID()
+          ),
+        (problem) => mapOpenProblem(problem, derived)
       );
+    const named = agentFlag(flags);
+    let opened: { agentId: string; handle: ApprovalHandle; derived: boolean } | undefined;
+    if (named === undefined && orgId !== undefined && UUID.test(orgId)) {
+      const derivedId = setupAgentId(orgId, principalId);
+      try {
+        // Read the agent first: an open is no probe (a re-run after the browser setup was approved would
+        // open a redundant proposal that fails policy_conflict when approved).
+        const agent = await governed(
+          io,
+          hosts,
+          'read the setup agent',
+          () => apis.api.getAgent(derivedId),
+          (problem) => (problem.status === 404 ? new SetupAgentAbsent() : undefined)
+        );
+        if (agent.principal_id?.toLowerCase() === principalId) {
+          throw new CliError(EXIT.proposalRejected, ALREADY_SET_UP);
+        }
+        opened = { agentId: derivedId, handle: await openSetup(derivedId, true), derived: true };
+      } catch (error) {
+        if (!(error instanceof SetupAgentAbsent)) throw error;
+      }
+    }
+    if (opened === undefined) {
+      let agentId: string;
+      if (named === undefined) {
+        const agent = await governed(io, hosts, 'create the agent', () =>
+          apis.api.createAgent(AGENT_NAME, randomUUID())
+        );
+        agentId = agent.id;
+        note(
+          io,
+          `Agent ${oneLine(agentId)} created. If its setup is not applied, retry the setup with --agent ${oneLine(agentId)}; once it is applied, make another write with --skip-setup.`
+        );
+      } else {
+        agentId = named;
+        note(
+          io,
+          `Using agent ${oneLine(agentId)}. A setup already applied for it is refused with proposal_refused:policy_conflict; use --skip-setup for another write.`
+        );
+      }
+      opened = { agentId, handle: await openSetup(agentId, false), derived: false };
+    }
+    const { agentId, handle, derived } = opened;
+    if (handle.created) {
+      note(io, `Setup proposed (approval ${handle.id}). Approve it in Approvals.`);
     } else {
       note(
         io,
-        `Using agent ${oneLine(agentId)}. A setup already applied for it is refused with proposal_refused:policy_conflict; use --skip-setup for another write.`
+        `Setup already open (approval ${handle.id}); not opening another. Approve it in Approvals.`
       );
     }
-    const handle = await governed(
-      io,
-      hosts,
-      'open the setup proposal',
-      () =>
-        apis.api.createApproval(
-          {
-            action: {
-              tool_ref: PROPOSE_POLICY_SET_REF,
-              arguments: proposalFor(agentId, principalId),
-            },
-            continuation: SETUP_CONTINUATION,
-          },
-          randomUUID()
-        ),
-      (problem) =>
-        problem.status === 422 &&
-        problem.code === 'proposal_refused' &&
-        problem.refusalCode === 'target_unknown'
-          ? // The proposal names only SANDBOX_TOOL_REF (a policy target and a grant), so coo's
-            // target_unknown (policy-set-checks.ts:256-290, bianoble-coo e62bb0c7) means the row is absent.
-            new CliError(
-              EXIT.sandboxUnavailable,
-              `The sandbox is not available here: the deployment has no ${SANDBOX_TOOL_REF} to grant (proposal_refused:target_unknown).`
-            )
-          : problem.status === 422 &&
-              problem.code === 'proposal_refused' &&
-              problem.refusalCode === 'principal_bound'
-            ? new CliError(EXIT.proposalRejected, ALREADY_SET_UP)
-            : problem.status === 422
-              ? new CliError(
-                  EXIT.proposalRejected,
-                  `The deployment refused the setup proposal (${problem.code}${problem.refusalCode === undefined ? '' : `:${oneLine(problem.refusalCode)}`}${problem.detail === undefined ? '' : `: ${oneLine(problem.detail)}`}).`
-                )
-              : undefined
-    );
-    note(io, `Setup proposed (approval ${handle.id}). Approve it in Approvals.`);
     const waitFor = setupWaitSeconds(seconds, Date.now() - startedAt);
     if (waitFor < seconds) {
       note(
@@ -541,7 +635,11 @@ async function setUp(
       'make the write with --skip-setup'
     );
     if (approval.state !== 'consumed') {
-      if (lastReason(approval).includes('proposal_refused:principal_bound')) {
+      const reason = lastReason(approval);
+      if (
+        reason.includes('proposal_refused:principal_bound') ||
+        (derived && reason.includes('proposal_refused:policy_conflict'))
+      ) {
         throw new CliError(EXIT.proposalRejected, ALREADY_SET_UP);
       }
       throw new CliError(
@@ -710,7 +808,15 @@ export async function starterCommand(flags: ParsedFlags, io: Io): Promise<void> 
 
   const setup = skipSetup
     ? undefined
-    : await setUp(io, hosts, flags, credential.client_id.slice('sp_'.length), seconds);
+    : await setUp(
+        io,
+        hosts,
+        flags,
+        // Lower-cased once: coo lower-cases the principal id in the agent id and in the proposal's digest.
+        credential.client_id.slice('sp_'.length).toLowerCase(),
+        credential.org_id,
+        seconds
+      );
   const written = await writeNote(io, hosts, tokens, seconds);
 
   if (boolFlag(flags, 'json')) {

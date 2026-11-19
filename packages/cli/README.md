@@ -122,9 +122,23 @@ npx @noblecloak/cli starter --credentials ./sp-credential.json
    The principal needs the govern origin (for `/v1`) and the gateway audience (for the MCP gateway), so
    create it with both `--audience` flags, as above.
 2. **Setup, as you.** It signs you in (loopback sign-in as above, for the govern audience; it needs no
-   administrator scope), declares an agent named "NobleCloak starter" (or uses `--agent`), and opens one
-   `propose-policy-set` approval: the agent is bound to the service principal, granted the sandbox's
-   `tool:sandbox:create-note`, and given an `ask` policy for it. **Approve it in Approvals.** The command waits.
+   administrator scope) and opens one `propose-policy-set` approval: the agent is bound to the service principal,
+   granted the sandbox's `tool:sandbox:create-note`, and given an `ask` policy for it. **Approve it in
+   Approvals.** The command waits. The agent is, in this order: the one `--agent` names; else, when the credential
+   file has an `org_id` that is a UUID, the agent the deployment declares for a principal created **in the
+   browser** (a credential downloaded from the Team module; the deployment opens a setup proposal for it then).
+   `noblecloak sp create` never has one opened, so a credential from `sp create` finds no such agent and the
+   command declares a new agent named "NobleCloak starter" instead, as it does for a credential without an
+   `org_id`. For the browser's agent the command reads it first (`GET /v1/agents/{id}`): if it is bound to this
+   principal the setup is already applied and the command exits 13 without opening anything (use
+   `--skip-setup`); otherwise it opens the proposal with the continuation the deployment gave its own, and the
+   deployment answers with the proposal it already has open ("Setup already open") instead of opening a second.
+   The deployment matches per proposer and per continuation: it answers with the open proposal only when you
+   are the administrator who created the principal in the browser. For another administrator a second proposal
+   opens, and whichever of the two is approved second fails with `policy_conflict`, which the command reports
+   as already set up. If an administrator rejected the browser's proposal, the deployment (with its
+   rejected-duplicate rule on) refuses to open the same one again (exit 13, naming the rejected approval):
+   create new credentials; the command does not declare another agent to get around the rejection.
 3. **Write, as the principal.** It opens an external run and an approval for one `tool:sandbox:create-note` call
    with its exact arguments, and waits. **Approve or deny it in Approvals.** Only if you approve does it send one
    MCP `tools/call` (`int_sandbox_create_note`) to the gateway, with the run named in `x-noblecloak-external-run-id`.
@@ -227,15 +241,15 @@ stopgap for scripts: the token is short-lived and you have to obtain it yourself
 
 `starter` adds:
 
-| Code | Meaning                                                                                                                                                                                                                                      |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 10   | No service-principal credential was given.                                                                                                                                                                                                   |
-| 11   | The principal may not ask for a token for the govern origin or the gateway audience, or its credential is for the other deployment (pass `--deployment`).                                                                                    |
-| 12   | The sandbox is not available: the deployment has no sandbox write tool to grant (the setup was refused as `target_unknown`), or cannot route an approval for it.                                                                             |
-| 13   | The setup was denied or withdrawn, or the deployment refused to apply it; or the principal is already bound (run with `--skip-setup`); or, with `--skip-setup`, the principal was never granted the write tool (run without `--skip-setup`). |
-| 14   | The write was denied or withdrawn, the gateway refused it, or the deployment will not reopen a write it refused moments ago. Nothing was written.                                                                                            |
-| 15   | Nobody decided an approval within `--wait` seconds, or it expired. An expired approval is gone; an undecided one stays open in Approvals until it expires.                                                                                   |
-| 16   | The approval for the write was already used by an earlier call.                                                                                                                                                                              |
+| Code | Meaning                                                                                                                                                                                                                                                                                                                                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 10   | No service-principal credential was given.                                                                                                                                                                                                                                                                                                                    |
+| 11   | The principal may not ask for a token for the govern origin or the gateway audience, or its credential is for the other deployment (pass `--deployment`).                                                                                                                                                                                                     |
+| 12   | The sandbox is not available: the deployment has no sandbox write tool to grant (the setup was refused as `target_unknown`), or cannot route an approval for it.                                                                                                                                                                                              |
+| 13   | The setup was denied or withdrawn, or the deployment refused to apply it; or the principal is already set up (run with `--skip-setup`); or an administrator rejected the same setup and the deployment will not open it again (create new credentials); or, with `--skip-setup`, the principal was never granted the write tool (run without `--skip-setup`). |
+| 14   | The write was denied or withdrawn, the gateway refused it, or the deployment will not reopen a write it refused moments ago. Nothing was written.                                                                                                                                                                                                             |
+| 15   | Nobody decided an approval within `--wait` seconds, or it expired. An expired approval is gone; an undecided one stays open in Approvals until it expires.                                                                                                                                                                                                    |
+| 16   | The approval for the write was already used by an earlier call.                                                                                                                                                                                                                                                                                               |
 
 Text goes to stdout, diagnostics and the sign-in URL to stderr. With `--json` stdout carries exactly one JSON
 object when the command succeeds.

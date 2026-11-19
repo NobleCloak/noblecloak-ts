@@ -8,6 +8,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { jcs, type JsonValue } from '@noblecloak/client';
 import { generateKey } from './keys.js';
 import { ACCESS_TOKEN, SP, type Recorded, type Stub } from './stub.test-support.js';
 
@@ -16,6 +17,8 @@ export const RUN_ID = '4f2b8c1e-5a4d-4e6f-8a9b-0c1d2e3f4a5b';
 export const AGENT_ID = 'agent_9d1e';
 export const SETUP_APPROVAL = 'ap_setup_1';
 export const WRITE_APPROVAL = 'ap_write_1';
+/** The setup approval coo opened when the principal was created in the browser. */
+export const BROWSER_APPROVAL = 'ap_browser_1';
 
 export interface Problem {
   readonly status: number;
@@ -23,7 +26,47 @@ export interface Problem {
   readonly detail?: string;
   /** The body's `code` member: on `proposal_refused`, why. */
   readonly code?: string;
+  /** The body's `rejected_approval_id` member, on `rejected_duplicate`. */
+  readonly rejected_approval_id?: string;
 }
+
+/**
+ * The setup proposal as bianoble-coo 01405581 builds it (apps/api/src/internal-setup-proposal-routes.ts
+ * `setupProposalArguments`), written out separately from `proposalFor` in starter.ts: the two have to agree
+ * for coo to match a re-open to the browser's proposal.
+ */
+export function cooSetupArguments(agentId: string, principalId: string): Record<string, unknown> {
+  return {
+    agent: { id: agentId, principal_id: principalId },
+    policies: [
+      {
+        role: 'tightening',
+        rationale: 'The starter agent asks before every sandbox write.',
+        assessment: {
+          side_effect_level: 'write',
+          blast_radius: 'one_record',
+          reversible: false,
+          external_party: false,
+          financial: false,
+        },
+        policy: {
+          kind: 'tool_invocation',
+          subjects: [{ type: 'agent', id: agentId }],
+          targets: { tools: ['tool:sandbox:create-note'] },
+          config: { mode: 'ask' },
+        },
+      },
+    ],
+    tool_grants: ['tool:sandbox:create-note'],
+  };
+}
+
+/** The continuation coo stores on the approval it opens for a browser-created principal (default-policy-open.ts `open()`). */
+export const cooSetupContinuation = (principalId: string): Record<string, unknown> => ({
+  kind: 'mcp_held',
+  delivery: 'held',
+  correlation: { source: 'internal_setup_proposal', principal_id: principalId },
+});
 
 export interface McpCall {
   readonly headers: Record<string, string | string[] | undefined>;
@@ -49,6 +92,35 @@ export interface World {
    * connection before an answer; `truncate` sends a 200 and a part of its body, then destroys the connection.
    */
   mcp: { status: number; body?: unknown; raw?: string } | 'drop' | 'truncate' | undefined;
+  /**
+   * What coo did when the principal was created in the browser (`POST /internal/orgs/{org}/setup-proposals`,
+   * bianoble-coo 01405581 apps/api/src/internal-setup-proposal-routes.ts), for the agent id coo derives
+   * (`setupAgentId`). Unset: no such agent is modelled (every other test).
+   *  - `agent`: `absent` (not declared: `GET` is 404, an open naming it is 422 `unknown_agent`), `declared`
+   *    (unbound), or `bound` (its setup is applied: `GET` shows `principal_id`, a second setup is 422
+   *    `proposal_refused` `policy_conflict`). `bindingHidden`: `GET` omits `principal_id`, as a
+   *    deployment before contract rev 13 does.
+   *  - `browser`: the proposal coo opened, as `proposer` (`user` is the person this test signs in as, `other`
+   *    another admin), under the continuation `default-policy-open.ts` stores for it. An open answers it
+   *    (200, `created: false`, `BROWSER_APPROVAL`) only for the same proposer, the same JCS digest of the
+   *    arguments and the same JCS continuation; the same proposer and digest under another continuation is
+   *    409 `continuation_conflict` (obligations continuation.ts `compareContinuation`); any other opens a
+   *    new approval (201).
+   *  - `rejectedDuplicate`: the approval id an administrator rejected; with the rule on, an identical open is
+   *    409 `rejected_duplicate` naming it (module-api approvals.ts).
+   *  - `holder`: an agent that already holds the principal; an open naming any other agent is 422
+   *    `principal_bound` (apps/api/src/policy-set-checks.ts: `holder !== agent.id`).
+   */
+  coo:
+    | {
+        agentId: string;
+        agent: 'absent' | 'declared' | 'bound';
+        bindingHidden?: boolean;
+        browser?: { proposer: 'user' | 'other' };
+        rejectedDuplicate?: string;
+        holder?: string;
+      }
+    | undefined;
   readonly agents: string[];
   readonly opened: { id: string; by: 'user' | 'sp'; body: Record<string, unknown> }[];
   readonly polls: string[];
@@ -74,6 +146,9 @@ function problem(res: ServerResponse, p: Problem): void {
       request_id: 'req_1',
       ...(p.detail === undefined ? {} : { detail: p.detail }),
       ...(p.code === undefined ? {} : { code: p.code }),
+      ...(p.rejected_approval_id === undefined
+        ? {}
+        : { rejected_approval_id: p.rejected_approval_id }),
     },
     'application/problem+json'
   );
@@ -126,6 +201,7 @@ export function installStarterRoutes(stub: Stub): World {
     rejectionReason: undefined,
     dropAgent: false,
     mcp: undefined,
+    coo: undefined,
     agents: [],
     opened: [],
     polls: [],
@@ -229,6 +305,27 @@ export function installStarterRoutes(stub: Stub): World {
       });
       return true;
     }
+    const agentRead = /^\/v1\/agents\/([^/]+)$/.exec(path);
+    if (method === 'GET' && agentRead?.[1] !== undefined) {
+      const coo = world.coo;
+      if (coo?.agentId !== agentRead[1] || coo.agent === 'absent') {
+        problem(res, { status: 404, type: 'not_found', detail: 'Agent not found' });
+        return true;
+      }
+      json(res, 200, {
+        data: {
+          id: coo.agentId,
+          name: 'starter-sp',
+          parent_id: null,
+          created_at: '2026-11-17T10:00:00Z',
+          ...(coo.bindingHidden === true
+            ? {}
+            : { principal_id: coo.agent === 'bound' ? SP : null }),
+        },
+        meta: META,
+      });
+      return true;
+    }
     if (method === 'POST' && path === '/v1/runs') {
       if (world.refuse.run !== undefined) {
         problem(res, world.refuse.run);
@@ -253,6 +350,64 @@ export function installStarterRoutes(stub: Stub): World {
         return true;
       }
       const id = user ? SETUP_APPROVAL : WRITE_APPROVAL;
+      if (user && world.coo !== undefined) {
+        const coo = world.coo;
+        const sent = request.json as {
+          action?: { arguments?: { agent?: { id?: unknown } } };
+          continuation?: unknown;
+        };
+        const named = sent.action?.arguments?.agent?.id;
+        if (named === coo.agentId) {
+          if (coo.agent === 'absent') {
+            problem(res, { status: 422, type: 'proposal_refused', code: 'unknown_agent' });
+            return true;
+          }
+          if (coo.holder !== undefined && coo.holder !== named) {
+            problem(res, { status: 422, type: 'proposal_refused', code: 'principal_bound' });
+            return true;
+          }
+          if (coo.agent === 'bound') {
+            problem(res, { status: 422, type: 'proposal_refused', code: 'policy_conflict' });
+            return true;
+          }
+          const same =
+            jcs(sent.action?.arguments as JsonValue) ===
+              jcs(cooSetupArguments(named, SP) as JsonValue) && coo.browser?.proposer === 'user';
+          if (same) {
+            if (
+              jcs(sent.continuation as JsonValue) !== jcs(cooSetupContinuation(SP) as JsonValue)
+            ) {
+              problem(res, { status: 409, type: 'continuation_conflict' });
+              return true;
+            }
+            json(res, 200, {
+              data: {
+                id: BROWSER_APPROVAL,
+                state: 'pending',
+                created: false,
+                created_at: '2026-11-17T10:00:00Z',
+                resume_token_will_issue: false,
+              },
+              meta: META,
+            });
+            return true;
+          }
+          if (coo.rejectedDuplicate !== undefined && coo.browser === undefined) {
+            problem(res, {
+              status: 409,
+              type: 'rejected_duplicate',
+              rejected_approval_id: coo.rejectedDuplicate,
+            });
+            return true;
+          }
+        } else if (coo.holder !== undefined && coo.holder !== named) {
+          problem(res, { status: 422, type: 'proposal_refused', code: 'principal_bound' });
+          return true;
+        } else if (named !== AGENT_ID) {
+          problem(res, { status: 422, type: 'proposal_refused', code: 'unknown_agent' });
+          return true;
+        }
+      }
       world.opened.push({ id, by: user ? 'user' : 'sp', body: request.json ?? {} });
       json(res, 201, {
         data: {
@@ -282,7 +437,7 @@ export function installStarterRoutes(stub: Stub): World {
       world.polls.push(id);
       const count = (polled.get(id) ?? 0) + 1;
       polled.set(id, count);
-      const decided = id === SETUP_APPROVAL ? world.decisions.setup : world.decisions.write;
+      const decided = id === WRITE_APPROVAL ? world.decisions.write : world.decisions.setup;
       json(res, 200, {
         data: approvalBody(id, count <= world.pendingPolls ? 'pending' : decided, world),
         meta: META,
@@ -299,7 +454,15 @@ export function installStarterRoutes(stub: Stub): World {
 export async function writeCredential(
   stub: Stub,
   dir: string,
-  options: { audiences?: string[] | null; register?: boolean; name?: string } = {}
+  options: {
+    audiences?: string[] | null;
+    register?: boolean;
+    name?: string;
+    /** The `org_id` `sp create` writes into the file. */
+    orgId?: string;
+    /** Write the principal's UUID in the `client_id` upper-cased (the credential parser accepts either case). */
+    upperCaseClientId?: boolean;
+  } = {}
 ): Promise<string> {
   const key = await generateKey();
   if (options.register !== false) stub.registered.push(key.publicJwk);
@@ -310,11 +473,12 @@ export async function writeCredential(
   await writeFile(
     path,
     JSON.stringify({
-      client_id: `sp_${SP}`,
+      client_id: `sp_${options.upperCaseClientId === true ? SP.toUpperCase() : SP}`,
       token_endpoint: `${stub.url}/auth/oauth/token`,
       assertion_audience: stub.url,
       private_jwk: key.privateJwk,
       ...(audiences === null ? {} : { audiences }),
+      ...(options.orgId === undefined ? {} : { org_id: options.orgId }),
     }),
     { mode: 0o600 }
   );
