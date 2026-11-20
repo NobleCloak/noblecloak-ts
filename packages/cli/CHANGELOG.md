@@ -1,5 +1,19 @@
 # @noblecloak/cli
 
+## 0.2.1
+
+### Patch Changes
+
+- 8f8f11e: Documentation only, no code changes. `@noblecloak/client`: the problem-code table lists all 46 codes of the contract (seven were missing) and the examples use the hosted API origin. `@noblecloak/react`: the mock implements revision 18, the import table lists the `permissions` and `connections` entries, the examples use the hosted origins, and the Quickstart holds the embed snippet. `@noblecloak/setup-steps`: says who uses the rule today and drops the first-release note. `@noblecloak/cli`: the README no longer names pre-production hosts. `@noblecloak/spec`: the contract's example audience and `servers` entry name `https://govern.noblecloak.com` (the `env` server variable is gone), and its header no longer says the file is generated.
+- 8f8f11e: README only: every package README now has an Install section, a usage section (Quickstart, Usage or Use) and a License section. `@noblecloak/cards` and `@noblecloak/setup-steps` gain Install; `@noblecloak/cli` and `@noblecloak/react` gain Quickstart; `@noblecloak/policy-formats` and `@noblecloak/theme` gain Usage; `@noblecloak/react` and `@noblecloak/theme` state the licence under a License heading. No code changes.
+- 4a9cdca: `noblecloak starter` reuses the setup proposal the deployment opened when a service principal was created in the browser (a credential downloaded from the Team module), instead of opening a second one. `noblecloak sp create` never has a setup opened for it, so a credential from `sp create` is unchanged: the command declares its own agent. When the credential file has an `org_id` that is a UUID, the command reads the agent the deployment declares for the principal (`GET /v1/agents/{id}`). If that agent is bound to the principal, the setup is already applied and the command exits 13 without opening anything. Otherwise it opens the setup with the continuation the deployment stored on its own proposal, so the deployment answers with the proposal it already has open; the deployment matches per proposer and per continuation, so another administrator gets a second proposal, and whichever is approved second fails `policy_conflict` (reported as already set up). A 409 `rejected_duplicate` (an administrator rejected that proposal) exits 13 naming the rejected approval and says to create new credentials; the command does not fall back to a new agent. A 409 `continuation_conflict` is explained. The principal id is lower-cased once, as the deployment does. `--agent` and `--skip-setup` keep their meaning.
+
+  `@noblecloak/client`: `GovernanceApi.getAgent(id)` reads an agent (`GET /v1/agents/{id}`), and a `Problem` carries `rejectedApprovalId` from a 409 `rejected_duplicate`.
+
+- Updated dependencies [8f8f11e]
+- Updated dependencies [4a9cdca]
+  - @noblecloak/client@0.14.1
+
 ## 0.2.0
 
 ### Minor Changes
