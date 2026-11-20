@@ -2,7 +2,7 @@
 
 A tool policy can look at the arguments of a call, not only at which tool it is. This page is for two readers: an
 **administrator**, who writes "bookings over 500 need a team lead", and a **builder**, who asks "what must my
-runtime send for that to work?". The rules come from the contract (`@noblecloak/spec`, `openapi.yaml`, revision
+runtime send for that to work?". The rules come from the contract (`@noblecloak/spec`, `openapi.public.yaml`, revision
 16), and each section names where. A deployment says which of it it serves in `GET /v1/capabilities`:
 `tools.facts`, `policies.rules` and `approvals.requirements`. One that lists none behaves as before revision 16.
 

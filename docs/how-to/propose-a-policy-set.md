@@ -6,7 +6,7 @@ for all three at once and lets one person, an administrator of the organisation,
 change. It is a single approval, and nothing changes until it is approved.
 
 This guide follows one proposal from the request to its effect, against the mock, which needs no account. The
-rules come from the contract (`@noblecloak/spec`, `openapi.yaml`): the section "Deployment-applied proposals" of the
+rules come from the contract (`@noblecloak/spec`, `openapi.public.yaml`): the section "Deployment-applied proposals" of the
 API description, and the schema `PolicySetProposal`. Sections 1 to 5 describe the proposal as revision 14 introduced it;
 section 6 adds what revision 18 allows (role rows, a set without an agent, and tool grants).
 

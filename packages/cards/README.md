@@ -9,6 +9,14 @@ depends on `@noblecloak/client` for types only.
 - **Click payload:** `encodeActionPayload`, `parseActionPayload`, `parseExecuteData`, `findCardAction`, `clickIntent`
 - **Limits**, **What a card shows**, **Safety**, **License**
 
+## Install
+
+```sh
+npm install @noblecloak/cards
+```
+
+`@noblecloak/client` is its one dependency and arrives with it.
+
 ## Use
 
 ```ts

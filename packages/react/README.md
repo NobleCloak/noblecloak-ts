@@ -20,7 +20,7 @@ It talks to the NobleCloak module API and needs nothing else of the server.
 ## Contract revision
 
 Approvals and Action status are built for **revision 8 of the module API contract**; the package's tests run against
-the mock server of this repository's `packages/spec`, which implements revision 15. Four things need a service of
+the mock server of this repository's `packages/spec`, which implements revision 18. Four things need a service of
 revision 6 or later: the stream's `approver=me` filter, the recently decided view (`state` as a set and
 `order=resolved_at`), approving several requests at once, and the names, `requester` and `arguments_state` an
 approval carries. Revision 8 adds the scope a person's token needs to resolve (`Capabilities.user_resolve_scope`,
@@ -44,15 +44,22 @@ bun add @noblecloak/react        # or: npm install @noblecloak/react
 `@noblecloak/theme`, the primitives the components render, are dependencies and arrive with it. Import from the
 subpaths; the package root has no module in it.
 
-| Import                            | What it holds                                                                                                           |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `@noblecloak/react/approvals`     | `useApprovals`, `useApprovalRequest`, `createApprovalsStore`, `Approvals`, `ApprovalRequest`, `MODULE_ID` and the types |
-| `@noblecloak/react/action-status` | `useActionStatus`, `ActionStatus`, `MODULE_ID` and the types                                                            |
-| `@noblecloak/react/auth`          | `createBrowserAuth`, `useAuthState`, `AuthError`, the refresh-token stores and the types                                |
-| `@noblecloak/react/slots`         | `NcProvider`, `useNc`, `useSlot`, `defaultComponents` and the `NcComponents` type (see "Bring your own components")     |
-| `@noblecloak/react/styles.css`    | the component's stylesheet, scoped under `.nc-root`; the hook and sign-in need none                                     |
+| Import                            | What it holds                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@noblecloak/react/approvals`     | `useApprovals`, `useApprovalRequest`, `createApprovalsStore`, `requirementsOf`, `Approvals`, `ApprovalRequest`, `MODULE_ID` and the types                                |
+| `@noblecloak/react/permissions`   | `usePolicies`, `usePolicyEditor`, `usePolicySimulate`, `useEffectivePolicies`, `createPoliciesStore`, `Permissions`, `MODULE_ID` and the types (see "Embed Permissions") |
+| `@noblecloak/react/connections`   | `useConnections`, `useConnection`, `createConnectionsStore`, `Connections`, `ConnectionDetail`, `AddConnection`, `MODULE_ID` and the types (see "Embed Connections")     |
+| `@noblecloak/react/action-status` | `useActionStatus`, `ActionStatus`, `MODULE_ID` and the types                                                                                                             |
+| `@noblecloak/react/auth`          | `createBrowserAuth`, `useAuthState`, `AuthError`, the refresh-token stores and the types                                                                                 |
+| `@noblecloak/react/slots`         | `NcProvider`, `useNc`, `useSlot`, `defaultComponents` and the `NcComponents` type (see "Bring your own components")                                                      |
+| `@noblecloak/react/styles.css`    | the component's stylesheet, scoped under `.nc-root`; the hook and sign-in need none                                                                                      |
 
-## Embed it
+## Quickstart
+
+Start with the Approvals module. Action status, Permissions and Connections each have a section of their own
+further down.
+
+### Embed it
 
 `approvals` and `auth` are client modules (they start with `'use client'`), so under the Next.js App Router
 use them from a client component. The component takes what `useApprovals` returns:
@@ -64,7 +71,7 @@ import { Approvals, useApprovals } from '@noblecloak/react/approvals';
 import '@noblecloak/react/styles.css';
 
 export function Inbox({ getToken }: { getToken: () => Promise<string> }) {
-  const controller = useApprovals({ baseUrl: 'https://approvals.example.test', getToken });
+  const controller = useApprovals({ baseUrl: 'https://govern.noblecloak.com', getToken });
   return <Approvals controller={controller} />;
 }
 ```
@@ -155,7 +162,7 @@ import { ApprovalRequest, useApprovalRequest } from '@noblecloak/react/approvals
 import '@noblecloak/react/styles.css';
 
 export function RequestPage({ id, getToken }: { id: string; getToken: () => Promise<string> }) {
-  return <ApprovalRequest id={id} baseUrl="https://approvals.example.test" getToken={getToken} />;
+  return <ApprovalRequest id={id} baseUrl="https://govern.noblecloak.com" getToken={getToken} />;
 }
 ```
 
@@ -204,7 +211,7 @@ export function Status({
   return (
     <ActionStatus
       approvalId={approvalId}
-      baseUrl="https://approvals.example.test"
+      baseUrl="https://govern.noblecloak.com"
       getToken={getToken}
     />
   );
@@ -281,17 +288,17 @@ The hook alone brings no component and no stylesheet (the build asserts it).
 
 ## Sign in
 
-`createBrowserAuth` is an OAuth 2.0 authorization-code flow with PKCE (S256) for a **public client**: no
+`createBrowserAuth` is an OAuth 2.1 authorization-code flow with PKCE (S256) for a **public client**: no
 client secret exists in a browser.
 
 ```ts
 import { createBrowserAuth } from '@noblecloak/react/auth';
 
 export const auth = createBrowserAuth({
-  issuer: 'https://auth.example.test', // endpoints come from its metadata document
+  issuer: 'https://auth.noblecloak.com', // endpoints come from its metadata document
   clientId: '<the id of your registered public client>',
   redirectUri: 'http://localhost:3000/approvals/callback', // exact, on this page's origin
-  resource: 'https://approvals.example.test', // the API's origin: the token's audience
+  resource: 'https://govern.noblecloak.com', // the API's origin: the token's audience
 });
 ```
 
@@ -308,9 +315,9 @@ export const auth = createBrowserAuth({
   (the contract's rev 8 `Capabilities.user_resolve_scope`): a deployment that advertises it answers a person's
   token that lacks it with 403 `insufficient_scope` when it resolves, approves or denies, and reads, withdrawals
   and consumption are not gated by this scope. That scope is why this module asks; a client that does not ask for
-  it, such as the plugin, gets a token without it, so such a token can open and read approvals but cannot
+  it, such as the NobleCloak Claude Code plugin, gets a token without it, so such a token can open and read approvals but cannot
   resolve them. Pass `scope: ''` to send no `scope` parameter (a sign-in that only reads), or your own
-  space-separated scope tokens to replace the default. Core drops a scope it does not issue, and the
+  space-separated scope tokens to replace the default. NobleCloak's authorization server drops a scope it does not issue, and the
   token then carries no scope; another authorization server may refuse the sign-in with `invalid_scope` instead, in which
   case pass `scope: ''` or the scope it issues. Where the API gates the resolve, a token without the scope gets 403
   `insufficient_scope`. A refresh keeps the scopes of the
@@ -497,7 +504,7 @@ export function Inbox(props: {
       <Approvals controller={props.controller} />
       <ActionStatus
         approvalId={props.approvalId}
-        baseUrl="https://approvals.example.test"
+        baseUrl="https://govern.noblecloak.com"
         getToken={props.getToken}
       />
     </NcProvider>
@@ -541,7 +548,7 @@ import { Permissions, usePolicies } from '@noblecloak/react/permissions';
 
 export function PolicyTable({ getToken }: { getToken: () => Promise<string> }) {
   const policies = usePolicies({
-    baseUrl: 'https://govern.example.test',
+    baseUrl: 'https://govern.noblecloak.com',
     getToken,
     roles: [{ id: 'member' }, { id: 'admin', label: 'Administrators' }],
   });
@@ -619,7 +626,7 @@ part; `connection_registration` and `connection_transports` narrow the form to t
 import { Connections, useConnections } from '@noblecloak/react/connections';
 
 export function ToolServers({ getToken }: { getToken: () => Promise<string> }) {
-  const connections = useConnections({ baseUrl: 'https://govern.example.test', getToken });
+  const connections = useConnections({ baseUrl: 'https://govern.noblecloak.com', getToken });
   return <Connections controller={connections} />;
 }
 ```
@@ -674,4 +681,6 @@ Permissions and Connections modules, signs in
 and carries a content-security policy. It also runs against the reference mock server with no sign-in
 service. Its README has the steps.
 
-Licensed under Apache-2.0; see the repository `LICENSE` and `NOTICE`.
+## License
+
+Apache-2.0; see the repository `LICENSE` and `NOTICE`.

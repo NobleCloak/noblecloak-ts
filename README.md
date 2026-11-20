@@ -7,40 +7,41 @@ Governance UI modules, the module API contract, and runtime adapters for NobleCl
 
 ## Packages
 
-| Package                      | Path                              | Status                            |
-| ---------------------------- | --------------------------------- | --------------------------------- |
-| `@noblecloak/spec`           | `packages/spec`                   | built, unpublished until the flip |
-| `@noblecloak/client`         | `packages/client`                 | built, unpublished until the flip |
-| `@noblecloak/cli`            | `packages/cli`                    | built, unpublished until the flip |
-| `@noblecloak/react`          | `packages/react`                  | built, unpublished until the flip |
-| `@noblecloak/theme`          | `packages/theme`                  | built, unpublished until the flip |
-| `@noblecloak/policy-formats` | `packages/policy-formats`         | built, unpublished until the flip |
-| `@noblecloak/cards`          | `packages/cards`                  | built, on no publish allowlist    |
-| `@noblecloak/setup-steps`    | `packages/setup-steps`            | built, on no publish allowlist    |
-| `@noblecloak/webhook`        | `packages/adapters/webhook`       | deferred (private, not in v1)     |
-| `@noblecloak/ai-sdk`         | `packages/adapters/ai-sdk`        | deferred (private, not in v1)     |
-| `@noblecloak/openai-agents`  | `packages/adapters/openai-agents` | deferred (private, not in v1)     |
-| `n8n-nodes-noblecloak`       | `packages/adapters/n8n`           | deferred (private, not in v1)     |
+| Package                      | Path                              | Status                        |
+| ---------------------------- | --------------------------------- | ----------------------------- |
+| `@noblecloak/spec`           | `packages/spec`                   | published on npm              |
+| `@noblecloak/client`         | `packages/client`                 | published on npm              |
+| `@noblecloak/cli`            | `packages/cli`                    | published on npm              |
+| `@noblecloak/react`          | `packages/react`                  | published on npm              |
+| `@noblecloak/theme`          | `packages/theme`                  | published on npm              |
+| `@noblecloak/policy-formats` | `packages/policy-formats`         | published on npm              |
+| `@noblecloak/cards`          | `packages/cards`                  | published on npm              |
+| `@noblecloak/setup-steps`    | `packages/setup-steps`            | published on npm              |
+| `@noblecloak/webhook`        | `packages/adapters/webhook`       | deferred (private, not in v1) |
+| `@noblecloak/ai-sdk`         | `packages/adapters/ai-sdk`        | deferred (private, not in v1) |
+| `@noblecloak/openai-agents`  | `packages/adapters/openai-agents` | deferred (private, not in v1) |
+| `n8n-nodes-noblecloak`       | `packages/adapters/n8n`           | deferred (private, not in v1) |
 
 `packages/skills` and `examples/next-app` are not published.
 
 Published adapters live in their own repositories (`noblecloak-langgraph-ts`; `noblecloak-langgraph-py` is
-reserved); `packages/adapters/` holds deferred, unpublished adapters. Documentation is not hosted from
-this repository; it lives at docs.noblecloak.com, which renders the `/v1` reference from the
-published `@noblecloak/spec` package.
+public and not yet released); `packages/adapters/` holds deferred, unpublished adapters. Documentation is
+not hosted from this repository; it lives at docs.noblecloak.com, whose approvals guides are copied from
+this repository's `docs/`.
 
 ## Five-minute builder path
 
-This path fills in as the modules land. When it is complete it will be: install a module
-(`bun add @noblecloak/react`), point it at an API, and see an approvals queue rendered against the
-mock server. Until then, `examples/next-app` is the fixture the modules run against, and it already embeds
-the approvals queue (`/approvals`, against the mock or a deployment; see its README):
+`examples/next-app` embeds the Approvals, Permissions and Connections modules and runs against the
+reference mock server with no sign-in service, or against a deployment (see its README):
 
 ```sh
 bun install
 bun run build
 cd examples/next-app && bun run dev   # http://localhost:3000, GET /api/health, /approvals
 ```
+
+In your own app, install a module (`bun add @noblecloak/react`) and follow
+[`packages/react/README.md`](packages/react/README.md).
 
 ## Development
 

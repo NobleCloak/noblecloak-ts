@@ -223,6 +223,8 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun run guard
+      - name: Every package and example README has the sections a stranger needs
+        run: bun run check:readmes
 
   actionlint:
     name: actionlint
