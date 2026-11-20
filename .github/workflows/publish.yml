@@ -16,6 +16,13 @@
 # skips the rest), so a main push that changes no version publishes nothing, and any push that does
 # bump a version publishes it without waiting for a tag. `needs: pack` makes the dry run pass first.
 #
+# `publish plan` asks npm whether it lacks any public package at its current version, and
+# `publish npm` runs only when it does. A job that names an environment asks for that environment's
+# approval before it starts, so without the plan every main push asked for the `npm-publish`
+# approval, including the push that only opens the version pull request and publishes nothing. The
+# plan installs nothing, holds `contents: read` and cannot publish; when its lookup fails it answers
+# "yes", so the release script runs and reports.
+#
 # Each publish job holds the one write credential its registry accepts (`id-token: write` for npm,
 # `packages: write` for GitHub Packages), so each runs no `bun install` and no build: no dependency's
 # code runs where it could use that credential. They download the `npm-packages` artifact the pack job
@@ -63,6 +70,28 @@ jobs:
           path: artifacts/*.tgz
           if-no-files-found: error
 
+  plan:
+    name: publish plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      has_unpublished: ${{ steps.plan.outputs.has_unpublished }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      # No install: the script needs only Node built-ins and the workspace manifests, and it calls
+      # `npm view`.
+      - id: plan
+        run: bun --no-install scripts/publish-plan.ts
+
   version:
     name: publish version
     # Opens or updates the Changesets version pull request. Publishes nothing. The pull request is
@@ -100,8 +129,11 @@ jobs:
 
   publish:
     name: publish npm
-    needs: pack
-    if: vars.PUBLIC_RELEASE_ENABLED == 'true'
+    # `pack` carries the manual-run condition (main only); a skipped `pack` skips this job too.
+    needs: [pack, plan]
+    # The second term keeps the job, and with it the environment's approval request, off a run that
+    # has nothing to publish.
+    if: vars.PUBLIC_RELEASE_ENABLED == 'true' && needs.plan.outputs.has_unpublished == 'true'
     # npm's trusted-publisher entry for each package names this environment, so a token minted
     # outside it (a modified publish.yml on a pushed tag that drops this line) is refused. The
     # environment requires a reviewer and allows only main and v* tags.
