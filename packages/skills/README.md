@@ -19,8 +19,8 @@ that of the connections skill; CI runs the same script (`skill / approvals`, `sk
 `skill / connections`). The permissions and connections runs have the mock stage only (`e2e/permissions.spec.ts`,
 `e2e/connections.spec.ts`): the sign-in spec covers the approvals route. It packs the workspace's public packages and installs `@noblecloak/react`, `@noblecloak/client` and
 `@noblecloak/theme` from those tarballs, scaffolds a fresh Next.js app with a pinned `create-next-app`, applies the skill with its own
-script (`--source <tarballs>`, because the packages are not on npm until the public release; a user's steps
-say `bun add @noblecloak/react`), then builds and end-to-end tests the app in both modes, and compares the
+script (`--source <tarballs>`, so the run tests the workspace's own builds, not the published ones; a user's
+steps say `bun add @noblecloak/react`), then builds and end-to-end tests the app in both modes, and compares the
 files the skill generated with the example's. It fails if a spec fails or the files differ (aliases
 resolved; both sides formatted by prettier with fixed options and the binding imports sorted, so string and
 template literals and the order of side-effect imports still count).

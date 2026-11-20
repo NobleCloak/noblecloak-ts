@@ -11,7 +11,7 @@ a format cannot carry:
 It is pure: no network and no React. It runs in a browser, in Node and in Bun. Nothing is lost silently:
 each construct a format cannot carry is listed with a JSON-pointer path and a reason.
 
-- **Install**
+- **Install**, **Usage**
 - **Export:** `exportCedar`, `exportAgt`
 - **Import:** `importCedar`, `importAgt` (from `@noblecloak/policy-formats/import`)
 - **Round trip:** `canonicalPolicy`, `diffPolicies`
@@ -29,6 +29,11 @@ npm install @cedar-policy/cedar-wasm@4.14.0
 Exporting needs nothing else. Importing parses Cedar with `@cedar-policy/cedar-wasm` 4.14.0, an optional
 peer dependency of about 4.4 MB. The import entry loads it with a dynamic `import()` on the first call,
 and the root entry never imports it, so an app that only exports never bundles it.
+
+## Usage
+
+Exporting is the package root; importing is the `@noblecloak/policy-formats/import` entry. Each has a
+section below, and so does the round trip.
 
 ## Export
 

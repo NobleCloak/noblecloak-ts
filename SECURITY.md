@@ -4,11 +4,8 @@
 
 Please do not open a public issue for a security problem.
 
-- While this repository is private, report it to the repository owners listed in `CODEOWNERS`
-  through a private channel.
-- Once the repository is public, use GitHub's **Report a vulnerability** button on the Security tab
-  (private vulnerability reporting). The NobleCloak trust center becomes the primary route when it
-  is published. Its address is added here when it is published.
+Report it to **security@noblecloak.com**. NobleCloak's vulnerability disclosure policy is at
+https://trust.noblecloak.com/policies/disclosure.
 
 Include the affected package and version, a description of the issue, and steps to reproduce it.
 

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 import { findViolations } from './check-private-deps.js';
+import { findReadmeProblems } from './check-readmes.js';
 import { listWorkspacePackages } from './workspace.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -906,6 +907,27 @@ describe('workflows', () => {
     expect(
       jobs.actionlint?.steps?.some((s) => s.uses?.startsWith('docker://rhysd/actionlint'))
     ).toBe(true);
+  });
+
+  it('every package and example README passes the README check', () => {
+    expect(findReadmeProblems(ROOT)).toEqual([]);
+  });
+
+  // The check runs on every pull request, and again in the job both publish jobs wait for, before
+  // anything is packed.
+  it('ci and the publish pack job run the README check, and both publish jobs need pack', () => {
+    const scripts = readJson('package.json').scripts as Record<string, string>;
+    expect(scripts['check:readmes']).toBe('bun scripts/check-readmes.ts');
+    const ciSteps = loadWorkflow('ci.yml').jobs.guard?.steps ?? [];
+    expect(ciSteps.some((s) => s.run === 'bun run check:readmes')).toBe(true);
+    const publish = loadWorkflow('publish.yml').jobs;
+    const packRuns = (publish.pack?.steps ?? []).map((s) => s.run ?? '');
+    expect(packRuns).toContain('bun run check:readmes');
+    expect(packRuns.indexOf('bun run check:readmes')).toBeLessThan(
+      packRuns.indexOf('bun run pack:all')
+    );
+    expect(publish.publish?.needs).toEqual('pack');
+    expect(publish['publish-github-packages']?.needs).toEqual('pack');
   });
 });
 

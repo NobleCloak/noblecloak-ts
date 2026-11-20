@@ -3,7 +3,7 @@
 A connection is an organisation's registration of a tool server: an MCP server (or an A2A agent) that the
 organisation's agents call through the governed gateway. This page is for two readers: an **administrator**, who
 registers servers and decides how calls through them authenticate, and a **member**, who links a credential of their
-own so that their calls through a server work. The rules come from the contract (`@noblecloak/spec`, `openapi.yaml`,
+own so that their calls through a server work. The rules come from the contract (`@noblecloak/spec`, `openapi.public.yaml`,
 revision 11). The Connections module (`@noblecloak/react/connections`) is one way to show and use them.
 
 ## What a registration is

@@ -77,7 +77,7 @@ accepted as an approver. The placeholder origins below are `https://govern.examp
    # {"issuer":"https://auth.example.test","client_id":"..."}
    ```
 
-2. **Configure the app.** Copy `.env.example` to `.env.local` and fill in the four variables (leave
+2. **Configure the app.** Copy `.env.example` to `.env.local` and fill in these four variables for the approvals page (leave
    `NEXT_PUBLIC_NC_MODE` unset: unset means sign-in):
 
    ```sh
@@ -86,6 +86,9 @@ accepted as an approver. The placeholder origins below are `https://govern.examp
    NEXT_PUBLIC_NC_CLIENT_ID=<the client_id from step 1>
    NEXT_PUBLIC_NC_REDIRECT_URI=http://localhost:3000/approvals/callback   # exactly this page
    ```
+
+   The permissions and connections pages each return to a callback of their own:
+   `NEXT_PUBLIC_NC_PERMISSIONS_REDIRECT_URI` and `NEXT_PUBLIC_NC_CONNECTIONS_REDIRECT_URI`, both in `.env.example`.
 
    The API address, the issuer and the redirect address must be `https`, or `http://localhost` for local
    work; `http://127.0.0.1` is refused in sign-in mode; the redirect address is exact, with no query, fragment or wildcard. The app tells you which
@@ -110,9 +113,9 @@ accepted as an approver. The placeholder origins below are `https://govern.examp
    against a deployment.
 
 Open http://localhost:3000/approvals and click **Sign in**. Signing in is always a click: nothing signs in
-on load, and a denial or an error stays on the page with a **Try again** button. Once the deployment's
-consent step is enabled (it is off today), it will ask you to let this app read and decide the approval
-requests waiting for you; its text is the deployment's, not this app's.
+on load, and a denial or an error stays on the page with a **Try again** button. The deployment's
+consent step then asks you to let this app read and decide the approval requests waiting for you; its
+text is the deployment's, not this app's.
 
 ## Troubleshooting
 
@@ -143,7 +146,7 @@ server is exempt. `/approvals/callback` is also sent with `Cache-Control: no-sto
   3000 and, in mock mode, 8787; in sign-in mode the sign-in service and the API are answered by the test.
   - Mock mode (`e2e/approvals.spec.ts`), across `http://localhost:3000` and `http://127.0.0.1:8787`: the
     policy header, the queue, the detail read (nothing can be decided before it loads), Approve and Deny. The
-    queue row must show within 2 s of the page's load (the brief's 2 s, measured from the page's load,
+    queue row must show within 2 s of the page's load (measured from the page's load,
     when the approval already exists; the agent-to-page time is not timed).
   - Mock mode (`e2e/permissions.spec.ts`): each test starts its own mock with this app's origin allowed. The
     table shows the two seeded policies; an administrator sets an Organisation cell, simulates the draft (it
@@ -153,9 +156,9 @@ server is exempt. `/approvals/callback` is also sent with `Cache-Control: no-sto
     administrator registers a tool server, refreshes its tools and links a bearer token of their own after
     ticking the consent (the token is on no page afterwards); an OAuth link consents, leaves for the mock's
     consent page and comes back to the page, which says the authorization completed and shows the link.
-  - Sign-in mode (`e2e/signin.spec.ts`, T23c): the callback in a real browser with a seeded pending record
+  - Sign-in mode (`e2e/signin.spec.ts`): the callback in a real browser with a seeded pending record
     and a stand-in sign-in service. A denied consent stays on the callback, makes no request and the
     approvals page does not navigate afterwards; a granted one exchanges the code once, cleans the
     address and the API receives the access token. It does not cover the redirect to a real authorization
-    server (the beta half). The API origin of this run is `http://localhost:8789`, because sign-in accepts
+    server. The API origin of this run is `http://localhost:8789`, because sign-in accepts
     `https:` or `http://localhost` there and not `http://127.0.0.1`.
