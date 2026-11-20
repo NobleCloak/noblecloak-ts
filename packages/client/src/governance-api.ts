@@ -54,12 +54,17 @@ function problemOf(status: number, error: unknown): Problem {
   const detail = isObject(error) && typeof error.detail === 'string' ? error.detail : undefined;
   const reason = isObject(error) && typeof error.reason === 'string' ? error.reason : undefined;
   const refusalCode = isObject(error) && typeof error.code === 'string' ? error.code : undefined;
+  const rejectedApprovalId =
+    isObject(error) && typeof error.rejected_approval_id === 'string'
+      ? error.rejected_approval_id
+      : undefined;
   return {
     status,
     code: type.slice(type.lastIndexOf('/') + 1),
     ...(detail === undefined ? {} : { detail }),
     ...(reason === undefined ? {} : { reason }),
     ...(refusalCode === undefined ? {} : { refusalCode }),
+    ...(rejectedApprovalId === undefined ? {} : { rejectedApprovalId }),
   };
 }
 
@@ -182,6 +187,18 @@ export class GovernanceApi {
             ? {}
             : { params: { header: { 'Idempotency-Key': idempotencyKey } } }),
         }),
+      (data) => data as Agent
+    );
+  }
+
+  /**
+   * Reads one declared agent of the organisation (`GET /v1/agents/{id}`). `principal_id` is the service
+   * principal the agent is bound to, null when unbound; a deployment before contract rev 13 omits it.
+   * An agent that is absent, another organisation's, or whose id is not a UUID is 404.
+   */
+  getAgent(id: string): Promise<Answer<Agent>> {
+    return this.#call(
+      () => this.#client.GET('/v1/agents/{id}', { params: { path: { id } } }),
       (data) => data as Agent
     );
   }

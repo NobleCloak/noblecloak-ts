@@ -9,6 +9,8 @@ export interface Problem {
   readonly reason?: string;
   /** The body's `code` member when it has one: on `proposal_refused` why (`principal_bound`, `policy_conflict`, ...). Not `code`, which is the problem type. */
   readonly refusalCode?: string;
+  /** The body's `rejected_approval_id` member when it has one: on 409 `rejected_duplicate`, the approval an administrator rejected. */
+  readonly rejectedApprovalId?: string;
 }
 
 export type Answer<T> =

@@ -149,6 +149,50 @@ describe('GovernanceApi createApproval and createAgent', () => {
   });
 });
 
+describe('GovernanceApi getAgent and a problem’s extras', () => {
+  it('getAgent reads /v1/agents/{id} and returns the agent with its bound principal', async () => {
+    const { api, seen } = harness(() =>
+      ok({ id: 'agent_1', name: 'n', parent_id: null, principal_id: 'sp-1' })
+    );
+    expect(await api.getAgent('agent_1')).toEqual({
+      ok: true,
+      data: { id: 'agent_1', name: 'n', parent_id: null, principal_id: 'sp-1' },
+    });
+    expect(seen[0]?.method).toBe('GET');
+    expect(seen[0]?.url.pathname).toBe('/v1/agents/agent_1');
+  });
+
+  it('getAgent returns an absent agent as a 404 Problem', async () => {
+    const { api } = harness(() => problem(404, 'not_found', 'Agent not found'));
+    expect(await api.getAgent('agent_1')).toEqual({
+      ok: false,
+      problem: { status: 404, code: 'not_found', detail: 'Agent not found' },
+    });
+  });
+
+  it('a 409 rejected_duplicate carries the rejected approval id', async () => {
+    const { api } = harness(
+      () =>
+        new Response(
+          JSON.stringify({
+            type: 'https://govern.example.com/problems/rejected_duplicate',
+            status: 409,
+            rejected_approval_id: 'ap_rejected',
+          }),
+          { status: 409, headers: { 'content-type': 'application/problem+json' } }
+        )
+    );
+    const answer = await api.createApproval({
+      action: { tool_ref: 'tool:x', arguments: {} },
+      continuation: { kind: 'mcp_held', delivery: 'held' },
+    });
+    expect(answer).toMatchObject({
+      ok: false,
+      problem: { status: 409, code: 'rejected_duplicate', rejectedApprovalId: 'ap_rejected' },
+    });
+  });
+});
+
 describe('GovernanceApi answers', () => {
   it('unwraps data from the envelope', async () => {
     const { api } = harness(() => ok({ id: 'a1', state: 'pending' }));
