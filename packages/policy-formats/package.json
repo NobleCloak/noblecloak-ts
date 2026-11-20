@@ -45,7 +45,7 @@
     "yaml": "2.9.1"
   },
   "peerDependencies": {
-    "@cedar-policy/cedar-wasm": "4.14.0"
+    "@cedar-policy/cedar-wasm": "4.15.0"
   },
   "peerDependenciesMeta": {
     "@cedar-policy/cedar-wasm": {
@@ -53,7 +53,7 @@
     }
   },
   "devDependencies": {
-    "@cedar-policy/cedar-wasm": "4.14.0",
+    "@cedar-policy/cedar-wasm": "4.15.0",
     "ajv": "8.20.0"
   }
 }
