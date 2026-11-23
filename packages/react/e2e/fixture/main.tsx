@@ -21,7 +21,11 @@ import { NcProvider } from '../../src/slots.js';
 import type { ApprovalsError } from '../../src/approvals-types.js';
 
 import { queueRows } from '../../src/testing/component-harness.js';
-import { detailStates, fakeController } from '../../src/testing/fake-controller.js';
+import {
+  approvalSummary,
+  detailStates,
+  fakeController,
+} from '../../src/testing/fake-controller.js';
 import { fakePoliciesController } from '../../src/testing/permissions-fake.js';
 import { fakeConnectionsController } from '../../src/testing/connections-fake.js';
 
@@ -34,7 +38,15 @@ export interface MountOptions {
    * `connections`: the registrations over fixture ones, with the form's opener, and one registration open (its
    * changes, the caller's own credential and its tools).
    */
-  readonly module: 'approvals' | 'request' | 'status' | 'fallback' | 'permissions' | 'connections';
+  readonly module:
+    | 'approvals'
+    | 'approvals-decide'
+    | 'approvals-proposal'
+    | 'request'
+    | 'status'
+    | 'fallback'
+    | 'permissions'
+    | 'connections';
   /**
    * Replace `Button`: `true` or `'provider'` through an `NcProvider` with a marked native button; `'prop'` through
    * the module's `components` prop; `'builder'` through an `NcProvider` with a builder's button whose label is its
@@ -151,6 +163,74 @@ function moduleFor(module: MountOptions['module'], slotted: Slotted): ReactEleme
             loadRecent: () => Promise.resolve(),
             approveMany: () => Promise.resolve({ ok: true, results: [] }),
             detail: detailStates('apr_1', { arguments: { amount: 4200, currency: 'USD' } }).loaded,
+          })}
+        />
+      );
+    case 'approvals-decide':
+      // An admin-level request (Approve asks to confirm) whose call is far taller than the screen.
+      return (
+        <Approvals
+          {...slotted}
+          controller={fakeController({
+            approvals: queueRows(3, { side_effect_level: 'admin' }),
+            detail: detailStates('apr_1', {
+              approval: {
+                side_effect_level: 'admin',
+                requester: { id: 'sp_7d1e', kind: 'service', display_name: 'Planes CRM' },
+                // The caller's own hint: shown only as "via", never as the asker.
+                agent: { id: 'agent_planes', name: 'Trusted Finance Agent' },
+              },
+              arguments: Object.fromEntries(
+                Array.from({ length: 120 }, (_, index) => [`field_${String(index)}`, index])
+              ),
+            }).loaded,
+          })}
+        />
+      );
+    case 'approvals-proposal':
+      // The setup proposal a first-time user meets: a propose-policy-set from a named agent.
+      return (
+        <Approvals
+          {...slotted}
+          controller={fakeController({
+            approvals: [
+              approvalSummary({
+                id: 'apr_1',
+                tool_ref: 'tool:noblecloak:propose-policy-set',
+                side_effect_level: 'admin',
+                requester: { id: 'sp_7d1e', kind: 'service', display_name: 'Planes CRM' },
+                created_at: new Date(Date.now() - 11 * 60_000).toISOString(),
+              }),
+              approvalSummary({
+                id: 'apr_2',
+                tool_ref: 'ext:billing:issue_refund',
+                requester: { id: 'sp_7d1e', kind: 'service', display_name: 'Planes CRM' },
+                created_at: new Date(Date.now() - 3 * 60_000).toISOString(),
+              }),
+            ],
+            detail: detailStates('apr_1', {
+              approval: {
+                tool_ref: 'tool:noblecloak:propose-policy-set',
+                side_effect_level: 'admin',
+                requester: { id: 'sp_7d1e', kind: 'service', display_name: 'Planes CRM' },
+                preview: { simulations: [], loosening: [] },
+              },
+              arguments: {
+                agent: { id: 'agent_planes', principal_id: 'sp_7d1e' },
+                tools: [{ tool_ref: 'ext:crm:lookup', side_effect_level: 'read' }],
+                policies: Array.from({ length: 3 }, (_, index) => ({
+                  role: 'baseline',
+                  rationale: 'Because.',
+                  assessment: { side_effect_level: 'write', blast_radius: 'one_record' },
+                  policy: {
+                    kind: 'tool_invocation',
+                    subjects: [{ type: 'role', id: 'everyone' }],
+                    targets: { tools: [`mcp:planes/main/tool_${String(index)}`] },
+                    config: { mode: index % 2 === 0 ? 'ask' : 'always_allow' },
+                  },
+                })),
+              },
+            }).loaded,
           })}
         />
       );

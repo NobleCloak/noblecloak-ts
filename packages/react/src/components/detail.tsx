@@ -13,10 +13,11 @@ import type { ApprovalRequirementView } from '../approvals-requirements.js';
 import { Actions } from './actions.js';
 import { CallView, callIsWhole, formatCall } from './call-view.js';
 import { ErrorMessage, errorText } from './error-message.js';
-import { clipText, formatTime } from './format.js';
+import { formatTime } from './format.js';
 import type { Translate } from './labels.js';
 import { escapeInvisible } from './format-json.js';
 import { ProposalSection } from './proposal.js';
+import { requestTitle } from './request-title.js';
 import { Safe } from './safe.js';
 import { useNc } from './slots.js';
 import { levelWord, obligationWord, principalText } from './words.js';
@@ -349,7 +350,13 @@ export function Detail({
   if (reviewedDigest === undefined && currentDigest !== undefined) setReviewedDigest(currentDigest);
   const digestChanged =
     reviewedDigest !== undefined && currentDigest !== undefined && currentDigest !== reviewedDigest;
-  const heading = approval?.tool_ref ?? t('detailHeadingFallback');
+  const heading = approval === undefined ? t('detailHeadingFallback') : requestTitle(approval, t);
+  // A policy-set proposal's call can be collapsed under its summary, but it is open: the summary reads only some
+  // members of the call (a policy's rules, approvers and exclusions, its kind, a rationale and anything a later
+  // revision adds are not in it), so nothing is hidden unless the approver closes it. The wrapper is there for
+  // every state of the call (whole, cut, repeated key), so pressing "Show all" does not move the call to another
+  // parent and lose the focus with it.
+  const foldCall = proposal?.status === 'ok' && detailArguments !== undefined;
 
   let body: ReactNode = null;
   switch (detail.status) {
@@ -427,6 +434,23 @@ export function Detail({
         : FINAL_STATES.has(detail.approval.state)
           ? 'final'
           : 'unreturned';
+      const callView = (
+        <CallView
+          arguments={detail.arguments}
+          shown={shown}
+          showAll={showAll}
+          onShowAll={() => {
+            setShowAll(true);
+          }}
+          digest={detail.approval.action_digest}
+          phase={phase}
+          {...(detail.approval.arguments_state === undefined
+            ? {}
+            : { argumentsState: detail.approval.arguments_state })}
+          t={t}
+          onCopyResult={onCopyResult}
+        />
+      );
       body = (
         <>
           {detail.status === 'refreshing' ? (
@@ -448,8 +472,6 @@ export function Detail({
               </Button>
             </Alert>
           ) : null}
-          <Facts approval={detail.approval} t={t} />
-          {resolved ? <Outcome approval={detail.approval} t={t} /> : null}
           {proposal?.status === 'ok' && callCanBeWhole ? (
             <ProposalSection proposal={proposal.proposal} t={t} />
           ) : null}
@@ -460,27 +482,32 @@ export function Detail({
               <p>{t('proposalUnreadable')}</p>
             </Alert>
           ) : null}
-          <CallView
-            arguments={detail.arguments}
-            shown={shown}
-            showAll={showAll}
-            onShowAll={() => {
-              setShowAll(true);
-            }}
-            digest={detail.approval.action_digest}
-            phase={phase}
-            {...(detail.approval.arguments_state === undefined
-              ? {}
-              : { argumentsState: detail.approval.arguments_state })}
-            t={t}
-            onCopyResult={onCopyResult}
-          />
+          <Facts approval={detail.approval} t={t} />
+          {resolved ? <Outcome approval={detail.approval} t={t} /> : null}
+          {foldCall ? (
+            <details className="nc-call-fold" open>
+              <summary>{t('callFullToggle')}</summary>
+              {callView}
+            </details>
+          ) : (
+            callView
+          )}
           <Requirements approval={detail.approval} t={t} />
           <History approval={detail.approval} t={t} />
           {resolved || decide === undefined ? null : (
             <Actions
               controller={decide}
               approval={detail.approval}
+              title={requestTitle(detail.approval, t)}
+              offReason={
+                detail.status !== 'loaded'
+                  ? undefined
+                  : digestChanged
+                    ? 'changed'
+                    : !callIsWhole(shown)
+                      ? 'call'
+                      : undefined
+              }
               enabled={detail.status === 'loaded' && callIsWhole(shown) && !digestChanged}
               t={t}
               reason={reason}
@@ -498,7 +525,7 @@ export function Detail({
   return (
     <Card role="region" className="nc-detail" aria-labelledby={headingId}>
       <h3 id={headingId} ref={headingRef} tabIndex={-1}>
-        <bdi>{escapeInvisible(clipText(heading))}</bdi>
+        <bdi>{heading}</bdi>
       </h3>
       {body}
       {onClose === undefined ? null : (

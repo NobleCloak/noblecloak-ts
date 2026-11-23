@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 import type { JsonObject } from '../approvals-types.js';
 import { escapeInvisible, formatJson, isWhole } from './format-json.js';
@@ -117,6 +117,15 @@ export function CallView({
 }: CallViewProps) {
   const { Button } = useNc();
   const headingId = useId();
+  // "Show all" removes its own button, which would drop focus to the page: the call's heading takes it instead.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const pressedShowAll = useRef(false);
+  useEffect(() => {
+    if (showAll && pressedShowAll.current) {
+      pressedShowAll.current = false;
+      headingRef.current?.focus();
+    }
+  }, [showAll]);
 
   if (args === undefined || shown === undefined) {
     return (
@@ -145,7 +154,9 @@ export function CallView({
   const { text, omitted, summarised, tooLarge, inexact, duplicateKey } = shown;
   return (
     <section aria-labelledby={headingId}>
-      <h4 id={headingId}>{t('callFullHeading')}</h4>
+      <h4 id={headingId} ref={headingRef} tabIndex={-1}>
+        {t('callFullHeading')}
+      </h4>
       {tooLarge ? <p role="alert">{t('callTooLarge')}</p> : <pre className="nc-json">{text}</pre>}
       {inexact > 0 ? <p role="alert">{t('callInexactNumbers', { count: inexact })}</p> : null}
       {duplicateKey === undefined ? null : (
@@ -155,7 +166,15 @@ export function CallView({
         <p>
           {omitted > 0 ? `${t('callMoreCharacters', { count: omitted })} ` : ''}
           {summarised > 0 ? `${t('callNestedNotShown', { count: summarised })} ` : ''}
-          <Button type="button" variant="secondary" size="sm" onClick={onShowAll}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              pressedShowAll.current = true;
+              onShowAll();
+            }}
+          >
             {t('callShowAll')}
           </Button>
         </p>

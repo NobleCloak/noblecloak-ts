@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
@@ -12,6 +12,7 @@ import {
   toolHidingArguments,
 } from '../testing/approvals-harness.js';
 import type { Harness } from '../testing/approvals-harness.js';
+import { findRowById } from '../testing/rows.js';
 import { DEFAULT_LABELS } from './labels.js';
 import { Approvals } from './Approvals.js';
 
@@ -86,9 +87,7 @@ describe('the rev 5 wrapper', () => {
       return <Approvals controller={controller} />;
     }
     render(<Probe />);
-    const rowButton = await screen.findByRole('button', {
-      name: new RegExp(opened.digest.slice(0, 12)),
-    });
+    const rowButton = await findRowById(opened.id);
     const row = controller?.approvals.find((a) => a.id === opened.id);
     expect(row).toBeDefined();
     for (const r of controller?.approvals ?? []) expect(carried(r)).toEqual([]);

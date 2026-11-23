@@ -378,8 +378,20 @@ For what an approval itself covers (one call, one scope, used once), see "What a
 
 The person decides on a **fresh read of that one request**, and what the read returns is all the person gets.
 
-- **The queue** shows the tool, its side-effect level (as a word, never by colour alone), the first 12
-  characters of the digest, who asked for it and how long ago it was made. A queue row never carries the
+- **The queue** shows each request as one sentence that says what is asked and by whom, the whole tool
+  reference, its side-effect level (as a word, never by colour alone), how long ago it was made, and "Review
+  and decide". The sentence is "{requester} wants to use {tool} ({source})" for a call, and "Policy setup from
+  {requester}" for a policy-set proposal (`tool:noblecloak:propose-policy-set`), "Policy setup for {agent}, from
+  {requester}" when the request also names another agent. `{requester}` is the name the service gives the
+  principal it verified (`requester.display_name`): it is always the one named as asking. The agent
+  (`agent.name`) is the caller's own display hint, not an identity, so it is only ever "via {agent}" on a call's
+  detail line, never the asker. With no requester name the sentence has none ("A request to use {tool}", "A
+  policy setup request") and the id is in the open request, never in the row. `{tool}` and `{source}` are the
+  tool reference split at its last `:` (`ext:billing:issue_refund` is "issue_refund (ext:billing)"; an
+  `mcp:{server}/{surface}/{tool}` reference is the tool and its server), shown as the service wrote them, so
+  `issue_refund` and `issue-refund` stay different; the service sends no display name for a tool. Names are
+  cut short and isolated, so one cannot push the tool out of the sentence or reorder it. The ids and the digest
+  are facts of the open request. A queue row never carries the
   call's arguments: the module removes them from anything the list, the stream or a decision returns. The
   queue shows more of itself on request ("Show more requests", in steps of 50 up to the 200 the service
   returns at once), and a "Recently decided" tab lists the requests decided lately, newest decision first, with
@@ -402,7 +414,10 @@ The person decides on a **fresh read of that one request**, and what the read re
   with a decision is the digest of the read the person saw. If the request changes while it is open (a new
   digest, or another state), the detail re-reads it once and shows that it changed; a changed digest needs one
   acknowledgement before the buttons come back. A request that is no longer pending shows its outcome and
-  history and no buttons.
+  history and no buttons. The detail is headed by the same sentence as the row. The reason box, Approve and
+  Deny are one group, "Your decision", pinned to the bottom of the screen while the detail is taller than it,
+  so a decision is never below a long call; when the buttons are off because the call above is not shown in
+  full, or because the request changed and the change is not yet acknowledged, the group says so.
 - **The call** is shown in one of two ways, and the page says which, in words:
   - the full call, headed "The full call, as returned for this request" (when the server returned the
     arguments: the tool is registered to show them to approvers and the reader may see them);
@@ -420,7 +435,8 @@ The person decides on a **fresh read of that one request**, and what the read re
   parsing) leaves Approve and Deny disabled**. Nothing is ever shown as a summary written by the agent.
 
 - **A policy-set proposal** (`tool:noblecloak:propose-policy-set`, contract revision 14 and later) gets a panel
-  above the full call, "What approving this does", read from the call and from the `preview` the single read
+  above the full call, "What approving this does" (the full call stays under "Show the full call", open, and the
+  approver can close it; the panel is not a substitute for it, it reads only some members of the call), read from the call and from the `preview` the single read
   serves to a reader who may approve it. Any other approval has no panel, whatever it carries. The panel
   shows, each when it has something to show:
   - **Policies**: grouped by subject (Everyone, then each role, then agents), one line per policy, with the
@@ -458,7 +474,11 @@ The person decides on a **fresh read of that one request**, and what the read re
 - **Never shown**: the continuation, the outcome record and any member the module does not list, so a field a
   later revision adds cannot break or change what is rendered. (The `preview` is read for a policy-set
   proposal only, as above.)
-- **Actions**: a `delete` or `admin` call asks for one more confirmation. A decision that the server refuses
+- **Actions**: Approve on a `delete` or `admin` call opens a confirmation dialog (the theme's `ConfirmDialog`, a
+  modal: focus is held inside it and starts on Cancel, Escape cancels, and the page behind cannot be used). It
+  names the request being approved and the level that asks for it. Deny never asks. The dialog closes, and
+  nothing is sent, if the request can no longer be decided while it is open (the detail reloads, its digest
+  changes, or it is no longer pending). A decision that the server refuses
   is explained in plain words, with the request id: not eligible (a person made an approver moments ago may be
   refused briefly), already decided, expired, not found, or the service is unavailable (retry; when the service
   says the cause is its check of who may decide, the page says that, and the wait it names). The wait is read from

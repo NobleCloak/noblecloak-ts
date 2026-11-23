@@ -1,9 +1,10 @@
 import type { ApprovalSummary, ApprovalsController } from '../approvals-types.js';
 import { ErrorMessage } from './error-message.js';
 import { clipText, formatAge } from './format.js';
+import { Safe } from './safe.js';
 import { escapeInvisible } from './format-json.js';
 import type { Translate } from './labels.js';
-import { Safe } from './safe.js';
+import { requestTitle } from './request-title.js';
 import { useNc } from './slots.js';
 import { principalText } from './words.js';
 
@@ -64,8 +65,11 @@ export function Recent({ controller, t, now, headingId, onSelect, onSignIn }: Re
                 }}
               >
                 <span className="nc-row-tool">
-                  <Safe>{clipText(approval.tool_ref)}</Safe>
+                  <bdi>{requestTitle(approval, t)}</bdi>
                 </span>
+                <code className="nc-muted nc-row-ref">
+                  <Safe>{clipText(approval.tool_ref)}</Safe>
+                </code>
                 <span>
                   <bdi>{outcomeText(approval, t)}</bdi>
                 </span>

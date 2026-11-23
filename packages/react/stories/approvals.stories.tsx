@@ -130,6 +130,46 @@ export const DetailError: Story = detailStory('error');
 export const DetailLongCall: Story = detailStory('loaded', {
   arguments: { text: 'A long value. '.repeat(500) },
 });
+// The setup proposal a first-time user meets: a named agent asks for a policy set, an admin-level decision
+
+const PLANES = { id: 'sp_7d1e', kind: 'service', display_name: 'Planes CRM' } as const;
+export const QueueSetupProposal: Story = withController({
+  approvals: [
+    approvalSummary({
+      id: 'apr_1',
+      tool_ref: 'tool:noblecloak:propose-policy-set',
+      side_effect_level: 'admin',
+      requester: PLANES,
+      created_at: new Date(Date.now() - 11 * 60_000).toISOString(),
+    }),
+    ...rows().map((row) => ({ ...row, requester: PLANES })),
+  ],
+  detail: detailStates('apr_1', {
+    approval: {
+      tool_ref: 'tool:noblecloak:propose-policy-set',
+      side_effect_level: 'admin',
+      requester: PLANES,
+      preview: { simulations: [], loosening: [] },
+    },
+    arguments: {
+      agent: { id: 'agent_planes', principal_id: 'sp_7d1e' },
+      tools: [{ tool_ref: 'ext:crm:lookup', side_effect_level: 'read' }],
+      policies: [
+        {
+          role: 'baseline',
+          rationale: 'Because.',
+          assessment: { side_effect_level: 'write', blast_radius: 'one_record' },
+          policy: {
+            kind: 'tool_invocation',
+            subjects: [{ type: 'role', id: 'everyone' }],
+            targets: { tools: ['mcp:planes/main/search_contacts'] },
+            config: { mode: 'ask' },
+          },
+        },
+      ],
+    },
+  }).loaded,
+});
 export const DetailConfirmLevel: Story = withController({
   approvals: rows(),
   detail: detailStates('apr_2', {
