@@ -14,6 +14,7 @@ describe('starter hosts', () => {
       governUrl: 'https://govern.noblecloak.com',
       mcpUrl: 'https://mcp.noblecloak.com',
       gatewayAudience: 'https://mcp-agents.noblecloak.com',
+      appUrl: 'https://app.noblecloak.com',
     });
   });
 
@@ -23,6 +24,7 @@ describe('starter hosts', () => {
       governUrl: 'https://govern.beta.shared.bianoble.com',
       mcpUrl: 'https://mcp.beta.shared.bianoble.com',
       gatewayAudience: 'https://mcp-agents.beta.shared.bianoble.com',
+      appUrl: 'https://shell.beta.shared.bianoble.com',
     };
     expect(hosts(['--deployment', 'beta'])).toEqual(beta);
     expect(hosts([], { NOBLECLOAK_DEPLOYMENT: 'beta' })).toEqual(beta);
@@ -44,6 +46,17 @@ describe('starter hosts', () => {
       mcpUrl: 'https://mcp.env.example.com',
       gatewayAudience: DEPLOYMENTS.production.gatewayAudience,
     });
+  });
+
+  it('name the browser app only for a deployment whose govern origin is not replaced', () => {
+    expect(hosts(['--govern-url', 'https://govern.example.com']).appUrl).toBeUndefined();
+    expect(hosts(['--govern-url', 'https://govern.noblecloak.com']).appUrl).toBe(
+      'https://app.noblecloak.com'
+    );
+    expect(hosts([], { NOBLECLOAK_GOVERN_URL: 'http://127.0.0.1:8080' }).appUrl).toBeUndefined();
+    expect(
+      hosts(['--deployment', 'beta'], { NOBLECLOAK_GOVERN_URL: 'http://127.0.0.1:8080' }).appUrl
+    ).toBe('https://shell.beta.shared.bianoble.com');
   });
 
   it('accept http on loopback and refuse a path on an origin', () => {

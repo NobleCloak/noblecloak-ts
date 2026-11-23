@@ -108,6 +108,27 @@ const note = (io: Io, line: string): void => {
   io.stderr(`${line}\n`);
 };
 
+/** "1 second", "2 seconds". */
+const secondsText = (n: number): string => `${String(n)} ${n === 1 ? 'second' : 'seconds'}`;
+
+/**
+ * What the terminal says once an approval is open, in three lines: where to decide it (the Approvals URL
+ * when `hosts` names the deployment's app, else the line as it was), what the request is called there (the
+ * Approvals list titles a row by its tool reference), and that this command waits, for how long, and how to
+ * stop. `opened` is the first line without its closing period.
+ */
+export function nextStepLines(
+  hosts: StarterHosts,
+  step: { opened: string; toolRef: string; decide: string; seconds: number }
+): string[] {
+  const where = hosts.appUrl === undefined ? '.' : `: ${hosts.appUrl}/approvals`;
+  return [
+    `${step.opened}${where}`,
+    `In Approvals it is the request for ${step.toolRef}.`,
+    `This command waits up to ${secondsText(step.seconds)} for you to ${step.decide}. Press Ctrl-C to stop; the request stays open.`,
+  ];
+}
+
 function waitSeconds(flags: ParsedFlags): number {
   const raw = stringFlag(flags, 'wait');
   if (raw === undefined) return DEFAULT_WAIT_SECONDS;
@@ -369,13 +390,14 @@ async function awaitApproval(
   again: string
 ): Promise<Approval> {
   const deadline = Date.now() + seconds * 1000;
+  const shown = oneLine(id);
   const floor = io.pollFloorMs ?? 1000;
   for (;;) {
     const remaining = Math.ceil((deadline - Date.now()) / 1000);
     if (remaining <= 0) {
       throw new CliError(
         EXIT.timeout,
-        `Nobody decided ${what} (approval ${id}) within ${String(seconds)} seconds. It stays open: decide it in Approvals, then ${again}.`
+        `Nobody decided ${what} (approval ${shown}) within ${secondsText(seconds)}. It stays open: decide it in Approvals, then ${again}.`
       );
     }
     const started = Date.now();
@@ -397,19 +419,19 @@ async function awaitApproval(
       if (Date.now() + floor >= deadline) {
         throw new CliError(
           EXIT.failed,
-          `${error.message} The approval for ${what} (approval ${id}) is still open: decide it in Approvals, then ${again}.`
+          `${error.message} The approval for ${what} (approval ${shown}) is still open: decide it in Approvals, then ${again}.`
         );
       }
       await sleep(io, floor);
       continue;
     }
     if (approval.state === 'expired') {
-      throw new CliError(EXIT.timeout, `The approval for ${what} expired (approval ${id}).`);
+      throw new CliError(EXIT.timeout, `The approval for ${what} expired (approval ${shown}).`);
     }
     if (settled(approval)) return approval;
     const spent = Date.now() - started;
     if (spent < floor) await sleep(io, floor - spent);
-    if (interrupted(io)) throw interruptedError(`${what} is still open (approval ${id}).`);
+    if (interrupted(io)) throw interruptedError(`${what} is still open (approval ${shown}).`);
   }
 }
 
@@ -609,19 +631,21 @@ async function setUp(
       opened = { agentId, handle: await openSetup(agentId, false), derived: false };
     }
     const { agentId, handle, derived } = opened;
-    if (handle.created) {
-      note(io, `Setup proposed (approval ${handle.id}). Approve it in Approvals.`);
-    } else {
-      note(
-        io,
-        `Setup already open (approval ${handle.id}); not opening another. Approve it in Approvals.`
-      );
-    }
     const waitFor = setupWaitSeconds(seconds, Date.now() - startedAt);
+    for (const line of nextStepLines(hosts, {
+      opened: handle.created
+        ? `Setup proposed (approval ${oneLine(handle.id)}). Approve it in Approvals`
+        : `Setup already open (approval ${oneLine(handle.id)}); not opening another. Approve it in Approvals`,
+      toolRef: PROPOSE_POLICY_SET_REF,
+      decide: 'approve it',
+      seconds: waitFor,
+    })) {
+      note(io, line);
+    }
     if (waitFor < seconds) {
       note(
         io,
-        `Waiting ${String(waitFor)} seconds for the setup, not ${String(seconds)}: your access token lasts 15 minutes. If it is approved later, run again with --skip-setup.`
+        `Waiting ${secondsText(waitFor)} for the setup, not ${String(seconds)}: your access token lasts 15 minutes. If it is approved later, run again with --skip-setup.`
       );
     }
     const approval = await awaitApproval(
@@ -703,7 +727,14 @@ async function writeNote(
               )
             : undefined
   );
-  note(io, `Write requested (approval ${handle.id}). Approve or deny it in Approvals.`);
+  for (const line of nextStepLines(hosts, {
+    opened: `Write requested (approval ${oneLine(handle.id)}). Approve or deny it in Approvals`,
+    toolRef: SANDBOX_TOOL_REF,
+    decide: 'decide it',
+    seconds,
+  })) {
+    note(io, line);
+  }
   const approval = await awaitApproval(
     io,
     hosts,
@@ -717,7 +748,7 @@ async function writeNote(
   if (approval.state === 'consumed') {
     throw new CliError(
       EXIT.replay,
-      `The approval for the write was already used (approval ${handle.id}). Run again to ask for a new one.`
+      `The approval for the write was already used (approval ${oneLine(handle.id)}). Run again to ask for a new one.`
     );
   }
   if (approval.state !== 'approved') {
@@ -833,6 +864,6 @@ export async function starterCommand(flags: ParsedFlags, io: Io): Promise<void> 
     return;
   }
   io.stdout(
-    `Wrote one note to the sandbox (approval ${written.approvalId}).${written.text === '' ? '' : ` ${written.text}`}\n`
+    `Wrote one note to the sandbox (approval ${oneLine(written.approvalId)}).${written.text === '' ? '' : ` ${written.text}`}\n`
   );
 }

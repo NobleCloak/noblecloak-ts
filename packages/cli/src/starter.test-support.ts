@@ -77,6 +77,8 @@ export interface World {
   /** What a poll of each approval answers once `pendingPolls` polls have answered `pending`. */
   decisions: { setup: string; write: string };
   pendingPolls: number;
+  /** Appended to the id of each approval the stub opens (a server can return any string as an id). */
+  idTail?: string;
   /** A refusal to answer an open (or the agent / run create) with, instead of its success. */
   refuse: { agent?: Problem; run?: Problem; setupOpen?: Problem; writeOpen?: Problem };
   /** The reason on the last history entry of a rejected approval. */
@@ -349,7 +351,7 @@ export function installStarterRoutes(stub: Stub): World {
         problem(res, refusal);
         return true;
       }
-      const id = user ? SETUP_APPROVAL : WRITE_APPROVAL;
+      const id = (user ? SETUP_APPROVAL : WRITE_APPROVAL) + (world.idTail ?? '');
       if (user && world.coo !== undefined) {
         const coo = world.coo;
         const sent = request.json as {
@@ -437,7 +439,7 @@ export function installStarterRoutes(stub: Stub): World {
       world.polls.push(id);
       const count = (polled.get(id) ?? 0) + 1;
       polled.set(id, count);
-      const decided = id === WRITE_APPROVAL ? world.decisions.write : world.decisions.setup;
+      const decided = id.startsWith(WRITE_APPROVAL) ? world.decisions.write : world.decisions.setup;
       json(res, 200, {
         data: approvalBody(id, count <= world.pendingPolls ? 'pending' : decided, world),
         meta: META,

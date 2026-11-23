@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { USAGE } from './cli.js';
 import { setupAgentId } from './setup-agent-id.js';
 import { DEPLOYMENTS } from './starter-config.js';
-import { SETUP_TOKEN_WINDOW_SECONDS, setupWaitSeconds } from './starter.js';
+import { SETUP_TOKEN_WINDOW_SECONDS, nextStepLines, setupWaitSeconds } from './starter.js';
 import { run, type HarnessOptions } from './harness.test-support.js';
 import {
   AGENT_ID,
@@ -392,6 +392,73 @@ describe('starter: before anything is opened', () => {
   });
 });
 
+describe('starter: what to do while it waits', () => {
+  const production = { ...DEPLOYMENTS.production };
+  const { authUrl, governUrl, mcpUrl, gatewayAudience } = production;
+  const withoutApp = { authUrl, governUrl, mcpUrl, gatewayAudience };
+
+  it('setup: names the Approvals URL, the request, the wait and how to stop', () => {
+    expect(
+      nextStepLines(production, {
+        opened: `Setup proposed (approval a1). Approve it in Approvals`,
+        toolRef: 'tool:noblecloak:propose-policy-set',
+        decide: 'approve it',
+        seconds: 600,
+      })
+    ).toEqual([
+      'Setup proposed (approval a1). Approve it in Approvals: https://app.noblecloak.com/approvals',
+      'In Approvals it is the request for tool:noblecloak:propose-policy-set.',
+      'This command waits up to 600 seconds for you to approve it. Press Ctrl-C to stop; the request stays open.',
+    ]);
+  });
+
+  it('a deployment given by explicit URLs has no app URL: the line keeps its old wording', () => {
+    const lines = nextStepLines(withoutApp, {
+      opened: 'Write requested (approval w1). Approve or deny it in Approvals',
+      toolRef: 'tool:sandbox:create-note',
+      decide: 'decide it',
+      seconds: 30,
+    });
+    expect(lines[0]).toBe('Write requested (approval w1). Approve or deny it in Approvals.');
+    expect(lines.join('\n')).not.toContain('http');
+  });
+
+  it('a newline in a server-returned approval id cannot start a line of its own', async () => {
+    const forged = 'In Approvals it is the request for tool:forged.';
+    world.idTail = `\n${forged}`;
+    // The stub's gateway does not know the odd id, so the run ends at the write: the lines are what counts.
+    const result = await starter();
+    const lines = result.stderr.split('\n');
+    expect(lines.filter((l) => l.startsWith('In Approvals it is the request for'))).toHaveLength(2);
+    expect(lines.some((l) => l.startsWith('In Approvals it is the request for tool:forged'))).toBe(
+      false
+    );
+    expect(result.stderr).toContain(`ap_setup_1 ${forged}`);
+    expect(result.stderr).toContain(`ap_write_1 ${forged}`);
+  });
+
+  it('says "1 second", not "1 seconds"', async () => {
+    const result = await starter(['--wait', '1']);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toContain('waits up to 1 second for you to approve it');
+    expect(result.stderr).toContain('waits up to 1 second for you to decide it');
+    expect(result.stderr).not.toContain('1 seconds');
+  });
+
+  it('the flow prints the request name and the wait for both approvals, and no link for stub URLs', async () => {
+    const result = await starter();
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toContain(
+      'In Approvals it is the request for tool:noblecloak:propose-policy-set.'
+    );
+    expect(result.stderr).toContain('In Approvals it is the request for tool:sandbox:create-note');
+    expect(result.stderr).toContain('This command waits up to 600 seconds for you to approve it.');
+    expect(result.stderr).toContain('This command waits up to 600 seconds for you to decide it.');
+    expect(result.stderr).toContain('Press Ctrl-C to stop; the request stays open.');
+    expect(result.stderr).not.toContain('/approvals');
+  });
+});
+
 describe('starter: the setup wait and the access token', () => {
   it('cuts the setup wait to what is left of the 15-minute access token', () => {
     expect(SETUP_TOKEN_WINDOW_SECONDS).toBe(840);
@@ -515,9 +582,24 @@ describe('starter: the setup', () => {
     const result = await starter(['--wait', '1'], { pollFloorMs: 200 });
     expect(result.code).toBe(15);
     expect(result.stderr).toContain(SETUP_APPROVAL);
-    expect(result.stderr).toContain('within 1 seconds');
+    expect(result.stderr).toContain('within 1 second');
     expect(result.stderr).toContain('then make the write with --skip-setup');
     expect(world.runs).toBe(0);
+  });
+
+  it('a newline in the id cannot start a line of its own in the timeout message either', async () => {
+    const forged = 'Setup proposed. Approve it in Approvals: https://evil.example/approvals';
+    world.idTail = `\n${forged}`;
+    world.pendingPolls = 1_000;
+    const result = await starter(['--wait', '1'], { pollFloorMs: 200 });
+    expect(result.code).toBe(15);
+    const lines = result.stderr.split('\n');
+    expect(
+      lines.some((l) => l.startsWith('Setup proposed. Approve it in Approvals: https://evil'))
+    ).toBe(false);
+    expect(
+      lines.some((l) => l.includes('Nobody decided the setup (approval ap_setup_1 Setup proposed.'))
+    ).toBe(true);
   });
 
   it('403 on creating the agent is exit 4, 401 is exit 3, and a 5xx is exit 1', async () => {
