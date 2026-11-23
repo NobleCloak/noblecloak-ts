@@ -13,7 +13,7 @@
     "clean": "rm -rf coverage .turbo"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "esbuild": "0.28.2",
     "yaml": "2.9.1"
   }
