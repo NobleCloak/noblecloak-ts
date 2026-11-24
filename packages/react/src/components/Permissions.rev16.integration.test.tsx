@@ -229,11 +229,16 @@ describe('a dry run of a policy with rules', { timeout: 30_000 }, () => {
     // The tool is the policy's only target.
     fireEvent.change(field, { target: { value: args } });
     await user.click(screen.getByRole('button', { name: 'Simulate' }));
-    return waitFor(() => {
-      const result = document.querySelector('.nc-perm-result');
-      if (!(result instanceof HTMLElement)) throw new Error('no result');
-      return result;
-    });
+    // The simulation evaluates the policy in process; under CI load that can outlast waitFor's
+    // 1 s default, so wait as long as for the form above (the describe allows 30 s).
+    return waitFor(
+      () => {
+        const result = document.querySelector('.nc-perm-result');
+        if (!(result instanceof HTMLElement)) throw new Error('no result');
+        return result;
+      },
+      { timeout: 5000 }
+    );
   }
 
   it('shows which rule decided, in a Rule column of the considered table', async () => {
