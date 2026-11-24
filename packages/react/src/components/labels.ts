@@ -21,8 +21,6 @@ export const DEFAULT_LABELS = {
   rowTitleTool: '{who} wants to use {tool}',
   rowTitleToolAnon: 'A request to use {tool}',
   rowTitleProposal: 'Policy setup from {who}',
-  rowTitleProposalFor: 'Policy setup for {agent}, from {who}',
-  rowTitleProposalAgent: 'Policy setup for {agent}',
   rowTitleProposalAnon: 'A policy setup request',
   toolWithSource: '{tool} ({source})',
   rowToolUnknown: 'an unnamed tool',
@@ -213,6 +211,9 @@ export const DEFAULT_LABELS = {
   deny: 'Deny',
   confirmApprove: 'Confirm approval',
   confirmCancel: 'Cancel',
+  confirmToolRef: 'Exact reference: {ref}.',
+  confirmToolRefLong:
+    'Exact reference, {length} characters long, SHA-256 starts {digest}: {start} … {end}. The whole reference is in the details.',
   confirmPrompt: 'This request has the {level} level. Confirm that you want to approve it.',
   sending: 'Sending your decision…',
   resultApproved: 'Approved. The request has left your queue.',

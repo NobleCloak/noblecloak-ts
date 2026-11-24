@@ -14,6 +14,7 @@ import { PROPOSE_POLICY_SET_TOOL } from '../approvals-proposal.js';
 import type { UseApprovalsOptions } from '../approvals-types.js';
 import { useApprovals } from '../use-approvals.js';
 import { call, recorder, startHarness } from '../testing/approvals-harness.js';
+import { iso } from '../testing/isolates.js';
 import type { Harness, Recorder } from '../testing/approvals-harness.js';
 import { findRowById, hasRow } from '../testing/rows.js';
 import { Approvals } from './Approvals.js';
@@ -127,12 +128,14 @@ describe('a propose-policy-set approval in <Approvals>', () => {
     await screen.findByRole('region', { name: 'What approving this does' });
 
     expect(listOf('Policies')).toEqual([
-      `${proposed.tool}: Allowed (baseline)`,
-      `${proposed.tool}: Denied (role row)`,
+      `${iso(proposed.tool)}: Allowed (baseline)`,
+      `${iso(proposed.tool)}: Denied (role row)`,
     ]);
     // The deployment's default for the tool is to ask: the baseline loosens it.
-    expect(listOf('What changes')).toEqual([`Everyone on ${proposed.tool}: Ask first → Allowed`]);
-    expect(listOf('New tools to register')).toEqual([`${proposed.tool} (write level)`]);
+    expect(listOf('What changes')).toEqual([
+      `Everyone on ${iso(proposed.tool)}: Ask first → Allowed`,
+    ]);
+    expect(listOf('New tools to register')).toEqual([`${iso(proposed.tool)} (write level)`]);
     expect(screen.queryByText('Approving loosens no policy.')).toBeNull();
 
     await waitFor(() => {

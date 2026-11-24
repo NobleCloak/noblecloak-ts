@@ -12,6 +12,7 @@ import {
   renderHost,
 } from '../testing/component-harness.js';
 import { axe } from '../testing/axe.js';
+import { FSI, toolWithSource } from '../testing/isolates.js';
 import { approvalSummary, detailStates, fakeController } from '../testing/fake-controller.js';
 
 afterEach(() => {
@@ -34,7 +35,9 @@ describe('the queue', () => {
     const list = screen.getByRole('list', { name: 'Approval requests' });
     const rows = within(list).getAllByRole('button');
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.textContent).toContain('A request to use tool_1 (ext:billing)');
+    expect(rows[0]?.textContent).toContain(
+      `A request to use ${toolWithSource('tool_1', 'ext:billing')}`
+    );
     expect(rows[0]?.textContent).toContain('Level: delete');
     expect(rows[0]?.textContent).toContain('Review and decide');
     // The whole tool reference stays in the row, so tools that read alike are told apart; the digest is in the detail.
@@ -52,7 +55,9 @@ describe('the queue', () => {
       approvals: queueRows(2),
       detailFor: (id) => detailStates(id).loading,
     });
-    const rows = screen.getAllByRole('button', { name: /request to use tool_\d/ });
+    const rows = screen.getAllByRole('button', {
+      name: new RegExp(`request to use ${FSI}tool_\\d`),
+    });
     expect(rows.map((row) => row.getAttribute('aria-current'))).toEqual([null, null]);
     await user.click(at(rows, 1));
     expect(host.calls).toEqual([{ method: 'openDetail', args: ['apr_2'] }]);

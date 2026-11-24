@@ -8,7 +8,9 @@ import type {
 } from '../approvals-types.js';
 import { reportFault } from '../fault.js';
 import { ErrorMessage } from './error-message.js';
+import { clipText } from './format.js';
 import type { Translate } from './labels.js';
+import { sha256Hex } from './sha256.js';
 import { useNc } from './slots.js';
 import { levelWord } from './words.js';
 
@@ -21,6 +23,43 @@ const CONFIRM_LEVELS: ReadonlySet<string> = new Set(['delete', 'admin']);
 /** Unicode isolates (U+2068, U+2069): they keep a name from the service from reordering the sentence around it. */
 const ISOLATE_START = String.fromCodePoint(0x2068);
 const ISOLATE_END = String.fromCodePoint(0x2069);
+
+/** A reference longer than this is shown as its start, its end, its length and a digest. COO digests names past 256. */
+const EXACT_REF_MAX = 256;
+const EXACT_REF_START = 120;
+const EXACT_REF_END = 60;
+
+/**
+ * The tool reference for the confirm line, made of printable ASCII only: every other character (look-alikes,
+ * blanks, controls) and the backslash are shown as escapes, so what is read is exactly what was sent. Over
+ * `EXACT_REF_MAX` characters the start and the end are shown with the length and the first 8 hex digits of the
+ * SHA-256 of the whole, so two long references that differ anywhere, the middle included, read differently; the
+ * whole reference is in the details.
+ */
+function exactRefLine(toolRef: unknown, t: Translate): string {
+  const ascii = (text: string): string =>
+    Array.from(text)
+      .map((char) => {
+        const code = char.codePointAt(0) ?? 0;
+        if (code >= 0x20 && code < 0x7f && char !== '\\') return char;
+        const hex = code.toString(16).toUpperCase();
+        return char === '\\'
+          ? '\\\\'
+          : hex.length <= 4
+            ? `\\u${hex.padStart(4, '0')}`
+            : `\\u{${hex}}`;
+      })
+      .join('');
+  const isolated = (text: string): string => `${ISOLATE_START}${ascii(text)}${ISOLATE_END}`;
+  const chars = Array.from(clipText(toolRef, Number.POSITIVE_INFINITY));
+  if (chars.length <= EXACT_REF_MAX) return t('confirmToolRef', { ref: isolated(chars.join('')) });
+  return t('confirmToolRefLong', {
+    length: String(chars.length),
+    digest: sha256Hex(chars.join('')).slice(0, 8),
+    start: isolated(chars.slice(0, EXACT_REF_START).join('')),
+    end: isolated(chars.slice(-EXACT_REF_END).join('')),
+  });
+}
 
 /** The error shown when `approve` or `deny` throws instead of returning a result. */
 const decisionThrew = (cause: unknown): ApprovalsError => ({
@@ -189,7 +228,7 @@ export function Actions({
             confirmed.current = false;
           }}
           title={t('confirmHeading')}
-          description={`${t('confirmRequest', { request: `${ISOLATE_START}${title}${ISOLATE_END}` })} ${t('confirmPrompt', { level: levelWord(approval.side_effect_level, t) })}`}
+          description={`${t('confirmRequest', { request: `${ISOLATE_START}${title}${ISOLATE_END}` })} ${exactRefLine(approval.tool_ref, t)} ${t('confirmPrompt', { level: levelWord(approval.side_effect_level, t) })}`}
           confirmLabel={t('confirmApprove')}
           cancelLabel={t('confirmCancel')}
           onConfirm={async () => {

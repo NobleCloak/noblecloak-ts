@@ -67,9 +67,16 @@ export const isWhole = (shown: FormattedJson): boolean =>
 // Unicode Default_Ignorable_Code_Point (zero-width characters, the soft hyphen, the combining grapheme joiner,
 // variation selectors, Hangul and Khmer fillers, the tag block) and every Bidi_Control, plus what that data
 // leaves out: the interlinear annotation marks U+FFF9-FFFB, and the line and paragraph separators U+2028
-// and U+2029, which break lines.
+// and U+2029, which break lines, and the braille blank U+2800, which is neither ignorable nor white space and
+// draws as a space; every format character (Cf: the Arabic number signs U+0605 and U+06DD, the Egyptian
+// hieroglyph format controls U+13430-1343F, and the rest) and every control character (Cc: U+0007, U+001B, the C1
+// controls U+0080-009F) except the tab, the line feed and the carriage return, which text may hold.
 // What the runtime's Unicode data classes as neither renders as received.
-const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}\u2028\u2029\uFFF9-\uFFFB]/gu;
+// The control characters are the point of this expression.
+/* eslint-disable no-control-regex */
+const INVISIBLE =
+  /[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}\p{Cf}\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029\u2800\uFFF9-\uFFFB]/gu;
+/* eslint-enable no-control-regex */
 
 /**
  * Shows the invisible and bidirectional-control characters of a server-controlled string as escapes. Anything that is not a string is shown as its text (nothing for null or undefined).

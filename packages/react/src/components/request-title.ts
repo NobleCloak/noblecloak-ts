@@ -50,20 +50,76 @@ function nameOf(value: unknown): string | undefined {
   return text === '' ? undefined : clipText(text, NAME_MAX);
 }
 
-/** A name for the middle of a sentence: invisible characters shown as escapes, and isolated. */
-const shown = (name: string): string => `${ISOLATE_START}${escapeInvisible(name)}${ISOLATE_END}`;
+/** Combining marks in a row that are shown as they are; a longer run could draw over the line, so the rest are escaped. */
+const MARKS_SHOWN = 2;
+const MARK_RUN = /\p{M}{3,}/gu;
+const hexEscape = (char: string): string => {
+  const hex = (char.codePointAt(0) ?? 0).toString(16).toUpperCase();
+  return hex.length <= 4 ? `\\u${hex.padStart(4, '0')}` : `\\u{${hex}}`;
+};
+
+/** A name for the middle of a sentence: invisible characters shown as escapes, at most two combining marks in a row, and isolated. */
+const shown = (name: string): string =>
+  `${ISOLATE_START}${escapeInvisible(name).replace(MARK_RUN, (run) =>
+    Array.from(run)
+      .map((mark, index) => (index < MARKS_SHOWN ? mark : hexEscape(mark)))
+      .join('')
+  )}${ISOLATE_END}`;
+
+/** What a part of a tool reference may be made of to be shown bare; anything else (a space, a bracket, a look-alike) is quoted. */
+const PLAIN_PART = /^[A-Za-z0-9_.:/@+-]+$/;
+/** A tool segment that holds one of these could read as "at {source}" or as a source, so it is quoted. */
+const SOURCE_LIKE = /[:@]/;
 
 /**
- * The tool for a sentence: its name, then its source in brackets. An empty or malformed reference reads as an
- * unnamed tool, so the sentence is never cut off.
+ * Inside quotes only letters (not modifier letters, which draw as quotes), numbers, the space and printable ASCII
+ * are shown as they are; every other character is shown as an escape, so no look-alike of a quote, a bracket or a
+ * colon can be read as one. The ASCII `"` and the backslash are escaped by a backslash.
+ */
+function quotedBody(text: string): string {
+  return Array.from(text)
+    .map((char) => {
+      if (char === '"' || char === '\\') return `\\${char}`;
+      if (/^[ -~]$/.test(char)) return char;
+      if (/^[\p{L}\p{N}]$/u.test(char) && !/^\p{Lm}$/u.test(char)) return char;
+      return hexEscape(char);
+    })
+    .join('');
+}
+
+/**
+ * One part of a tool reference for a sentence: clipped, invisible characters shown as escapes, and isolated, so
+ * what it holds cannot reorder the sentence. A part is shown bare only when it is made of letters, digits and
+ * `_ . : / @ + -` (a tool segment, `{ tool: true }`, also without `:` and `@`); any other part is put in quotes,
+ * with what is not a letter, a number, a space or ASCII punctuation shown as an escape. The isolates are invisible,
+ * so without quotes a tool part `safe_read (ext:trusted)`, or one with a blank or a look-alike bracket, would read
+ * as the tool `safe_read` of the source `ext:trusted`. Shared with the proposal's tool lines.
+ */
+export function refPartText(
+  part: string,
+  max: number,
+  options: { readonly tool?: boolean } = {}
+): string {
+  const text = clipText(part, max);
+  const bare = PLAIN_PART.test(part) && !(options.tool === true && SOURCE_LIKE.test(part));
+  if (bare) return shown(text);
+  // The ellipsis of a cut is ours: it is kept as it is, inside the quotes.
+  const cut = part.length > max;
+  return shown(`“${quotedBody(cut ? text.slice(0, -1) : text)}${cut ? '…' : ''}”`);
+}
+
+/**
+ * The tool for a sentence: its name, then its source in brackets, each isolated on its own. An empty or malformed
+ * reference reads as an unnamed tool, so the sentence is never cut off. The exact reference is in the detail and in
+ * the confirm dialog.
  */
 function toolText(toolRef: unknown, t: Translate): string {
   const parts = toolParts(typeof toolRef === 'string' ? toolRef : '');
   if (parts.tool === '') return t('rowToolUnknown');
-  const tool = escapeInvisible(clipText(parts.tool, TOOL_MAX));
+  const tool = refPartText(parts.tool, TOOL_MAX, { tool: true });
   return parts.source === undefined
     ? tool
-    : t('toolWithSource', { tool, source: escapeInvisible(clipText(parts.source, SOURCE_MAX)) });
+    : t('toolWithSource', { tool, source: refPartText(parts.source, SOURCE_MAX) });
 }
 
 /**
@@ -76,11 +132,11 @@ const agentName = (approval: TitledApproval): string | undefined => nameOf(appro
 
 /**
  * The agent a request names, as "via {agent}", when it is a name the requester does not already carry. Secondary
- * text, never the asker. `undefined` for a policy-set proposal (its title already says which agent) and when there
- * is nothing to add.
+ * text, never the asker. `undefined` when there is nothing to add. A policy-set proposal's title does not name an
+ * agent, so the hint is shown here and nowhere as the proposal's target (that is the proposed policy's own
+ * subjects, read from the call).
  */
 export function requestVia(approval: TitledApproval, t: Translate): string | undefined {
-  if (approval.tool_ref === PROPOSE_POLICY_SET_TOOL) return undefined;
   const agent = agentName(approval);
   return agent === undefined || agent === requesterName(approval)
     ? undefined
@@ -90,20 +146,17 @@ export function requestVia(approval: TitledApproval, t: Translate): string | und
 /**
  * What a request is, in a sentence, for a row, the heading of its detail and the confirm dialog. A call is the
  * requester wanting to use the tool, with where the tool comes from; a policy-set proposal is a policy setup from the
- * requester, for the agent when the request names one that is not the requester. With no requester name the sentence
- * has none (the id is in the detail), and the agent is never put in its place. Every value from the service is
- * escaped, names are isolated and cut short, so the text is safe in a `<bdi>`.
+ * requester. The title never says which agent a proposal is for: the agent is the caller's unverified hint, and what
+ * the proposal targets is in its parsed policy (the detail shows it). With no requester name the sentence has none
+ * (the id is in the detail), and the agent is never put in its place. Every value from the service is escaped,
+ * names and the parts of a tool reference are isolated and cut short, so the text is safe in a `<bdi>`.
  */
 export function requestTitle(approval: TitledApproval, t: Translate): string {
   const who = requesterName(approval);
-  const agent = agentName(approval);
   if (approval.tool_ref === PROPOSE_POLICY_SET_TOOL) {
-    if (who !== undefined && agent !== undefined && agent !== who) {
-      return t('rowTitleProposalFor', { agent: shown(agent), who: shown(who) });
-    }
-    if (who !== undefined) return t('rowTitleProposal', { who: shown(who) });
-    if (agent !== undefined) return t('rowTitleProposalAgent', { agent: shown(agent) });
-    return t('rowTitleProposalAnon');
+    return who === undefined
+      ? t('rowTitleProposalAnon')
+      : t('rowTitleProposal', { who: shown(who) });
   }
   const tool = toolText(approval.tool_ref, t);
   return who === undefined
