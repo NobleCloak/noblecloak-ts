@@ -1,5 +1,11 @@
 # @noblecloak/theme
 
+## 0.1.4
+
+### Patch Changes
+
+- 6d265a1: `DialogDescription` wraps a long unbroken word (`overflow-wrap: anywhere`), so a long tool reference in a confirm dialog stays inside it.
+
 ## 0.1.3
 
 ### Patch Changes

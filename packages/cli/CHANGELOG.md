@@ -1,5 +1,15 @@
 # @noblecloak/cli
 
+## 0.2.2
+
+### Patch Changes
+
+- 6d265a1: The page the browser shows after CLI sign-in is now a NobleCloak page, in light and dark, readable on a phone. It tells you to return to the terminal, where the command continues; when sign-in did not complete it says the command has stopped and to run it again, and shows the authorization server's error text (escaped). The page is one self-contained document served from 127.0.0.1 with a Content-Security-Policy that allows no script and no other origin. Exit codes and output are unchanged.
+- 6d265a1: When a service-principal credential file or key file cannot be read, the error now names the absolute path it tried and the reason in words: "no such file", "permission denied", "it is a directory, not a file". For a missing `noblecloak-*.json` file it suggests the one nearest file of the same principal in the same directory. The error `code` (`credential_unreadable`) and `cause` (the fs error code) are unchanged, and the message never carries file contents. The path is shown only when the argument looks like a path (its file name has an extension, or it has a separator and its directory exists); a token, a base64 secret or JSON given in its place is not echoed, and control characters in a shown path are escaped. `noblecloak starter` prints the same text, and names `NOBLECLOAK_SP_CREDENTIALS` when the path came from it.
+- 0ce98e3: `noblecloak starter` now says what to do while it waits: for the production and beta deployments it prints the Approvals URL, what the request is called there, how long it waits, and that Ctrl-C stops it and leaves the request open. A deployment given by explicit URLs keeps the old line without a link. `--json` output and exit codes are unchanged.
+- Updated dependencies [6d265a1]
+  - @noblecloak/client@0.14.2
+
 ## 0.2.1
 
 ### Patch Changes
