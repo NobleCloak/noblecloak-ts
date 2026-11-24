@@ -518,6 +518,7 @@
 
 .nc-root .nc-dialog-description {
   display: block;
+  overflow-wrap: anywhere;
   color: var(--nc-i-muted);
 }
 

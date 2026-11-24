@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PROPOSE_POLICY_SET_TOOL } from '../approvals-proposal.js';
 import type { ApprovalDetailState, JsonObject } from '../approvals-types.js';
 import { axe } from '../testing/axe.js';
+import { toolWithSource } from '../testing/isolates.js';
 import { queueRows, renderController } from '../testing/component-harness.js';
 import { approvalSummary, detailStates, fakeController } from '../testing/fake-controller.js';
 import { Approvals } from './Approvals.js';
@@ -67,7 +68,9 @@ describe('a row says what is asked and by whom', () => {
     );
     const [setup, refund] = within(screen.getByRole('list')).getAllByRole('button');
     expect(setup?.textContent).toContain(`Policy setup from ${I}Planes CRM${J}`);
-    expect(refund?.textContent).toContain(`${I}Ann${J} wants to use issue_refund (ext:billing)`);
+    expect(refund?.textContent).toContain(
+      `${I}Ann${J} wants to use ${I}issue_refund${J} (${I}ext:billing${J})`
+    );
     // The agent is the caller's hint: secondary, and never the asker.
     expect(refund?.textContent).toContain(`via ${I}Refund bot${J}`);
     expect(refund?.textContent).not.toContain(`${I}Refund bot${J} wants`);
@@ -111,7 +114,9 @@ describe('a row says what is asked and by whom', () => {
       })
     );
     expect(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     ).toBeDefined();
   });
 

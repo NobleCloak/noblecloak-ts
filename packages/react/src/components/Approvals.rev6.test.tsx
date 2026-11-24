@@ -12,6 +12,7 @@ import type {
 } from '../approvals-types.js';
 import { at, queueRows, renderController, renderHost } from '../testing/component-harness.js';
 import { axe } from '../testing/axe.js';
+import { toolWithSource } from '../testing/isolates.js';
 import { approvalSummary, detailStates, fakeController } from '../testing/fake-controller.js';
 
 afterEach(() => {
@@ -313,10 +314,14 @@ describe('approving several at once', () => {
     renderController(fakeController({ approvals: queueRows(3, noArguments), approveMany }));
     expect(screen.queryByRole('button', { name: /Approve selected/ })).toBeNull();
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     );
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_3 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_3', 'ext:billing')}`,
+      })
     );
     await user.click(screen.getByRole('button', { name: 'Approve selected (2)' }));
     // Nothing is sent until it is confirmed.
@@ -344,14 +349,18 @@ describe('approving several at once', () => {
     const approveMany = vi.fn(() => Promise.resolve<ManyResult>({ ok: true, results: [] }));
     renderController(fakeController({ approvals: queueRows(2, noArguments), approveMany }));
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     );
     await user.click(screen.getByRole('button', { name: 'Approve selected (1)' }));
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('button', { name: 'Approve selected (1)' })).toBeDefined();
     await user.click(screen.getByRole('button', { name: 'Approve selected (1)' }));
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_2 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_2', 'ext:billing')}`,
+      })
     );
     expect(screen.queryByRole('button', { name: /Confirm approving/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Approve selected (2)' })).toBeDefined();
@@ -382,7 +391,7 @@ describe('approving several at once', () => {
     for (const n of [1, 2])
       await user.click(
         screen.getByRole('checkbox', {
-          name: `Select: A request to use tool_${String(n)} (ext:billing)`,
+          name: `Select: A request to use ${toolWithSource(`tool_${String(n)}`, 'ext:billing')}`,
         })
       );
     await user.click(screen.getByRole('button', { name: 'Approve selected (2)' }));
@@ -394,7 +403,7 @@ describe('approving several at once', () => {
     for (const n of [1, 2])
       await user.click(
         screen.getByRole('checkbox', {
-          name: `Select: A request to use tool_${String(n)} (ext:billing)`,
+          name: `Select: A request to use ${toolWithSource(`tool_${String(n)}`, 'ext:billing')}`,
         })
       );
     await user.click(screen.getByRole('button', { name: 'Approve selected (2)' }));
@@ -416,7 +425,9 @@ describe('approving several at once', () => {
       fakeController({ approvals: queueRows(2, noArguments), approveMany })
     );
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     );
     expect(screen.getByRole('button', { name: 'Approve selected (1)' })).toBeDefined();
     view.rerender(<div>{/* the first request left the queue */}</div>);
@@ -429,7 +440,9 @@ describe('approving several at once', () => {
       })
     );
     expect(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_2 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_2', 'ext:billing')}`,
+      })
     ).toHaveProperty('disabled', true);
   });
 });
@@ -441,10 +454,14 @@ describe('a ticked request that stops being selectable', () => {
     const rows = queueRows(2, noArguments);
     const view = renderController(fakeController({ approvals: rows, approveMany }));
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     );
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_2 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_2', 'ext:billing')}`,
+      })
     );
     expect(screen.getByRole('button', { name: 'Approve selected (2)' })).toBeDefined();
     // A refresh: the first request's call can now be read, the second was decided elsewhere; both stay in the list.
@@ -469,10 +486,14 @@ describe('a ticked request that stops being selectable', () => {
     const rows = queueRows(2, noArguments);
     const view = renderController(fakeController({ approvals: rows, approveMany }));
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     );
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_2 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_2', 'ext:billing')}`,
+      })
     );
     view.rerender(
       <Approvals
@@ -576,7 +597,9 @@ describe('which requests may be approved without opening them', () => {
     const rows = queueRows(1, noArguments);
     const view = renderController(fakeController({ approvals: rows, approveMany: spy }));
     await user.click(
-      screen.getByRole('checkbox', { name: 'Select: A request to use tool_1 (ext:billing)' })
+      screen.getByRole('checkbox', {
+        name: `Select: A request to use ${toolWithSource('tool_1', 'ext:billing')}`,
+      })
     );
     await user.click(screen.getByRole('button', { name: 'Approve selected (1)' }));
     view.rerender(

@@ -10,12 +10,20 @@ afterEach(cleanup);
 const RLO = String.fromCharCode(0x202e);
 /** The escape as the component prints it: a backslash, then `u202E`. */
 const ESC = String.fromCharCode(0x5c) + 'u202E';
+const FSI = String.fromCharCode(0x2068);
+const PDI = String.fromCharCode(0x2069);
+/**
+ * U+2068 and U+2069 are not in this list: the component puts them around the tool and the source of a title itself.
+ * A hostile value cannot smuggle one in: the test below checks they are balanced, and `escapeInvisible` turns the
+ * ones a value holds into escapes.
+ */
 const HIDDEN_CODES = [
-  0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200b, 0x200e, 0x200f,
-  0x2028, 0x2029, 0xfff9, 0xfffa, 0xfffb,
+  0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x200b, 0x200e, 0x200f, 0x2028, 0x2029,
+  0xfff9, 0xfffa, 0xfffb,
 ];
 const hasRaw = (text: string): boolean =>
   HIDDEN_CODES.some((code) => text.includes(String.fromCharCode(code)));
+const count = (text: string, mark: string): number => text.split(mark).length - 1;
 
 function hostile(): ReturnType<typeof approvalSummary> {
   return approvalSummary({
@@ -46,6 +54,7 @@ describe('c1-2 every server-controlled string is escaped and isolated', () => {
       })
     );
     expect(hasRaw(container.textContent)).toBe(false);
+    expect(count(container.textContent, FSI)).toBe(count(container.textContent, PDI));
     expect(container.textContent).toContain(ESC);
   });
 
@@ -67,7 +76,7 @@ describe('c1-2 every server-controlled string is escaped and isolated', () => {
     expect(isolated.some((text) => text.includes(`by${ESC}someone`))).toBe(true);
     // The heading and the row say the request in words; the tool name in them is escaped like any other.
     expect(screen.getByRole('heading', { level: 3 }).querySelector('bdi')?.textContent).toBe(
-      `A request to use ${ESC}tpircs (ext:evil)`
+      `A request to use ${FSI}“${ESC}tpircs”${PDI} (${FSI}ext:evil${PDI})`
     );
   });
 
@@ -99,7 +108,7 @@ describe('c2-9 a very long tool reference is cut in a row and the heading, whole
       })
     );
     // The title cuts the tool at 80 characters; the row also shows the reference, cut at 200, and the facts all of it.
-    const title = `A request to use ${long.slice(0, 80)}…`;
+    const title = `A request to use ${FSI}${long.slice(0, 80)}…${PDI}`;
     const row = document.querySelector('.nc-row-tool');
     expect(row?.textContent).toBe(title);
     expect(document.querySelector('.nc-detail > h3')?.textContent).toBe(title);

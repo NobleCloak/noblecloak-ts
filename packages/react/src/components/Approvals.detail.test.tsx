@@ -12,6 +12,7 @@ import {
   renderHost,
 } from '../testing/component-harness.js';
 import { axe } from '../testing/axe.js';
+import { FSI, toolWithSource } from '../testing/isolates.js';
 import { DETAIL_STATUSES, detailStates, fakeController } from '../testing/fake-controller.js';
 
 afterEach(cleanup);
@@ -61,7 +62,7 @@ describe('T40: every detail state renders its text', () => {
     renderController(controllerFor('refreshing', true));
     expect(screen.getByText('Updating…')).toBeDefined();
     expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(
-      'A request to use issue_refund (ext:billing)'
+      `A request to use ${toolWithSource('issue_refund', 'ext:billing')}`
     );
     expect(document.body.textContent).toContain(MARKER);
   });
@@ -189,7 +190,9 @@ describe('T40: every detail state renders its text', () => {
   it('moves focus to the detail heading on open and back to the row on close', async () => {
     const user = userEvent.setup();
     renderHost({ approvals: queueRows(2), detailFor: (id) => detailStates(id).loaded });
-    const rows = screen.getAllByRole('button', { name: /request to use tool_\d/ });
+    const rows = screen.getAllByRole('button', {
+      name: new RegExp(`request to use ${FSI}tool_\\d`),
+    });
     await user.click(at(rows, 1));
     const heading = screen.getByRole('heading', { level: 3 });
     expect(document.activeElement).toBe(heading);
@@ -280,7 +283,7 @@ describe('T21: accessibility of every detail state', () => {
     const user = userEvent.setup();
     renderController(controllerFor('loaded'));
     const order = [
-      'A request to use tool_1',
+      `A request to use ${FSI}tool_1`,
       'Copy digest',
       'Reason (optional)',
       'Approve',

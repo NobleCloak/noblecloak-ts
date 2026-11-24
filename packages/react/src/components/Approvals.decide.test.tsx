@@ -12,6 +12,8 @@ import type {
 } from '../approvals-types.js';
 import { queueRows, renderController, renderHost } from '../testing/component-harness.js';
 import { axe } from '../testing/axe.js';
+import { iso, PDI, toolWithSource } from '../testing/isolates.js';
+import { sha256Hex } from './sha256.js';
 import { approvalSummary, detailStates, fakeController } from '../testing/fake-controller.js';
 
 afterEach(cleanup);
@@ -157,9 +159,19 @@ describe('T21: the confirm step', () => {
       const dialog = screen.getByRole('dialog', { name: 'Approve this request?' });
       // It says what is being approved (the request, in words) and why it asks (the level).
       expect(dialog.textContent).toContain('You are about to approve this request: “');
-      expect(dialog.textContent).toContain('A request to use issue_refund (ext:billing)');
+      expect(dialog.textContent).toContain(
+        `A request to use ${toolWithSource('issue_refund', 'ext:billing')}`
+      );
+      // ...and the reference it was cut from, whole.
+      expect(dialog.textContent).toContain(`Exact reference: ${iso('ext:billing:issue_refund')}.`);
       expect(dialog.textContent).toContain(
         `This request has the ${level} level. Confirm that you want to approve it.`
+      );
+      // The three sentences are joined by one space each, with nothing run together.
+      expect(dialog.querySelector('p')?.textContent).toBe(
+        `You are about to approve this request: “${iso(`A request to use ${toolWithSource('issue_refund', 'ext:billing')}`)}”. ` +
+          `Exact reference: ${iso('ext:billing:issue_refund')}. ` +
+          `This request has the ${level} level. Confirm that you want to approve it.`
       );
       // Cancel comes before Confirm, so a native dialog's first focus lands on the safe choice.
       const buttons = within(dialog).getAllByRole('button');
@@ -221,8 +233,118 @@ describe('T21: the confirm step', () => {
     await user.click(screen.getByRole('button', { name: 'Approve' }));
     const [i, j] = [String.fromCodePoint(0x2068), String.fromCodePoint(0x2069)];
     const text = screen.getByRole('dialog').textContent;
-    expect(text).toContain(`“${i}${i}Ann${j} wants to use issue_refund (ext:billing)${j}”.`);
+    expect(text).toContain(
+      `“${i}${i}Ann${j} wants to use ${i}issue_refund${j} (${i}ext:billing${j})${j}”.`
+    );
     expect(text).not.toContain('Trusted Finance Agent');
+  });
+
+  it('shows the exact tool reference, escaped and isolated, so the approver sees what the sentence was cut from', async () => {
+    const user = userEvent.setup();
+    const [i, j] = [String.fromCodePoint(0x2068), String.fromCodePoint(0x2069)];
+    renderHost({
+      approvals: queueRows(1, { tool_ref: 'mcp:srv/tools/safe_read (ext:trusted)‮' }),
+      detailFor: (id) =>
+        detailStates(id, {
+          approval: {
+            side_effect_level: 'admin',
+            tool_ref: 'mcp:srv/tools/safe_read (ext:trusted)‮',
+          },
+        }).loaded,
+    });
+    await user.click(screen.getByRole('button', { name: /safe_read/ }));
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    const text = screen.getByRole('dialog').textContent;
+    expect(text).toContain(`Exact reference: ${i}mcp:srv/tools/safe_read (ext:trusted)`);
+    expect(text).not.toContain('‮');
+    expect(text).toContain(j);
+  });
+
+  it('names the agent a proposal is for from its policy subjects, never from the caller hint', async () => {
+    const user = userEvent.setup();
+    const proposalArguments = {
+      policies: [
+        {
+          role: 'tightening',
+          rationale: 'Because.',
+          assessment: { side_effect_level: 'write', blast_radius: 'one_record' },
+          policy: {
+            kind: 'tool_invocation',
+            subjects: [{ type: 'agent', id: 'agent_real' }],
+            targets: { tools: ['ext:crm:export'] },
+            config: { mode: 'deny' },
+          },
+        },
+      ],
+    };
+    renderHost({
+      approvals: queueRows(1, {
+        tool_ref: 'tool:noblecloak:propose-policy-set',
+        requester: { id: 'user_ann', kind: 'user', display_name: 'Ann' },
+      }),
+      detailFor: (id) =>
+        detailStates(id, {
+          approval: {
+            side_effect_level: 'admin',
+            tool_ref: 'tool:noblecloak:propose-policy-set',
+            requester: { id: 'user_ann', kind: 'user', display_name: 'Ann' },
+            agent: { id: 'agent_x', name: 'Payroll agent' },
+          },
+          arguments: proposalArguments,
+        }).loaded,
+    });
+    await user.click(screen.getByRole('button', { name: /Policy setup/ }));
+    // The detail lists who the policy is for, from the proposal itself.
+    expect(screen.getByText('Agent agent_real')).toBeDefined();
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    const text = screen.getByRole('dialog').textContent;
+    expect(text).toContain('Policy setup from');
+    expect(text).not.toContain('Payroll agent');
+  });
+
+  it('shows long references that differ at the end or in the middle differently, up to 256 whole, and non-ASCII as escapes', async () => {
+    const user = userEvent.setup();
+    const stem = 'ext:billing:' + 'x'.repeat(400);
+    const midA = `ext:billing:${'x'.repeat(200)}1${'x'.repeat(200)}`;
+    const midB = `ext:billing:${'x'.repeat(200)}2${'x'.repeat(200)}`;
+    const whole = `ext:billing:${'x'.repeat(100)}1${'x'.repeat(100)}`;
+    const texts: string[] = [];
+    for (const tool_ref of [
+      `${stem}A`,
+      `${stem}B`,
+      'ext:billing:issue_refund⠀（x）',
+      midA,
+      midB,
+      whole,
+    ]) {
+      renderHost({
+        approvals: queueRows(1, { tool_ref }),
+        detailFor: (id) =>
+          detailStates(id, { approval: { side_effect_level: 'admin', tool_ref } }).loaded,
+      });
+      await user.click(screen.getByRole('button', { name: /request to use/ }));
+      await user.click(screen.getByRole('button', { name: 'Approve' }));
+      texts.push(screen.getByRole('dialog').textContent);
+      cleanup();
+    }
+    const [a, b, c, midTextA, midTextB, wholeText] = texts;
+    expect(a).not.toBe(b);
+    expect(a).toContain('Exact reference, 413 characters long');
+    expect(a).toContain('The whole reference is in the details.');
+    expect(a).toContain(`xA${PDI}.`);
+    expect(b).toContain(`xB${PDI}.`);
+    expect(c).toContain(
+      `Exact reference: ${iso('ext:billing:issue_refund\\u2800\\uFF08x\\uFF09')}. This request`
+    );
+    // Two references that differ only in the hidden middle: the start, the end and the length are the same, the digest is not.
+    const digestOf = (text: string | undefined): string | undefined =>
+      /SHA-256 starts ([0-9a-f]{8})/.exec(text ?? '')?.[1];
+    expect(digestOf(midTextA)).toBeDefined();
+    expect(digestOf(midTextB)).toBeDefined();
+    expect(digestOf(midTextA)).not.toBe(digestOf(midTextB));
+    expect(digestOf(midTextA)).toBe(sha256Hex(midA).slice(0, 8));
+    // Up to 256 characters the whole reference is shown, the middle too.
+    expect(wholeText).toContain(`Exact reference: ${iso(whole)}.`);
   });
 
   it.each(['read', 'write', 'external'] as const)(

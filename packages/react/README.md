@@ -381,16 +381,23 @@ The person decides on a **fresh read of that one request**, and what the read re
 - **The queue** shows each request as one sentence that says what is asked and by whom, the whole tool
   reference, its side-effect level (as a word, never by colour alone), how long ago it was made, and "Review
   and decide". The sentence is "{requester} wants to use {tool} ({source})" for a call, and "Policy setup from
-  {requester}" for a policy-set proposal (`tool:noblecloak:propose-policy-set`), "Policy setup for {agent}, from
-  {requester}" when the request also names another agent. `{requester}` is the name the service gives the
-  principal it verified (`requester.display_name`): it is always the one named as asking. The agent
-  (`agent.name`) is the caller's own display hint, not an identity, so it is only ever "via {agent}" on a call's
-  detail line, never the asker. With no requester name the sentence has none ("A request to use {tool}", "A
+  {requester}" for a policy-set proposal (`tool:noblecloak:propose-policy-set`). `{requester}` is the name the
+  service gives the principal it verified (`requester.display_name`): it is always the one named as asking. The
+  agent (`agent.name`) is the caller's own display hint, not an identity, so it is only ever "via {agent}" on
+  the row's detail line, never the asker and never the agent a proposal is "for" (that is read from the proposed
+  policy's own subjects, in the open request). With no requester name the sentence has none ("A request to use {tool}", "A
   policy setup request") and the id is in the open request, never in the row. `{tool}` and `{source}` are the
   tool reference split at its last `:` (`ext:billing:issue_refund` is "issue_refund (ext:billing)"; an
   `mcp:{server}/{surface}/{tool}` reference is the tool and its server), shown as the service wrote them, so
-  `issue_refund` and `issue-refund` stay different; the service sends no display name for a tool. Names are
-  cut short and isolated, so one cannot push the tool out of the sentence or reorder it. The ids and the digest
+  `issue_refund` and `issue-refund` stay different; the service sends no display name for a tool. Names,
+  the tool and the source are cut short and isolated each on its own, so one cannot push the tool out of the
+  sentence or reorder it; a tool or source is shown bare only when it is made of letters, digits and
+  `_ . : / @ + -`; any other (a space, a bracket, a look-alike, a blank) is shown in quotes, and inside the
+  quotes only letters (not modifier letters), numbers, the space and printable ASCII are shown as they are
+  (the ASCII quote and the backslash behind a backslash); every other character is an escape. A tool segment
+  with a `:` or an `@` is quoted too. So a tool cannot pass for a source or for the words around it. Control
+  and format characters show as escapes, and a name shows at most two combining marks in a row. A proposal's
+  tool lines are written the same way. The ids and the digest
   are facts of the open request. A queue row never carries the
   call's arguments: the module removes them from anything the list, the stream or a decision returns. The
   queue shows more of itself on request ("Show more requests", in steps of 50 up to the 200 the service
@@ -476,7 +483,8 @@ The person decides on a **fresh read of that one request**, and what the read re
   proposal only, as above.)
 - **Actions**: Approve on a `delete` or `admin` call opens a confirmation dialog (the theme's `ConfirmDialog`, a
   modal: focus is held inside it and starts on Cancel, Escape cancels, and the page behind cannot be used). It
-  names the request being approved and the level that asks for it. Deny never asks. The dialog closes, and
+  names the request being approved, shows the exact tool reference it was made from (any character that is not printable ASCII as an escape; the whole reference up to 256 characters, then its start, its end, its length and the first 8 hex digits of its SHA-256, the whole being in the details), and the level that asks for
+  it. Deny never asks. The dialog closes, and
   nothing is sent, if the request can no longer be decided while it is open (the detail reloads, its digest
   changes, or it is no longer pending). A decision that the server refuses
   is explained in plain words, with the request id: not eligible (a person made an approver moments ago may be

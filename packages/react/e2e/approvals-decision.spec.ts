@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+import { iso, toolWithSource } from '../src/testing/isolates.js';
+
 import { injectStylesheet, mount, openHostPage } from './harness.js';
 
 const SHOTS = process.env.NC_SHOTS_DIR;
@@ -70,9 +72,13 @@ test('Approve at the admin level opens a modal that names the request and holds 
   await expect(dialog).toBeVisible();
   // The asker is the verified requester; the caller's agent hint is never named as the asker.
   await expect(dialog).toContainText(
-    /You are about to approve this request: “.*Planes CRM.* wants to use issue_refund \(ext:billing\).*”\./
+    `You are about to approve this request: “${iso(`${iso('Planes CRM')} wants to use ${toolWithSource('issue_refund', 'ext:billing')}`)}”.`
   );
   await expect(dialog).not.toContainText('Trusted Finance Agent');
+  // ...and the exact reference, so the sentence cannot be the only thing the approver reads.
+  await expect(dialog).toContainText(
+    `Exact reference: ${iso('ext:billing:issue_refund')}. This request`
+  );
   await expect(dialog).toContainText('This request has the admin level.');
   // The first focus lands on the safe choice.
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
@@ -132,7 +138,9 @@ test('a setup proposal reads as one, its raw call is open and collapsible, and t
   await expect(rows.first()).toContainText('Policy setup from');
   await expect(rows.first()).toContainText('Planes CRM');
   await expect(rows.first()).toContainText('Review and decide');
-  await expect(rows.nth(1)).toContainText('wants to use issue_refund (ext:billing)');
+  await expect(rows.nth(1)).toContainText(
+    `wants to use ${toolWithSource('issue_refund', 'ext:billing')}`
+  );
   await expect(rows.nth(1)).toContainText('ext:billing:issue_refund');
   await expect(rows.first()).not.toContainText(/Digest|sp_7d1e/);
   await expect(page.getByRole('heading', { level: 3 })).toContainText('Policy setup from');

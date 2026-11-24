@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ApprovalDetailState, ApprovalSummary, JsonObject } from '../approvals-types.js';
 import { MARKER, queueRows, renderController, renderHost } from '../testing/component-harness.js';
 import { axe } from '../testing/axe.js';
+import { toolWithSource } from '../testing/isolates.js';
 import { approvalSummary, detailStates, fakeController } from '../testing/fake-controller.js';
 
 afterEach(cleanup);
@@ -150,7 +151,7 @@ describe('T17: detail rendering of arguments', () => {
       })
     );
     expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(
-      'A request to use issue_refund (ext:billing)'
+      `A request to use ${toolWithSource('issue_refund', 'ext:billing')}`
     );
     expect(screen.queryByText('Policy')).toBeNull();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined();

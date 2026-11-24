@@ -205,7 +205,8 @@ async function loadCredential(
   io: Io,
   hosts: StarterHosts
 ): Promise<ServicePrincipalCredential> {
-  const source = stringFlag(flags, 'credentials') ?? io.env[CREDENTIAL_ENV];
+  const flag = stringFlag(flags, 'credentials');
+  const source = flag ?? io.env[CREDENTIAL_ENV];
   if (source === undefined || source.trim() === '') {
     throw new CliError(
       EXIT.noCredentials,
@@ -214,11 +215,14 @@ async function loadCredential(
   }
   let credential: ServicePrincipalCredential;
   try {
-    credential = await loadServicePrincipalCredential(source, { env: io.env });
+    // The flag, or nothing: with no flag the loader reads the variable itself and names it in its messages.
+    credential = await loadServicePrincipalCredential(flag, { env: io.env });
   } catch (error) {
     if (error instanceof ServicePrincipalError) {
-      // The loader's message names a field or where the credential came from, never a value.
-      throw new CliError(EXIT.usage, error.message);
+      // The loader's message names a field, a file path that looks like one, or where the credential came
+      // from, never a value; its control characters are already escaped there, and oneLine is defence in
+      // depth that keeps it on one line whatever a future message holds.
+      throw new CliError(EXIT.usage, oneLine(error.message));
     }
     throw error;
   }

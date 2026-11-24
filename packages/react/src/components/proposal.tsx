@@ -3,7 +3,9 @@ import type { ReactNode } from 'react';
 
 import { shortToolRef } from '../approvals-proposal.js';
 import type { Proposal, ProposalSubject } from '../approvals-proposal.js';
+import { MAX_REF_CHARS } from './format.js';
 import { escapeInvisible } from './format-json.js';
+import { refPartText } from './request-title.js';
 import type { ApprovalsLabelKey, Translate } from './labels.js';
 import { useNc } from './slots.js';
 import { levelWord, lookup } from './words.js';
@@ -41,13 +43,20 @@ function subjectText(subject: ProposalSubject, t: Translate): string {
   }
 }
 
-/** A tool as "tool on server" for an `mcp:` reference, the reference itself otherwise; `undefined` is every tool. */
+/**
+ * A tool as "tool on server" for an `mcp:` reference, the reference itself otherwise; `undefined` is every tool. Each
+ * part is isolated and quoted when it is not plain, as in a request's title, so a tool `x on github` cannot pass for
+ * the tool `x` of the server `github`.
+ */
 function toolText(toolRef: string | undefined, t: Translate): string {
   if (toolRef === undefined) return t('proposalAllTools');
   const { tool, server } = shortToolRef(toolRef);
   return server === undefined
-    ? escapeInvisible(tool)
-    : t('proposalToolOnServer', { tool: escapeInvisible(tool), server: escapeInvisible(server) });
+    ? refPartText(tool, MAX_REF_CHARS)
+    : t('proposalToolOnServer', {
+        tool: refPartText(tool, MAX_REF_CHARS, { tool: true }),
+        server: refPartText(server, MAX_REF_CHARS),
+      });
 }
 
 /** The full reference, for the tooltip of a line that shows the short one. */

@@ -1,6 +1,6 @@
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { USAGE } from './cli.js';
 import { setupAgentId } from './setup-agent-id.js';
@@ -255,6 +255,35 @@ describe('starter: before anything is opened', () => {
       `noblecloak sp create --org <uuid> --name <name> --audience ${stub.url} --audience ${GATEWAY_AUDIENCE} --out <path>`
     );
     expect(stub.requests).toEqual([]);
+  });
+
+  it('a credential file that is not there: exit 2, naming the resolved path and why, with no request made', async () => {
+    const missing = join(dirname(credential), 'noblecloak-sp-typo.json');
+    const result = await run(stub, ['starter', '--credentials', missing, ...hostFlags()]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(
+      `error: Cannot read the service-principal credential file ${missing} (named by the path argument): no such file.\n`
+    );
+    expect(stub.requests).toEqual([]);
+  });
+
+  it('a credential path from NOBLECLOAK_SP_CREDENTIALS that is not there: names the variable, not the argument', async () => {
+    const missing = join(dirname(credential), 'noblecloak-sp-typo.json');
+    const result = await run(stub, ['starter', ...hostFlags()], {
+      env: { NOBLECLOAK_SP_CREDENTIALS: missing },
+    });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(
+      `error: Cannot read the service-principal credential file ${missing} (named by the path in NOBLECLOAK_SP_CREDENTIALS): no such file.\n`
+    );
+  });
+
+  it('a credential argument that is a secret and not a path is not printed', async () => {
+    const secret = 'ghp_aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6';
+    const result = await run(stub, ['starter', '--credentials', secret, ...hostFlags()]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).not.toContain(secret);
+    expect(result.stderr).toContain('Cannot read the service-principal credential file');
   });
 
   it('reads the credential from NOBLECLOAK_SP_CREDENTIALS', async () => {

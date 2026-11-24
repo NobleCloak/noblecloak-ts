@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ApprovalDetailStatus, ApprovalRequestController } from '../approvals-types.js';
 import { axe } from '../testing/axe.js';
+import { toolWithSource } from '../testing/isolates.js';
 import { cannedApproval, jsonResponse, problemResponse } from '../testing/approvals-harness.js';
 import { canned } from '../testing/canned-api.js';
 import { MARKER } from '../testing/component-harness.js';
@@ -35,7 +36,9 @@ describe('ApprovalRequest renders one request on its own', () => {
   it('shows the tool, the lineage, the policy, the timing and the digest of a loaded request', () => {
     render(<ApprovalRequest request={requestFor('loaded')} />);
     expect(
-      screen.getByRole('heading', { name: 'A request to use issue_refund (ext:billing)' })
+      screen.getByRole('heading', {
+        name: `A request to use ${toolWithSource('issue_refund', 'ext:billing')}`,
+      })
     ).toBeDefined();
     const text = document.body.textContent;
     expect(text).toContain('agent_refunds');
@@ -71,7 +74,9 @@ describe('ApprovalRequest renders one request on its own', () => {
     };
     render(<ApprovalRequest request={request} />);
     expect(
-      screen.getByRole('heading', { name: 'A request to use issue_refund (ext:billing)' })
+      screen.getByRole('heading', {
+        name: `A request to use ${toolWithSource('issue_refund', 'ext:billing')}`,
+      })
     ).toBeDefined();
     expect(document.body.textContent).not.toContain('agent_refunds');
     expect(document.body.textContent).not.toContain('policy_default');
@@ -124,7 +129,9 @@ describe('ApprovalRequest given an id reads the request itself', () => {
     const { rerender } = render(<ApprovalRequest id="apr_1" {...props} />);
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { name: 'A request to use create_issue (mcp:tracker)' })
+        screen.getByRole('heading', {
+          name: `A request to use ${toolWithSource('create_issue', 'mcp:tracker')}`,
+        })
       ).toBeDefined();
     });
     expect(buttons()).not.toContain('Approve');

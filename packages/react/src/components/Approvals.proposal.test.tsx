@@ -13,6 +13,7 @@ import type { CardProps } from '@noblecloak/theme';
 import { PROPOSE_POLICY_SET_TOOL } from '../approvals-proposal.js';
 import type { ApprovalDetailState, ApprovalSummary, JsonObject } from '../approvals-types.js';
 import { axe } from '../testing/axe.js';
+import { iso } from '../testing/isolates.js';
 import { queueRows, renderController } from '../testing/component-harness.js';
 import { detailStates, fakeController } from '../testing/fake-controller.js';
 import type { ApprovalsProps } from './Approvals.js';
@@ -34,6 +35,8 @@ const entry = (role: string, subject: unknown, tool: string, mode: string): unkn
 const EVERYONE = { type: 'role', id: 'everyone' };
 const MCP = 'mcp:crm/main/send_email';
 const EXT = 'ext:crm:export';
+/** A tool or server in a line: isolated on its own by the component. */
+const SEND = `${iso('send_email')} on ${iso('crm')}`;
 
 /** A full proposal: a baseline, a role row, a tightening, a tool to register, an agent with a principal, a grant. */
 const ARGUMENTS = {
@@ -96,17 +99,29 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
     const subjects = [...policies.querySelectorAll('strong')].map((node) => node.textContent);
     expect(subjects).toEqual(['Everyone', 'Role member', 'Agent agent_1']);
     expect(items(policies)).toEqual([
-      'send_email on crm: Ask first (baseline)',
-      `${EXT}: Allowed (role row)`,
-      'send_email on crm: Denied (tightening)',
+      `${SEND}: Ask first (baseline)`,
+      `${iso(EXT)}: Allowed (role row)`,
+      `${SEND}: Denied (tightening)`,
+    ]);
+  });
+
+  it('quotes a tool or server that holds a space or a look-alike, so it cannot pass for "tool on server"', () => {
+    const args = {
+      policies: [
+        entry('baseline', EVERYONE, 'mcp:evil/t/x on github', 'ask'),
+        entry('baseline', EVERYONE, 'mcp:evil/t/y⠀（on github）', 'ask'),
+      ],
+    } as unknown as JsonObject;
+    show(detailOf(args, undefined));
+    expect(items(proposal())).toEqual([
+      `${iso('“x on github”')} on ${iso('evil')}: Ask first (baseline)`,
+      `${iso('“y\\u2800\\uFF08on github\\uFF09”')} on ${iso('evil')}: Ask first (baseline)`,
     ]);
   });
 
   it('keeps the full tool reference available on a shortened line', () => {
     show(detailOf(ARGUMENTS, PREVIEW));
-    const row = within(proposal())
-      .getByText('send_email on crm: Ask first (baseline)')
-      .closest('li');
+    const row = within(proposal()).getByText(`${SEND}: Ask first (baseline)`).closest('li');
     expect(row?.getAttribute('title')).toBe(MCP);
   });
 
@@ -114,8 +129,8 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
     show(detailOf(ARGUMENTS, PREVIEW));
     const changes = sectionOf('What changes');
     expect(items(changes)).toEqual([
-      'Everyone on send_email on crm: Denied → Ask first',
-      `Role member on ${EXT}: Ask first → Allowed`,
+      `Everyone on ${SEND}: Denied → Ask first`,
+      `Role member on ${iso(EXT)}: Ask first → Allowed`,
     ]);
     expect(within(proposal()).queryByText('Approving loosens no policy.')).toBeNull();
   });
@@ -125,13 +140,13 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
     const section = within(proposal());
     const noEffect = sectionOf('Has no effect');
     expect(items(noEffect)).toEqual([
-      `Role auditor on ${EXT}: a tighter policy for everyone already applies.`,
+      `Role auditor on ${iso(EXT)}: a tighter policy for everyone already applies.`,
     ]);
     const grants = sectionOf('Tools granted');
     expect(grants.textContent).toContain('For Agent agent_1');
-    expect(items(grants)).toEqual(['ext:crm:report']);
+    expect(items(grants)).toEqual([iso('ext:crm:report')]);
     const tools = sectionOf('New tools to register');
-    expect(items(tools)).toEqual(['ext:crm:lookup (read level)']);
+    expect(items(tools)).toEqual([`${iso('ext:crm:lookup')} (read level)`]);
     expect(section.getByText('Agent agent_1 is bound to service principal sp_1.')).toBeDefined();
   });
 
@@ -167,7 +182,7 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
     expect(section.queryByRole('heading', { name: 'Has no effect' })).toBeNull();
     expect(section.queryByText(/loosens no policy/)).toBeNull();
     // The grants of the call itself are still shown.
-    expect(items(sectionOf('Tools granted'))).toEqual(['ext:crm:report']);
+    expect(items(sectionOf('Tools granted'))).toEqual([iso('ext:crm:report')]);
   });
 
   it('shows the preview alone when the call was not served: no policies, the changes and the grants of the preview', () => {
@@ -175,7 +190,7 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
     const section = within(proposal());
     expect(section.queryByRole('heading', { name: 'Policies' })).toBeNull();
     expect(items(sectionOf('What changes'))).toHaveLength(2);
-    expect(items(sectionOf('Tools granted'))).toEqual(['ext:crm:report']);
+    expect(items(sectionOf('Tools granted'))).toEqual([iso('ext:crm:report')]);
   });
 
   it('shows a final approval, which has its call but no preview, as the call alone', () => {
@@ -280,7 +295,7 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
       policies: [entry('toString', EVERYONE, EXT, 'constructor')],
     } as unknown as JsonObject;
     show(detailOf(args, undefined));
-    expect(items(proposal())).toEqual([`${EXT}: constructor (toString)`]);
+    expect(items(proposal())).toEqual([`${iso(EXT)}: constructor (toString)`]);
   });
 
   it('shows a mode or row kind this version does not know as it came', () => {
@@ -288,7 +303,7 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
       policies: [entry('future_kind', EVERYONE, EXT, 'maybe')],
     } as unknown as JsonObject;
     show(detailOf(args, undefined));
-    expect(items(proposal())).toEqual([`${EXT}: maybe (future_kind)`]);
+    expect(items(proposal())).toEqual([`${iso(EXT)}: maybe (future_kind)`]);
   });
 
   it('has no accessibility violations', async () => {
@@ -308,7 +323,7 @@ describe('SP-R1: a policy-set proposal in the approval detail', () => {
       });
       const section = within(screen.getByRole('region', { name: 'Effect of approving' }));
       expect(section.getByText('Nothing gets looser.')).toBeDefined();
-      expect(items(sectionOf('Policies'))[0]).toBe('send_email on crm: Needs a person (for all)');
+      expect(items(sectionOf('Policies'))[0]).toBe(`${SEND}: Needs a person (for all)`);
     });
 
     it('renders the section through the Card slot, so a replacement of that role reaches it', () => {
