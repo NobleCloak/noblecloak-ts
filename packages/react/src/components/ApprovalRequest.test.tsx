@@ -34,7 +34,9 @@ describe('ApprovalRequest renders one request on its own', () => {
 
   it('shows the tool, the lineage, the policy, the timing and the digest of a loaded request', () => {
     render(<ApprovalRequest request={requestFor('loaded')} />);
-    expect(screen.getByRole('heading', { name: 'ext:billing:issue_refund' })).toBeDefined();
+    expect(
+      screen.getByRole('heading', { name: 'A request to use issue_refund (ext:billing)' })
+    ).toBeDefined();
     const text = document.body.textContent;
     expect(text).toContain('agent_refunds');
     expect(text).toContain('run_1');
@@ -68,7 +70,9 @@ describe('ApprovalRequest renders one request on its own', () => {
       retry: () => undefined,
     };
     render(<ApprovalRequest request={request} />);
-    expect(screen.getByRole('heading', { name: 'ext:billing:issue_refund' })).toBeDefined();
+    expect(
+      screen.getByRole('heading', { name: 'A request to use issue_refund (ext:billing)' })
+    ).toBeDefined();
     expect(document.body.textContent).not.toContain('agent_refunds');
     expect(document.body.textContent).not.toContain('policy_default');
   });
@@ -119,7 +123,9 @@ describe('ApprovalRequest given an id reads the request itself', () => {
     const props = { baseUrl: 'https://canned.test', getToken: () => 'tok', fetch: api.fetch };
     const { rerender } = render(<ApprovalRequest id="apr_1" {...props} />);
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'mcp:tracker:create_issue' })).toBeDefined();
+      expect(
+        screen.getByRole('heading', { name: 'A request to use create_issue (mcp:tracker)' })
+      ).toBeDefined();
     });
     expect(buttons()).not.toContain('Approve');
     const first = api.calls.length;

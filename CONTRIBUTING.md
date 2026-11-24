@@ -28,7 +28,12 @@ updates the "Version Packages" pull request from the pending changesets. That jo
 nothing, and it is the only job in any workflow with `contents` or `pull-requests` write. The
 `publish` job alone holds `id-token: write`, which npm trusted publishing needs. The
 `publish-github-packages` job alone holds `packages: write`, which publishing to the NobleCloak
-GitHub Packages registry needs. Neither installs or builds anything. Every job that holds a write
+GitHub Packages registry needs. Neither installs or builds anything. The `publish` job runs only
+when the `plan` job (`scripts/publish-plan.ts`, which installs nothing and only asks npm which
+versions it has) says npm lacks a public package at its current version, so the `npm-publish`
+environment's approval is requested on the push that changes a version (the merge of the version
+pull request), not on every push to `main`. When the lookup fails, `plan` answers yes and the
+release script decides. Every job that holds a write
 permission checks out with `persist-credentials: false`, so the token is not left in `.git/config`
 for dependency code to read; `changesets/action` authenticates with the token it is handed.
 `repo-policy.test.ts` enforces all of this. It needs the repository setting "Allow

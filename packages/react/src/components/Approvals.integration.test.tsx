@@ -16,6 +16,7 @@ import {
 } from '../testing/approvals-harness.js';
 import type { Harness, Recorder } from '../testing/approvals-harness.js';
 import { clock, completeFlow, newStub } from '../testing/auth-harness.js';
+import { findRowById, hasRow } from '../testing/rows.js';
 import { Approvals } from './Approvals.js';
 
 /**
@@ -69,17 +70,12 @@ const optionsFor = (
   ...extra,
 });
 
-/** The queue row of the approval opened with `digest` (its first characters are on the row). */
-const rowOf = (digest: string): Promise<HTMLElement> =>
-  screen.findByRole('button', {
-    name: new RegExp(digest.slice(0, 12).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-  });
-
 const button = (name: string): HTMLButtonElement =>
   screen.getByRole<HTMLButtonElement>('button', { name });
 
-async function openRow(user: ReturnType<typeof userEvent.setup>, digest: string): Promise<void> {
-  await user.click(await rowOf(digest));
+/** Opens the queue row of the approval `id`; a row names its request in words, so it is found by id. */
+async function openRow(user: ReturnType<typeof userEvent.setup>, id: string): Promise<void> {
+  await user.click(await findRowById(id));
   await waitFor(() => {
     expect(button('Approve').disabled).toBe(false);
   });
@@ -94,7 +90,7 @@ describe('c1-17 the component over a real store', () => {
     const rec = recorder();
     const expose: Exposed = { current: undefined };
     render(<Probe options={optionsFor(rec)} expose={expose} />);
-    await openRow(user, opened.digest);
+    await openRow(user, opened.id);
 
     // A stale list that still shows the row as pending, as a lagging replica would.
     let stale: unknown;
@@ -120,9 +116,7 @@ describe('c1-17 the component over a real store', () => {
       resolution: 'approved',
       expected_action_digest: opened.digest,
     });
-    expect(
-      screen.queryByRole('button', { name: new RegExp(opened.digest.slice(0, 12)) })
-    ).toBeNull();
+    expect(hasRow(opened.id)).toBe(false);
     expect(document.querySelector('.nc-detail')).toBeNull();
 
     await act(async () => {
@@ -132,9 +126,7 @@ describe('c1-17 the component over a real store', () => {
       expect(expose.current?.status).toBe('ready');
     });
     expect(expose.current?.approvals.some((a) => a.id === opened.id)).toBe(false);
-    expect(
-      screen.queryByRole('button', { name: new RegExp(opened.digest.slice(0, 12)) })
-    ).toBeNull();
+    expect(hasRow(opened.id)).toBe(false);
   });
 
   it('deny: the POST carries the reason and the rejected resolution, and the detail closes', async () => {
@@ -142,7 +134,7 @@ describe('c1-17 the component over a real store', () => {
     const opened = await openApproval(h.baseUrl, h.tokens.creator);
     const rec = recorder();
     render(<Probe options={optionsFor(rec)} expose={{ current: undefined }} />);
-    await openRow(user, opened.digest);
+    await openRow(user, opened.id);
     await user.type(screen.getByRole('textbox'), 'not today');
     await user.click(button('Deny'));
     await screen.findByText('Denied. The request has left your queue.');
@@ -159,7 +151,7 @@ describe('c1-17 the component over a real store', () => {
     const opened = await openApproval(h.baseUrl, h.tokens.creator);
     const rec = recorder();
     render(<Probe options={optionsFor(rec)} expose={{ current: undefined }} />);
-    await openRow(user, opened.digest);
+    await openRow(user, opened.id);
     rec.intercept((c) =>
       c.method === 'POST' ? problemResponse(409, 'approval_conflict') : undefined
     );
@@ -186,7 +178,7 @@ describe('c1-17 the component over a real store', () => {
         onSignIn={onSignIn}
       />
     );
-    await openRow(user, opened.digest);
+    await openRow(user, opened.id);
     valid = false;
     await user.click(button('Approve'));
     expect((await screen.findAllByText('Your session has expired.')).length).toBeGreaterThan(0);

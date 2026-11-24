@@ -45,7 +45,7 @@ import { listPublicPackages } from './workspace.js';
 import type { WorkspacePackage } from './workspace.js';
 
 /** The `create-next-app` the exercise scaffolds with; the Next.js the example pins (`examples/next-app`). */
-export const CREATE_NEXT_APP_VERSION = '16.4.3';
+export const CREATE_NEXT_APP_VERSION = '16.4.6';
 
 /** A root layout with no font import: the exercise's only network use is the package registry. */
 export const PLAIN_LAYOUT = `import type { ReactNode } from 'react';

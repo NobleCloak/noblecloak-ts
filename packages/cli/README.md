@@ -147,6 +147,13 @@ npx @noblecloak/cli starter --credentials ./sp-credential.json
    MCP `tools/call` (`int_sandbox_create_note`) to the gateway, with the run named in `x-noblecloak-external-run-id`.
    An approval admits one call: the command never repeats it.
 
+While it waits, it prints on stderr where to decide the request, what the request is called there, and how long
+it waits: for the `production` and `beta` deployments the Approvals page of that deployment's app
+(`https://app.noblecloak.com/approvals`, `https://shell.beta.shared.bianoble.com/approvals`), then the request's tool
+reference (`tool:noblecloak:propose-policy-set` for the setup, `tool:sandbox:create-note` for the write), then
+that Ctrl-C stops the command and leaves the request open. With `--govern-url` (or `NOBLECLOAK_GOVERN_URL`)
+pointing elsewhere there is no link: the command does not guess an app address. `--json` output is unchanged.
+
 The two approvals are decided by a person with the Approvals module, never with the token that opened them.
 
 | Flag                         | Variable                      | Meaning                                                                                                                                                                                                                                                                                                                          |

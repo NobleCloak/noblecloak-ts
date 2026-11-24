@@ -60,7 +60,9 @@ describe('T40: every detail state renders its text', () => {
   it('refreshing: says Updating, still shows the request, and turns the actions off', () => {
     renderController(controllerFor('refreshing', true));
     expect(screen.getByText('Updating…')).toBeDefined();
-    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('ext:billing:issue_refund');
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(
+      'A request to use issue_refund (ext:billing)'
+    );
     expect(document.body.textContent).toContain(MARKER);
   });
 
@@ -187,7 +189,7 @@ describe('T40: every detail state renders its text', () => {
   it('moves focus to the detail heading on open and back to the row on close', async () => {
     const user = userEvent.setup();
     renderHost({ approvals: queueRows(2), detailFor: (id) => detailStates(id).loaded });
-    const rows = screen.getAllByRole('button', { name: /ext:billing:tool_/ });
+    const rows = screen.getAllByRole('button', { name: /request to use tool_\d/ });
     await user.click(at(rows, 1));
     const heading = screen.getByRole('heading', { level: 3 });
     expect(document.activeElement).toBe(heading);
@@ -278,7 +280,7 @@ describe('T21: accessibility of every detail state', () => {
     const user = userEvent.setup();
     renderController(controllerFor('loaded'));
     const order = [
-      'ext:billing:tool_1',
+      'A request to use tool_1',
       'Copy digest',
       'Reason (optional)',
       'Approve',

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -21,7 +21,7 @@ function loaded(level: ApprovalSummary['side_effect_level'] = 'external') {
 }
 
 async function openFirstRow(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
+  await user.click(screen.getByRole('button', { name: /tool_1\b/ }));
 }
 
 describe('deciding', () => {
@@ -83,7 +83,7 @@ describe('deciding', () => {
     await screen.findByText('Approved. The request has left your queue.');
     expect(host.calls.at(-1)).toEqual({ method: 'closeDetail', args: [] });
     expect(screen.queryByRole('heading', { level: 3 })).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /tool_1\b/ }));
   });
 
   it('after success focus lands on the queue heading when the controller keeps showing the detail', async () => {
@@ -146,34 +146,83 @@ describe('deciding', () => {
 
 describe('T21: the confirm step', () => {
   it.each(['delete', 'admin'] as const)(
-    'Approve at the %s level asks to confirm, with focus on Confirm',
+    'Approve at the %s level opens a dialog that names the request and the level, and decides nothing until Confirm',
     async (level) => {
       const user = userEvent.setup();
       const host = renderHost({ approvals: queueRows(1), detailFor: loaded(level) });
       await openFirstRow(user);
+      expect(screen.queryByRole('dialog')).toBeNull();
       await user.click(screen.getByRole('button', { name: 'Approve' }));
       expect(host.calls.filter((call) => call.method === 'approve')).toEqual([]);
-      const confirm = screen.getByRole('button', { name: 'Confirm approval' });
-      expect(document.activeElement).toBe(confirm);
-      expect(
-        screen.getByText(
-          `This request has the ${level} level. Confirm that you want to approve it.`
-        )
-      ).toBeDefined();
-      await user.click(confirm);
+      const dialog = screen.getByRole('dialog', { name: 'Approve this request?' });
+      // It says what is being approved (the request, in words) and why it asks (the level).
+      expect(dialog.textContent).toContain('You are about to approve this request: “');
+      expect(dialog.textContent).toContain('A request to use issue_refund (ext:billing)');
+      expect(dialog.textContent).toContain(
+        `This request has the ${level} level. Confirm that you want to approve it.`
+      );
+      // Cancel comes before Confirm, so a native dialog's first focus lands on the safe choice.
+      const buttons = within(dialog).getAllByRole('button');
+      expect(buttons.map((b) => b.textContent)).toEqual(['Cancel', 'Confirm approval']);
+      await user.click(within(dialog).getByRole('button', { name: 'Confirm approval' }));
       expect(host.calls.filter((call) => call.method === 'approve')).toHaveLength(1);
     }
   );
 
-  it('Cancel closes the confirm step and returns focus to Approve without deciding', async () => {
+  it('Cancel closes the dialog and returns focus to Approve without deciding', async () => {
     const user = userEvent.setup();
     const host = renderHost({ approvals: queueRows(1), detailFor: loaded('delete') });
     await openFirstRow(user);
     await user.click(screen.getByRole('button', { name: 'Approve' }));
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Approve this request?' })).getByRole('button', {
+        name: 'Cancel',
+      })
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Confirm approval' })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Approve' }));
     expect(host.calls.filter((call) => call.method === 'approve')).toEqual([]);
+  });
+
+  it('a decision that cannot be sent any more takes the dialog away, so Confirm is never answered', async () => {
+    const user = userEvent.setup();
+    const states = detailStates('apr_1', { approval: { side_effect_level: 'admin' } });
+    const withDetail = (detail: ApprovalDetailState) =>
+      fakeController({ approvals: queueRows(1), detail });
+    const view = renderController(withDetail(states.loaded));
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(screen.getByRole('dialog', { name: 'Approve this request?' })).toBeDefined();
+    // The detail reloads: it is no longer `loaded`, so nothing can be sent.
+    view.rerender(<Approvals controller={withDetail(states.refreshing)} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Back to `loaded`: the dialog does not come back by itself, the person has to ask again.
+    view.rerender(<Approvals controller={withDetail(states.loaded)} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('names what is approved with the asker the service gave', async () => {
+    const user = userEvent.setup();
+    renderHost({
+      approvals: queueRows(1, {
+        requester: { id: 'user_ann', kind: 'user', display_name: 'Ann' },
+      }),
+      detailFor: (id) =>
+        detailStates(id, {
+          approval: {
+            side_effect_level: 'admin',
+            requester: { id: 'user_ann', kind: 'user', display_name: 'Ann' },
+            // The caller's own hint of an agent: never what the dialog names as the asker.
+            agent: { id: 'agent_refunds', name: 'Trusted Finance Agent' },
+          },
+        }).loaded,
+    });
+    await openFirstRow(user);
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    const [i, j] = [String.fromCodePoint(0x2068), String.fromCodePoint(0x2069)];
+    const text = screen.getByRole('dialog').textContent;
+    expect(text).toContain(`“${i}${i}Ann${j} wants to use issue_refund (ext:billing)${j}”.`);
+    expect(text).not.toContain('Trusted Finance Agent');
   });
 
   it.each(['read', 'write', 'external'] as const)(

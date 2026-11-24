@@ -149,7 +149,9 @@ describe('T17: detail rendering of arguments', () => {
         detail: { id: 'apr_1', status: 'loaded', approval: summary },
       })
     );
-    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe('ext:billing:issue_refund');
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toBe(
+      'A request to use issue_refund (ext:billing)'
+    );
     expect(screen.queryByText('Policy')).toBeNull();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined();
   });
@@ -210,7 +212,7 @@ describe('T33: no arguments remain in the DOM once the detail is gone', () => {
   it('after the detail closes', async () => {
     const user = userEvent.setup();
     renderHost({ approvals: queueRows(1), detailFor: marked });
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
+    await user.click(screen.getByRole('button', { name: /tool_1\b/ }));
     expect(document.body.textContent).toContain(MARKER);
     await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(document.body.textContent).not.toContain(MARKER);
@@ -222,15 +224,15 @@ describe('T33: no arguments remain in the DOM once the detail is gone', () => {
       approvals: queueRows(2),
       detailFor: (id) => (id === 'apr_1' ? marked(id) : toolHidingArguments(id)),
     });
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_2/ }));
+    await user.click(screen.getByRole('button', { name: /tool_1\b/ }));
+    await user.click(screen.getByRole('button', { name: /tool_2\b/ }));
     expect(document.body.textContent).not.toContain(MARKER);
   });
 
   it('after a successful resolve, even when the controller still holds the detail', async () => {
     const user = userEvent.setup();
     const host = renderHost({ approvals: queueRows(1), detailFor: marked });
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
+    await user.click(screen.getByRole('button', { name: /tool_1\b/ }));
     expect(document.body.textContent).toContain(MARKER);
     await user.click(screen.getByRole('button', { name: 'Approve' }));
     expect(host.calls.map((call) => call.method)).toEqual(['openDetail', 'approve', 'closeDetail']);
@@ -262,9 +264,9 @@ describe('T33: no arguments remain in the DOM once the detail is gone', () => {
       approvals: queueRows(2),
       detailFor: (id) => toolShowingArguments({ s: 'x'.repeat(10_000) }, id),
     });
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
+    await user.click(screen.getByRole('button', { name: /tool_1\b/ }));
     await user.click(screen.getByRole('button', { name: 'Show all' }));
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_2/ }));
+    await user.click(screen.getByRole('button', { name: /tool_2\b/ }));
     expect(pre().textContent).toHaveLength(4000);
   });
 });
@@ -309,7 +311,7 @@ describe('T37: the DOM shows no arguments the controller did not return in the d
           }),
       },
     });
-    await user.click(screen.getByRole('button', { name: /ext:billing:tool_1/ }));
+    await user.click(screen.getByRole('button', { name: /tool_1\b/ }));
     await user.click(screen.getByRole('button', { name: 'Approve' }));
     expect(await screen.findByText('Its state now: approved.')).toBeDefined();
     expect(document.body.textContent).not.toContain(MARKER);

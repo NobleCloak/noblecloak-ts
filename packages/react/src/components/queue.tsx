@@ -3,12 +3,12 @@ import type { Ref } from 'react';
 
 import type { ApprovalsConnection, ApprovalsController } from '../approvals-types.js';
 import { ErrorMessage } from './error-message.js';
-import { clipText, formatAge, shortDigest } from './format.js';
-import { escapeInvisible } from './format-json.js';
+import { clipText, formatAge } from './format.js';
 import type { ApprovalsLabelKey, Translate } from './labels.js';
+import { requestTitle, requestVia } from './request-title.js';
 import { Safe } from './safe.js';
 import { useNc } from './slots.js';
-import { levelWord, principalText } from './words.js';
+import { levelWord } from './words.js';
 
 const CONNECTION_LABEL: Readonly<Record<ApprovalsConnection, ApprovalsLabelKey>> = {
   connecting: 'connectionConnecting',
@@ -91,17 +91,15 @@ export function Queue({
                       }}
                     />
                     <span className="nc-visually-hidden">
-                      {t('rowSelect', { tool: escapeInvisible(clipText(approval.tool_ref)) })}
+                      {t('rowSelect', { tool: requestTitle(approval, t) })}
                     </span>
                   </label>
-                ) : choosable ? (
-                  // Said in words, beside the row, so a person who cannot see colour or a disabled box still learns why.
-                  <span className="nc-muted nc-no-choose">{t(noBatchKey(block))}</span>
                 ) : null}
                 <Button
                   type="button"
                   variant="secondary"
                   className="nc-row"
+                  data-approval-id={approval.id}
                   aria-current={selected ? 'true' : undefined}
                   ref={(element) => {
                     rowRef(approval.id, element);
@@ -111,29 +109,35 @@ export function Queue({
                   }}
                 >
                   <span className="nc-row-tool">
+                    <bdi>{requestTitle(approval, t)}</bdi>
+                  </span>{' '}
+                  {/* The whole reference, so two tools that read alike are told apart in the row that can be approved. */}
+                  <code className="nc-muted nc-row-ref">
                     <Safe>{clipText(approval.tool_ref)}</Safe>
-                  </span>
-                  {approval.requester === undefined ? null : (
-                    <span>
-                      <bdi>
-                        {t('rowRequester', {
-                          name: escapeInvisible(clipText(principalText(approval.requester))),
-                        })}
-                      </bdi>
-                    </span>
-                  )}
-                  <span>{t('rowLevel', { level: levelWord(approval.side_effect_level, t) })}</span>
-                  <code>
-                    <bdi>
-                      {t('rowDigest', {
-                        digest: escapeInvisible(shortDigest(approval.action_digest)),
-                      })}
-                    </bdi>
-                  </code>
-                  <span className="nc-muted">{formatAge(approval.created_at, now, t)}</span>
-                  {resolving.has(approval.id) ? (
-                    <span className="nc-muted">{t('rowSending')}</span>
+                  </code>{' '}
+                  <span className="nc-muted">
+                    {t('rowLevel', { level: levelWord(approval.side_effect_level, t) })}
+                    {' · '}
+                    {formatAge(approval.created_at, now, t)}
+                    {requestVia(approval, t) === undefined ? null : (
+                      <>
+                        {' · '}
+                        <bdi>{requestVia(approval, t)}</bdi>
+                      </>
+                    )}
+                  </span>{' '}
+                  {/* Said in words, in the row, so a person who cannot see that the box is missing still learns why. */}
+                  {choosable && block !== undefined ? (
+                    <>
+                      <span className="nc-muted">{t(noBatchKey(block))}</span>{' '}
+                    </>
                   ) : null}
+                  {resolving.has(approval.id) ? (
+                    <>
+                      <span className="nc-muted">{t('rowSending')}</span>{' '}
+                    </>
+                  ) : null}
+                  <span className="nc-row-open">{t('rowOpen')}</span>
                 </Button>
               </li>
             );

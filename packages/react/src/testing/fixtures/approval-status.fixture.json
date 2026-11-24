@@ -18,26 +18,16 @@
         "deployment": "hosted",
         "entitlements": [],
         "jwks_uri": "<origin>/.well-known/jwks.json",
-        "kids": [
-          "kid_FIXTURE_1"
-        ],
-        "resolutions": [
-          "approved",
-          "rejected"
-        ],
-        "features": [
-          "runs"
-        ],
+        "kids": ["kid_FIXTURE_1"],
+        "resolutions": ["approved", "rejected"],
+        "features": ["runs"],
         "limits": {
           "decisions_batch_max_items": 50,
           "records_batch_max_items": 100,
           "approval_arguments_max_bytes": 32768,
           "resolutions_batch_max_items": 50
         },
-        "continuation_deliveries": [
-          "pull",
-          "held"
-        ],
+        "continuation_deliveries": ["pull", "held"],
         "tool_registration": "administrators",
         "authzen_configuration": "<origin>/.well-known/authzen-configuration",
         "dpop": "off",

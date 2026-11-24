@@ -15,6 +15,7 @@ import type { UseApprovalsOptions } from '../approvals-types.js';
 import { useApprovals } from '../use-approvals.js';
 import { call, recorder, startHarness } from '../testing/approvals-harness.js';
 import type { Harness, Recorder } from '../testing/approvals-harness.js';
+import { findRowById, hasRow } from '../testing/rows.js';
 import { Approvals } from './Approvals.js';
 
 let h: Harness;
@@ -122,11 +123,7 @@ describe('a propose-policy-set approval in <Approvals>', () => {
     const proposed = await propose('always_allow');
     render(<Probe options={optionsFor(h.tokens.admin, recorder())} />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: new RegExp(proposed.digest.slice(0, 12)),
-      })
-    );
+    await user.click(await findRowById(proposed.id));
     await screen.findByRole('region', { name: 'What approving this does' });
 
     expect(listOf('Policies')).toEqual([
@@ -161,9 +158,7 @@ describe('a propose-policy-set approval in <Approvals>', () => {
     const user = userEvent.setup();
     const proposed = await propose('ask');
     render(<Probe options={optionsFor(h.tokens.admin, recorder())} />);
-    await user.click(
-      await screen.findByRole('button', { name: new RegExp(proposed.digest.slice(0, 12)) })
-    );
+    await user.click(await findRowById(proposed.id));
     await screen.findByRole('region', { name: 'What approving this does' });
     expect(within(region()).getByText('Approving loosens no policy.')).toBeDefined();
   });
@@ -198,8 +193,6 @@ describe('opening an approval by id (the deep link)', () => {
     render(<Probe options={optionsFor(h.tokens.admin, rec)} openId={proposed.id} />);
     await screen.findByRole('region', { name: 'What approving this does' });
     expect(listOf('What changes')).toHaveLength(1);
-    expect(
-      screen.queryByRole('button', { name: new RegExp(proposed.digest.slice(0, 12)) })
-    ).toBeNull();
+    expect(hasRow(proposed.id)).toBe(false);
   });
 });

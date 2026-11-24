@@ -14,11 +14,27 @@ export const DEFAULT_LABELS = {
   connectionLive: 'Live. New requests appear as they arrive.',
   connectionPolling: 'Checking for new requests every few seconds.',
   connectionOffline: 'Offline. The list may be out of date.',
+  // A row says what is asked and by whom in one sentence. `{who}` is the requester the service verified, by the
+  // name it gave; `{agent}` is the agent the caller named (a hint, never the asker); `{tool}` is the tool as the
+  // service wrote it, with its source (`toolWithSource`). With no requester name the `Anon` form is used and the
+  // id is in the detail.
+  rowTitleTool: '{who} wants to use {tool}',
+  rowTitleToolAnon: 'A request to use {tool}',
+  rowTitleProposal: 'Policy setup from {who}',
+  rowTitleProposalFor: 'Policy setup for {agent}, from {who}',
+  rowTitleProposalAgent: 'Policy setup for {agent}',
+  rowTitleProposalAnon: 'A policy setup request',
+  toolWithSource: '{tool} ({source})',
+  rowToolUnknown: 'an unnamed tool',
+  rowVia: 'via {agent}',
+  rowOpen: 'Review and decide',
   rowLevel: 'Level: {level}',
+  /** Not shown in a row since the row names the request in words; the digest is in the detail. Kept so a host's override still type-checks. */
   rowDigest: 'Digest {digest}',
   rowSending: 'Sending your decision…',
+  /** Not shown in a row since the title names the asker; the requester is in the detail. Kept so a host's override still type-checks. */
   rowRequester: 'From {name}',
-  rowSelect: 'Select {tool}',
+  rowSelect: 'Select: {tool}',
   rowDecidedBy: '{resolution} by {name}',
   rowDecidedNobody: '{resolution}',
   queueShowMore: 'Show more requests',
@@ -30,9 +46,9 @@ export const DEFAULT_LABELS = {
   recentRetry: 'Try again',
   recentShowMore: 'Show older',
   recentMore: 'Older requests are available.',
-  rowNoBatchReadable: 'Has a call to read: open it to decide.',
+  rowNoBatchReadable: 'Open this request to read its call before approving.',
   rowNoBatchWithheld: 'Open this request to decide it.',
-  rowNoBatchUnknown: 'Open it to read it before approving.',
+  rowNoBatchUnknown: 'Open this request to read it before approving.',
   batchApproveSelected: 'Approve selected ({count})',
   batchPrompt:
     'Approve {count} requests as listed, without opening them? Each is approved only if it is still the one you see here.',
@@ -99,6 +115,7 @@ export const DEFAULT_LABELS = {
 
   // The call
   callFullHeading: 'The full call, as returned for this request',
+  callFullToggle: 'Show the full call',
   callDigestOnlyLoaded:
     'The arguments of this call are not shown to you. You are approving the call identified by this digest.',
   callDigestOnlyResolved:
@@ -184,6 +201,13 @@ export const DEFAULT_LABELS = {
   historyEntry: '{resolution} by {by}',
 
   // Deciding
+  decisionLabel: 'Your decision',
+  decisionCallNotWhole:
+    'The call above is not shown in full, so it cannot be approved or denied here.',
+  decisionDigestChanged:
+    'This request changed. Confirm above that you have read the change to approve or deny it.',
+  confirmHeading: 'Approve this request?',
+  confirmRequest: 'You are about to approve this request: “{request}”.',
   reasonLabel: 'Reason (optional)',
   approve: 'Approve',
   deny: 'Deny',

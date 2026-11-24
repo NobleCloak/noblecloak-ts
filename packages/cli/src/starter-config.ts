@@ -18,6 +18,11 @@ export interface StarterHosts {
   readonly mcpUrl: string;
   /** The audience of the principal's token for the gateway. An identifier: nothing resolves it. */
   readonly gatewayAudience: string;
+  /**
+   * The origin of the browser app (the shell) of a named deployment, where Approvals is at `/approvals`.
+   * Absent when the govern origin is not the deployment's own: nothing names the app of a custom host.
+   */
+  readonly appUrl?: string;
 }
 
 /**
@@ -33,12 +38,14 @@ export const DEPLOYMENTS = {
     governUrl: 'https://govern.noblecloak.com',
     mcpUrl: 'https://mcp.noblecloak.com',
     gatewayAudience: 'https://mcp-agents.noblecloak.com',
+    appUrl: 'https://app.noblecloak.com',
   },
   beta: {
     authUrl: 'https://api.beta.shared.bianoble.com',
     governUrl: 'https://govern.beta.shared.bianoble.com',
     mcpUrl: 'https://mcp.beta.shared.bianoble.com',
     gatewayAudience: 'https://mcp-agents.beta.shared.bianoble.com',
+    appUrl: 'https://shell.beta.shared.bianoble.com',
   },
 } as const satisfies Record<string, StarterHosts>;
 
@@ -81,14 +88,20 @@ export function resolveStarterHosts(flags: ParsedFlags, io: Io): StarterHosts {
   };
   const authUrl = pick('auth-url', AUTH_URL_ENV, defaults.authUrl);
   assertSecureUrl(authUrl, 'The authorization server URL');
+  const governUrl = origin(
+    pick('govern-url', GOVERN_URL_ENV, defaults.governUrl),
+    'The govern URL'
+  );
   return {
     authUrl: authUrl.replace(/\/+$/, ''),
-    governUrl: origin(pick('govern-url', GOVERN_URL_ENV, defaults.governUrl), 'The govern URL'),
+    governUrl,
     mcpUrl: origin(pick('mcp-url', MCP_URL_ENV, defaults.mcpUrl), 'The MCP gateway URL'),
     gatewayAudience: origin(
       pick('gateway-audience', GATEWAY_AUDIENCE_ENV, defaults.gatewayAudience),
       'The gateway audience'
     ),
+    // Only the deployment's own govern origin tells which browser app holds its Approvals.
+    ...(governUrl === defaults.governUrl ? { appUrl: defaults.appUrl } : {}),
   };
 }
 

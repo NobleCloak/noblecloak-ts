@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('the queue', () => {
-  it('lists each request as a button with the tool, the level word, a short digest and the age', () => {
+  it('lists each request as a button that says what is asked, the level word, the age and what to do', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-05T12:05:00Z'));
     renderController(
@@ -34,10 +34,13 @@ describe('the queue', () => {
     const list = screen.getByRole('list', { name: 'Approval requests' });
     const rows = within(list).getAllByRole('button');
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.textContent).toContain('ext:billing:tool_1');
+    expect(rows[0]?.textContent).toContain('A request to use tool_1 (ext:billing)');
     expect(rows[0]?.textContent).toContain('Level: delete');
-    expect(rows[0]?.textContent).toContain('Digest a3f1c0dea3f1');
-    expect(rows[0]?.textContent).not.toContain('a3f1c0dea3f1c');
+    expect(rows[0]?.textContent).toContain('Review and decide');
+    // The whole tool reference stays in the row, so tools that read alike are told apart; the digest is in the detail.
+    expect(rows[0]?.textContent).toContain('ext:billing:tool_1');
+    expect(rows[0]?.textContent).not.toContain('Digest');
+    expect(rows[0]?.textContent).not.toContain('a3f1c0de');
     expect(rows[0]?.textContent).toContain('5 min ago');
     expect(rows[1]?.textContent).toContain('1 d ago');
     expect(rows[1]?.textContent).toContain('Level: external');
@@ -49,7 +52,7 @@ describe('the queue', () => {
       approvals: queueRows(2),
       detailFor: (id) => detailStates(id).loading,
     });
-    const rows = screen.getAllByRole('button', { name: /ext:billing:tool_/ });
+    const rows = screen.getAllByRole('button', { name: /request to use tool_\d/ });
     expect(rows.map((row) => row.getAttribute('aria-current'))).toEqual([null, null]);
     await user.click(at(rows, 1));
     expect(host.calls).toEqual([{ method: 'openDetail', args: ['apr_2'] }]);

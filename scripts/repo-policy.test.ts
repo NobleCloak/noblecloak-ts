@@ -29,6 +29,7 @@ const readJson = (path: string): Record<string, unknown> =>
   JSON.parse(read(path)) as Record<string, unknown>;
 
 interface Step {
+  id?: string;
   uses?: string;
   run?: string;
   name?: string;
@@ -45,6 +46,7 @@ interface Job {
   strategy?: { matrix?: Record<string, unknown> };
   if?: string;
   permissions?: Permissions;
+  outputs?: Record<string, string>;
   env?: Record<string, string>;
   steps?: Step[];
 }
@@ -745,7 +747,7 @@ describe('workflows', () => {
     expect(minters.map(([id]) => id)).toEqual(['publish.yml:publish']);
     for (const [id, job] of minters) {
       for (const step of job.steps ?? []) expect(step.run ?? '', id).not.toMatch(INSTALL_OR_BUILD);
-      expect(job.needs, id).toEqual('pack');
+      expect(job.needs, id).toEqual(['pack', 'plan']);
       const download = job.steps?.find((s) => s.uses?.startsWith('actions/download-artifact@'));
       expect(download?.with, id).toEqual({ name: 'npm-packages', path: 'artifacts' });
     }
@@ -802,6 +804,29 @@ describe('workflows', () => {
     );
     // The workflow does name it; 'the tree passes the private-dependency guard' covers the install side.
     expect(read('.github/workflows/publish.yml')).toContain('https://npm.pkg.github.com');
+  });
+
+  // The plan decides whether `publish npm` starts (and so whether the npm-publish approval is asked
+  // for), so it must not be able to publish, and no dependency's code may run in it.
+  it('publish plan installs nothing, cannot publish, and gates publish npm on its one output', () => {
+    const jobs = loadWorkflow('publish.yml').jobs;
+    const plan = jobs.plan;
+    expect(plan?.permissions).toEqual({ contents: 'read' });
+    expect(plan?.environment).toBeUndefined();
+    expect(plan?.needs).toBeUndefined();
+    expect(plan?.if).toBeUndefined();
+    expect((plan?.steps ?? []).map((s) => s.run).filter((run) => run !== undefined)).toEqual([
+      'bun --no-install scripts/publish-plan.ts',
+    ]);
+    expect(plan?.steps?.find((s) => s.run !== undefined)?.id).toBe('plan');
+    expect(plan?.outputs).toEqual({
+      has_unpublished: '${{ steps.plan.outputs.has_unpublished }}',
+    });
+    expect(jobs.publish?.if).toBe(
+      "vars.PUBLIC_RELEASE_ENABLED == 'true' && needs.plan.outputs.has_unpublished == 'true'"
+    );
+    // The script starts no process of its own: its one call out is the `npm view` lookup release.ts exports.
+    expect(read('scripts/publish-plan.ts')).not.toMatch(/spawnSync|child_process|runCommand/);
   });
 
   // A v* tag push runs publish.yml as it exists at the tagged commit, so the workflow file cannot
@@ -926,7 +951,7 @@ describe('workflows', () => {
     expect(packRuns.indexOf('bun run check:readmes')).toBeLessThan(
       packRuns.indexOf('bun run pack:all')
     );
-    expect(publish.publish?.needs).toEqual('pack');
+    expect(publish.publish?.needs).toEqual(['pack', 'plan']);
     expect(publish['publish-github-packages']?.needs).toEqual('pack');
   });
 });

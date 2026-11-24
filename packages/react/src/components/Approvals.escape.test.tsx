@@ -65,8 +65,9 @@ describe('c1-2 every server-controlled string is escaped and isolated', () => {
     expect(isolated).toContain(`pol${ESC}icy`);
     expect(isolated).toContain(`scope${ESC}1`);
     expect(isolated.some((text) => text.includes(`by${ESC}someone`))).toBe(true);
+    // The heading and the row say the request in words; the tool name in them is escaped like any other.
     expect(screen.getByRole('heading', { level: 3 }).querySelector('bdi')?.textContent).toBe(
-      `ext:evil:${ESC}tpircs`
+      `A request to use ${ESC}tpircs (ext:evil)`
     );
   });
 
@@ -97,9 +98,12 @@ describe('c2-9 a very long tool reference is cut in a row and the heading, whole
         detail: detailStates('apr_1', { approval: { tool_ref: long } }).loaded,
       })
     );
+    // The title cuts the tool at 80 characters; the row also shows the reference, cut at 200, and the facts all of it.
+    const title = `A request to use ${long.slice(0, 80)}…`;
     const row = document.querySelector('.nc-row-tool');
-    expect(row?.textContent).toBe(`${long.slice(0, 200)}…`);
-    expect(document.querySelector('.nc-detail > h3')?.textContent).toBe(`${long.slice(0, 200)}…`);
+    expect(row?.textContent).toBe(title);
+    expect(document.querySelector('.nc-detail > h3')?.textContent).toBe(title);
+    expect(document.querySelector('.nc-row-ref')?.textContent).toBe(`${long.slice(0, 200)}…`);
     expect(document.querySelector('.nc-facts dd')?.textContent).toBe(long);
   });
 });
