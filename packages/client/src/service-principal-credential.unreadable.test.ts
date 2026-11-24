@@ -126,12 +126,12 @@ describe('loadServicePrincipalCredential: an unreadable credential file', () => 
     expect(err.message).not.toContain('Ab3x9QzL');
   });
 
-  it('does not echo a 16-character-or-longer token-alphabet string even when its directory exists', async () => {
+  it('does not echo a file name of 16 or more token-alphabet characters even when its directory exists', async () => {
     const dir = await tempDir();
     await mkdir(join(dir, 'sub'));
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    const err = await failure(loadServicePrincipalCredential('sub/Ab3x+9QzLmN0pQr'));
-    expect(err.message).not.toContain('Ab3x+9QzLmN0pQr');
+    const err = await failure(loadServicePrincipalCredential('sub/Ab3x+9QzLmN0pQrS'));
+    expect(err.message).not.toContain('Ab3x+9QzLmN0pQrS');
   });
 
   it('does not carry the contents of a credential file it did read when the key file is missing', async () => {
