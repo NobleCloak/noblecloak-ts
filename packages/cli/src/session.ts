@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { open } from 'node:fs/promises';
+import { callbackHeaders, failurePage, mismatchPage, successPage } from './callback-page.js';
 import { assertSecureUrl, type Config } from './config.js';
 import { interrupted, interruptedError, requestSignal, timeoutOnlySignal } from './abortable.js';
 import { CliError, EXIT } from './errors.js';
@@ -98,7 +99,7 @@ async function discover(
   return { authorization, token, revocation };
 }
 
-/** The pages the loopback listener answers with: plain text, nothing from the request echoed. */
+/** A plain-text answer for a request that is not the sign-in callback: nothing from the request echoed. */
 function reply(res: ServerResponse, status: number, text: string): void {
   res.writeHead(status, {
     'content-type': 'text/plain; charset=utf-8',
@@ -108,13 +109,20 @@ function reply(res: ServerResponse, status: number, text: string): void {
   res.end(`${text}\n`);
 }
 
+/** An answer to the callback itself: a self-contained page, served with a CSP that allows no other origin. */
+function replyPage(res: ServerResponse, status: number, html: string): void {
+  res.writeHead(status, callbackHeaders);
+  res.end(html);
+}
+
 interface Callback {
   readonly code: string;
 }
 
 /**
  * Listens on 127.0.0.1 and resolves with the code of the first callback whose `state` matches. A request
- * with another path or another state gets a plain page and the listener keeps waiting. Rejects with exit
+ * with another path gets a plain-text 404 and one with another state gets the "response ignored" page; the
+ * listener keeps waiting in both cases. Rejects with exit
  * code 3 on timeout, on an error from the authorization server (with the right `state`) or on cancel.
  */
 function waitForCallback(
@@ -125,26 +133,40 @@ function waitForCallback(
   return new Promise<Callback>((resolve, reject) => {
     let settled = false;
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      // A request target that does not parse (a raw `GET http://[ HTTP/1.1`) would throw out of this
+      // handler as an uncaught exception and take the sign-in down with it.
+      if (!URL.canParse(req.url ?? '/', 'http://127.0.0.1')) {
+        reply(res, 400, 'Bad request.');
+        return;
+      }
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       if (req.method !== 'GET' || url.pathname !== '/callback') {
         reply(res, 404, 'Not found.');
         return;
       }
       if (url.searchParams.get('state') !== state) {
-        reply(res, 400, 'This sign-in response does not match the request. It was ignored.');
+        replyPage(res, 400, mismatchPage());
         return;
       }
+      // Defense in depth: unreachable while finish() closes the server and every connection, so a second
+      // callback cannot connect. Plain text, since no one sees it.
       if (settled) {
         reply(res, 409, 'This sign-in was already completed.');
         return;
       }
       const code = url.searchParams.get('code');
       if (url.searchParams.has('error') || code === null || code === '') {
-        reply(res, 400, 'Sign-in was not completed. Return to the terminal.');
+        // The state matched, so this is the authorization server's answer. Its error text is shown
+        // escaped and cut (see failurePage); nothing else from the query string is.
+        replyPage(
+          res,
+          400,
+          failurePage(url.searchParams.get('error'), url.searchParams.get('error_description'))
+        );
         finish(new CliError(EXIT.unauthenticated, 'Sign-in was not completed.'));
         return;
       }
-      reply(res, 200, 'Signed in. You can close this tab and return to the terminal.');
+      replyPage(res, 200, successPage());
       finish(undefined, { code });
     });
 
