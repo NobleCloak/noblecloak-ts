@@ -1,5 +1,12 @@
 # @noblecloak/spec
 
+## 0.12.4
+
+### Patch Changes
+
+- Updated dependencies [6d265a1]
+  - @noblecloak/client@0.14.2
+
 ## 0.12.3
 
 ### Patch Changes
