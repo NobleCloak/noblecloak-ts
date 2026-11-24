@@ -23,6 +23,10 @@ export function assertSecureUrl(value: string, what: string): URL {
   } catch {
     throw new CliError(EXIT.usage, `${what} is not a URL.`);
   }
+  // A credential in the URL would travel with every request and into the logs; the message names no value.
+  if (url.username !== '' || url.password !== '') {
+    throw new CliError(EXIT.usage, `${what} must not contain a username or password.`);
+  }
   const loopback = LOOPBACK_HOSTS.has(url.hostname);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
     throw new CliError(EXIT.usage, `${what} must be an https URL (http is allowed on loopback).`);

@@ -33,6 +33,7 @@
     "clean": "rm -rf dist coverage .turbo"
   },
   "dependencies": {
-    "@noblecloak/client": "workspace:*"
+    "@noblecloak/client": "workspace:*",
+    "@noblecloak/setup-steps": "workspace:*"
   }
 }

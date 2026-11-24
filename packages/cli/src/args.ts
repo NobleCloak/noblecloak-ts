@@ -50,6 +50,29 @@ const STARTER_OPTIONS = {
   help: { type: 'boolean', short: 'h' },
 } as const;
 
+/** The hosts every `login` and `setup` flag set shares. */
+const HOSTS = {
+  deployment: { type: 'string' },
+  'auth-url': { type: 'string' },
+  'admin-audience': { type: 'string' },
+  'app-url': { type: 'string' },
+  'no-open': { type: 'boolean' },
+  json: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+} as const;
+
+/** The flags of `noblecloak login`. */
+const LOGIN_OPTIONS = { ...HOSTS, email: { type: 'string' } } as const;
+
+/** The flags of `noblecloak setup`. */
+const SETUP_OPTIONS = HOSTS;
+
+/** The flags of `noblecloak logout`. */
+const LOGOUT_OPTIONS = {
+  json: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+} as const;
+
 export type SpCommand = keyof typeof OPTIONS;
 
 export function isSpCommand(value: string | undefined): value is SpCommand {
@@ -67,6 +90,18 @@ export function parseCommandFlags(command: SpCommand, argv: readonly string[]): 
 
 export function parseStarterFlags(argv: readonly string[]): ParsedFlags {
   return parseFlags(STARTER_OPTIONS, argv);
+}
+
+export function parseLoginFlags(argv: readonly string[]): ParsedFlags {
+  return parseFlags(LOGIN_OPTIONS, argv);
+}
+
+export function parseSetupFlags(argv: readonly string[]): ParsedFlags {
+  return parseFlags(SETUP_OPTIONS, argv);
+}
+
+export function parseLogoutFlags(argv: readonly string[]): ParsedFlags {
+  return parseFlags(LOGOUT_OPTIONS, argv);
 }
 
 function parseFlags(options: ParseArgsConfig['options'], argv: readonly string[]): ParsedFlags {

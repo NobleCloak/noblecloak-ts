@@ -22,6 +22,10 @@ export interface Io {
    * Default 1000.
    */
   readonly pollFloorMs?: number;
+  /** How old the saved sign-in's lock file must be before it is taken over as a crashed holder's. Default 90 s. */
+  readonly lockStaleMs?: number;
+  /** How long to wait for the saved sign-in's lock before giving up. Default 100 s. */
+  readonly lockWaitMs?: number;
   /**
    * Aborted when the user interrupts the command (Ctrl-C). Every request and the revoke prompt observe it;
    * the command then exits 3 after ending the session. */

@@ -1,0 +1,5 @@
+---
+'@noblecloak/cli': minor
+---
+
+`noblecloak login`, `noblecloak setup` and `noblecloak logout`. `login` signs you in through your browser with no configuration (`--deployment beta` and `--auth-url`, `--admin-audience`, `--app-url` for another deployment, `--email` for the company-login hint), sends the tab to NobleCloak's signed-in page instead of serving one from the loopback, saves the sign-in in `~/.noblecloak/cli/auth.json` (0600, in a private directory, under a lock so two commands never refresh with the same token), and prints what to do next by the organisation's setup progress. `setup` opens the setup wizard at the first unfinished step. `logout` revokes and deletes the saved sign-in, and says when the server could not be told. A saved sign-in is deleted only when the server says its refresh token is over; a transient refusal keeps it. `starter` and the `sp` commands keep their own sign-in and keep nothing, but now refuse a URL with a username or password, and `--user-token-file` refuses anything that is not a regular file.

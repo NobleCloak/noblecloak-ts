@@ -4,8 +4,8 @@ The `noblecloak` command line. An organisation administrator uses it to create, 
 organisation's **service principals**, and to write the credential file an agent loads.
 
 - **Install**, **Quickstart**, **Configuration**
-- **Commands**: `sp create`, `sp list`, `sp rotate`, `sp revoke`, `starter`
-- **The credential file**, **Sign-in**, **Exit codes**, **Security notes**
+- **Commands**: `login`, `setup`, `logout`, `sp create`, `sp list`, `sp rotate`, `sp revoke`, `starter`
+- **The saved sign-in**, **The credential file**, **Sign-in**, **Exit codes**, **Security notes**
 
 ## Install
 
@@ -15,6 +15,10 @@ noblecloak --help
 ```
 
 ## Quickstart
+
+To start, sign in and finish setup: `npx @noblecloak/cli login`, then `noblecloak setup` (see
+[`noblecloak login`](#noblecloak-login)). `login` and `setup` know NobleCloak's servers: they need no
+configuration.
 
 Run it without installing: `npx @noblecloak/cli sp list --org <uuid>` (the `sp` commands need the
 [configuration](#configuration) below), or the starter agent, `npx @noblecloak/cli starter` (see
@@ -41,6 +45,75 @@ export NOBLECLOAK_ADMIN_AUDIENCE=<the admin audience>
 service-principal routes only, so the command cannot look an organisation up by name.
 
 ## Commands
+
+### `noblecloak login`
+
+```sh
+npx @noblecloak/cli login [--email <address>] [--deployment production|beta] [--no-open] [--json]
+```
+
+Signs you in through your browser, and says what to do next:
+
+```
+Opening your browser to sign in…
+(If it didn't open: https://auth.noblecloak.com/…)
+
+✓ Signed in
+
+Next: finish setup (3 of 4 steps left)
+  noblecloak setup   or   https://app.noblecloak.com/setup
+
+In Claude Code, run /mcp to connect tools.
+```
+
+The browser tab ends on NobleCloak's own signed-in page, not on a page of this command: the loopback listener
+never serves HTML. It redirects the tab to the app's `/cli/signed-in` page, naming your organisation by id (and
+nothing else: no token, code or email), or to the same page with a fixed error code when the sign-in failed. A
+deployment whose app URL is not known gets a plain-text answer instead.
+
+The _Next_ line follows the organisation's setup, counted by the same rule as the setup pill (`@noblecloak/setup-steps`).
+An organisation with nothing left to do, and a person who is not an administrator of it, get only the `/mcp`
+line. If the progress cannot be read, `login` says so on stderr and still signs you in.
+
+| Flag                       | Variable                    | Meaning                                                                                                                                                                                 |
+| -------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--deployment <name>`      | `NOBLECLOAK_DEPLOYMENT`     | `production` (default) or `beta`. An explicit `--deployment` ignores the host variables below.                                                                                          |
+| `--auth-url <url>`         | `NOBLECLOAK_AUTH_URL`       | Replaces the deployment's authorization server (self-hosted). The admin audience and app URL are then not guessed: pass `--admin-audience`, and `--app-url` for the browser pages.      |
+| `--admin-audience <value>` | `NOBLECLOAK_ADMIN_AUDIENCE` | Replaces the deployment's admin API audience.                                                                                                                                           |
+| `--app-url <url>`          | `NOBLECLOAK_APP_URL`        | Replaces the deployment's app origin, where `/cli/signed-in` and `/setup` are served.                                                                                                   |
+| `--email <address>`        |                             | Tells the sign-in page which company login to use. It goes to the authorization server as `login_hint`, and nowhere else: not to the app, not into the saved file, not into the output. |
+| `--no-open`                |                             | Print the sign-in URL and open nothing.                                                                                                                                                 |
+| `--json`                   |                             | Print one JSON object on stdout.                                                                                                                                                        |
+
+`login` asks for one scope, `setup:read`, on the admin API's audience: enough to read the organisation's setup
+checklist and nothing else. It does not ask for `service_principals:manage`; the `sp` commands sign in for that on
+their own.
+
+### `noblecloak setup`
+
+```sh
+noblecloak setup [--deployment production|beta] [--no-open] [--json]
+```
+
+Opens the setup wizard (`/setup` on the deployment's app) in your browser; the wizard opens at the first unfinished
+step. It does not need you to be signed in. When a sign-in is saved it also says how many steps are left, or that
+setup is finished. A saved sign-in that has expired or was revoked costs only that line: `setup` says to run
+`noblecloak login` and opens the wizard anyway. When the count cannot be read it says so and still opens the wizard;
+`--json` gives the reason as `saved_sign_in` (`none`, `skipped`, `expired`, `other_deployment`, `unusable` or `read`).
+It takes the same host flags as `login`; a self-hosted deployment needs `--app-url`, and `--admin-audience` only for
+the count (without it the count is skipped).
+
+### `noblecloak logout`
+
+```sh
+noblecloak logout [--json]
+```
+
+Asks the server to end the saved sign-in (it revokes the refresh token), then deletes the file. It does the same for
+a saved file it will not use because other users can read it, and for any `auth.json.*.tmp` file a dead command
+left behind. It says `Signed out.` only when the server accepted every revoke. When the server could not be told
+(unreachable, not https, or a file that cannot be read at all, so there is no token to send), it deletes the file and
+says the session there may stay open until it expires.
 
 ### `noblecloak sp create`
 
@@ -175,6 +248,50 @@ A host is taken from its flag, then its variable, then the `--deployment` defaul
 Running it twice: the setup binds the principal to one agent and publishes that agent's policy, so it is
 applied once. After you approved it, run `starter --skip-setup` for another write, with the same credential.
 
+## The saved sign-in
+
+`login` is the one command that keeps your sign-in. It writes `~/.noblecloak/cli/auth.json` (the directory is
+`NOBLECLOAK_CLI_STATE_DIR` when that is set): the directory is mode 0700, the file 0600, written through a temp
+file and a rename so a reader never sees half of it. A file that other users can read, and anything that is not a
+regular file, is not used. A directory that already exists must be owned by you with no group or other access, or
+`login` refuses to save into it (it never changes the mode of a directory it did not create). `noblecloak logout`
+revokes the sign-in and deletes it. A sign-in is also deleted when `setup` finds the server saying its refresh token
+is revoked, already used, expired or otherwise over; any other refusal of a refresh (a transient single sign-on
+failure, the network, a server error) keeps the file. A `401` on the setup read says the sign-in expired and keeps
+the file.
+
+Commands that renew the sign-in take an exclusive lock file (`auth.json.lock` in the same directory) around reading,
+refreshing and writing, because a refresh token works once and the server revokes the whole family when one is used
+twice. A second command waits, then reads what the first wrote. A lock older than 90 seconds is a crashed command's
+and is taken over. A `login` that replaces an earlier sign-in revokes the earlier session too.
+
+```json
+{
+  "version": 1,
+  "issuer": "https://auth.noblecloak.com",
+  "clientId": "noblecloak-cli",
+  "audience": "https://admin-api.noblecloak.com",
+  "scope": "setup:read",
+  "accessToken": "…",
+  "refreshToken": "…",
+  "expiresAt": 1795546703480,
+  "tokenType": "Bearer",
+  "authenticatedAt": "2026-11-24T00:00:00.000Z",
+  "orgId": "<the organisation the sign-in is bound to>",
+  "sub": "<the person's id>"
+}
+```
+
+The member names `accessToken`, `refreshToken`, `expiresAt` (epoch milliseconds), `tokenType`, `scope`,
+`authenticatedAt`, `issuer`, `orgId` and `sub` are the Claude Code plugin's own `auth.json` names, so the plugin
+can read this file with the code it has. The file holds no email. **Check `clientId`, `audience` and `issuer` before
+sending the token anywhere:** it belongs to the `noblecloak-cli` client and is bound to the admin API, so it is not
+accepted by the MCP gateway or the governance API. The access token lives 15 minutes; commands renew it with the
+refresh token (the server rotates it, and the file is rewritten). The refresh token expires after 7 days without use.
+
+`starter` does not use this sign-in: it needs a token for the govern API's audience, and a token is bound to one
+audience when it is issued, so it keeps signing in for its own.
+
 ## The credential file
 
 `sp create` writes one self-contained JSON file, mode 0600:
@@ -211,7 +328,7 @@ hand the file to a CI system, store its text as a secret and set `NOBLECLOAK_SP_
 
 ## Sign-in
 
-Each command that needs you (all but `starter --skip-setup`) signs you in and ends the session when it finishes. It uses the `noblecloak-cli` public client
+Except for `login` (see [The saved sign-in](#the-saved-sign-in)), each command that needs you (all but `starter --skip-setup`) signs you in and ends the session when it finishes. It uses the `noblecloak-cli` public client
 with OAuth 2.1 authorization code and PKCE (S256) on a loopback address:
 
 1. It reads the deployment's authorization server metadata, and stops (exit code 1) unless the metadata's
@@ -223,7 +340,7 @@ with OAuth 2.1 authorization code and PKCE (S256) on a loopback address:
 4. It exchanges the code, runs the command, then **revokes the refresh token** at the deployment, whether the
    command succeeded or failed.
 
-The access token stays in memory. Nothing about your session is written to disk.
+For these commands the access token stays in memory. Nothing about your session is written to disk.
 
 Ctrl-C works at every step: it cancels the sign-in wait, the request in flight or the `revoke` confirmation, then
 revokes the refresh token and exits with code 3. After an interrupted `create`, `rotate` or `revoke` request the

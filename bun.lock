@@ -83,6 +83,7 @@
       },
       "dependencies": {
         "@noblecloak/client": "workspace:*",
+        "@noblecloak/setup-steps": "workspace:*",
       },
     },
     "packages/client": {
