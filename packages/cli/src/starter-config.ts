@@ -49,12 +49,13 @@ export const DEPLOYMENTS = {
   },
 } as const satisfies Record<string, StarterHosts>;
 
-type DeploymentName = keyof typeof DEPLOYMENTS;
+export type DeploymentName = keyof typeof DEPLOYMENTS;
 
-const isDeployment = (name: string): name is DeploymentName => Object.hasOwn(DEPLOYMENTS, name);
+export const isDeployment = (name: string): name is DeploymentName =>
+  Object.hasOwn(DEPLOYMENTS, name);
 
 /** An https origin (http on loopback) with no path, query or hash, without a trailing slash. */
-function origin(value: string, what: string): string {
+export function origin(value: string, what: string): string {
   const url = assertSecureUrl(value, what);
   if (url.pathname !== '/' || url.search !== '' || url.hash !== '') {
     throw new CliError(
