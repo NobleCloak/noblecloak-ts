@@ -163,6 +163,8 @@ const EXTENSION = /\.[A-Za-z0-9]{1,8}$/;
 const TOKEN_SHAPE = /^[A-Za-z0-9+/=_.-]{16,}$/;
 /** The characters a token or base64 secret is made of; a file name with any other is not one. */
 const TOKEN_ALPHABET = /^[A-Za-z0-9+/=_.-]*$/;
+/** A bare name behind only `./` or `../` prefixes: `./x`, `../x`, `../../x`. */
+const BARE_RELATIVE = /^(?:\.\.?[\\/])+[^\\/]+$/;
 /** Text that is a connection string or a URL with credentials, not a path: `@`, `;`, `://`, or `=` and more. */
 const CONNECTION_STRING = /[@;]|:\/\/|=[^=]/;
 /**
@@ -194,25 +196,30 @@ function printable(text: string): string {
  * looks like a path is: a value that was never a path (a base64 CI secret, a token, a raw key, JSON) must
  * not reach a message. It does when its file name has an extension, or it has a path separator and the
  * directory it names exists. Text containing a quote, a brace, a line break, `@`, `;`, `://` or `=` followed
- * by more text never does (JSON, a connection string, a URL with credentials), and neither does text shaped
- * like a token or base64 that has no extension, nor a bare token-alphabet name directly under the
- * filesystem root or the working directory (a short base64 secret with a leading `/` or `./`).
+ * by more text never does (JSON, a connection string, a URL with credentials). Neither does text with no
+ * separator and no extension, nor text whose file name (its last segment) is shaped like a token or base64
+ * (one unbroken run of 16 or more token characters) and has no extension, nor a bare token-alphabet name
+ * directly under the filesystem root, the base directory (the working directory unless `baseDir` is
+ * passed) or behind only `./` and `../` prefixes (a short base64 secret with a leading `/`, `./` or
+ * `../`). A backslash counts as a separator only where the platform's does (Windows); on POSIX it is part
+ * of the name. A long path is judged by its last segment only: `/etc/noblecloak/credential` is shown, while
+ * `sub/<base64>` is not.
  *
  * Accepted residual: a raw token that itself ends in an extension such as `.json` or `.pem`, and has none
  * of the characters above, is taken for a file name.
  */
-async function looksLikePath(given: string, resolved: string): Promise<boolean> {
+async function looksLikePath(given: string, resolved: string, baseDir?: string): Promise<boolean> {
   if (/["'{}\r\n]/.test(given) || CONNECTION_STRING.test(given)) return false;
   const nodePath = await import('node:path');
   const name = nodePath.basename(resolved);
   if (EXTENSION.test(name)) return true;
-  if (TOKEN_SHAPE.test(given)) return false;
-  if (!/[\\/]/.test(given)) return false;
+  if (TOKEN_SHAPE.test(name)) return false;
+  // A backslash separates names only where the platform says so: on POSIX it is an ordinary character.
+  if (!(nodePath.sep === '\\' ? /[\\/]/ : /\//).test(given)) return false;
   const dir = nodePath.dirname(resolved);
-  const cwd = typeof process === 'undefined' ? undefined : process.cwd();
-  if ((dir === nodePath.parse(resolved).root || dir === cwd) && TOKEN_ALPHABET.test(name)) {
-    return false;
-  }
+  const base = baseDir ?? (typeof process === 'undefined' ? undefined : process.cwd());
+  const bare = dir === nodePath.parse(resolved).root || dir === base || BARE_RELATIVE.test(given);
+  if (bare && TOKEN_ALPHABET.test(name)) return false;
   try {
     const { stat } = await import('node:fs/promises');
     return (await stat(dir)).isDirectory();
@@ -300,34 +307,66 @@ async function nearestCredentialName(path: string): Promise<string | undefined> 
   return best.name;
 }
 
+export interface DescribeUnreadableOptions {
+  /** What the file is, in the message's words: "the service-principal credential file", "the --credentials file". */
+  readonly what: string;
+  /** The absolute path that was read. Defaults to `given` resolved against the working directory. */
+  readonly path?: string;
+  /** Where `given` came from, shown as "(named by …)"; omitted when not set. */
+  readonly namedBy?: string;
+  /** The directory a relative `given` was resolved against. Defaults to the working directory. */
+  readonly baseDir?: string;
+}
+
+export interface UnreadableFileDescription {
+  /** The error message to show. */
+  readonly message: string;
+  /** The fs error code (`ENOENT`, ...), or `unknown`. Not the fs error, whose message holds the path. */
+  readonly cause: string;
+}
+
 /**
- * Reads a file and, on failure, throws `credential_unreadable` naming `what` and the cause in words. The
- * resolved path is added only when `given`, the text the caller passed, looks like a path
- * ({@link looksLikePath}); control characters in it are escaped. The cause property is the fs error code,
- * not the fs error, whose message holds the path. File contents are never read into a message.
+ * The message for a file that could not be read, and the fs error code to keep as the cause (`unknown`
+ * when `error` carries none). The resolved path is added only when `given`, the text the caller passed,
+ * looks like a path ({@link looksLikePath}); control characters in it are escaped. The cause is the code,
+ * not the fs error, whose message holds the path. File contents are never read into the message.
+ * The loader and `noblecloak sp rotate` both word an unreadable credential file with this.
  */
+export async function describeUnreadableFile(
+  given: string,
+  error: unknown,
+  options: DescribeUnreadableOptions
+): Promise<UnreadableFileDescription> {
+  const path = options.path ?? (await import('node:path')).resolve(given);
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const known = typeof code === 'string' ? code : 'unknown';
+  const echo = await looksLikePath(given, path, options.baseDir);
+  const named = echo ? `${options.what} ${printable(path)}` : options.what;
+  const by = options.namedBy === undefined ? '' : ` (named by ${options.namedBy})`;
+  const hint = known === 'ENOENT' && echo ? await nearestCredentialName(path) : undefined;
+  const tail = hint === undefined ? '' : ` Did you mean ${printable(hint)}?`;
+  return { message: `Cannot read ${named}${by}: ${reasonFor(known)}.${tail}`, cause: known };
+}
+
+/** Reads a file and, on failure, throws `credential_unreadable` with {@link describeUnreadableFile}'s message. */
 async function readText(
   path: string,
   given: string,
   what: string,
-  namedBy?: string
+  namedBy?: string,
+  baseDir?: string
 ): Promise<string> {
   const { readFile } = await import('node:fs/promises');
   try {
     return await readFile(path, 'utf8');
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    const known = typeof code === 'string' ? code : 'unknown';
-    const echo = await looksLikePath(given, path);
-    const named = echo ? `${what} ${printable(path)}` : what;
-    const by = namedBy === undefined ? '' : ` (named by ${namedBy})`;
-    const hint = known === 'ENOENT' && echo ? await nearestCredentialName(path) : undefined;
-    const tail = hint === undefined ? '' : ` Did you mean ${printable(hint)}?`;
-    throw new ServicePrincipalError(
-      'credential_unreadable',
-      `Cannot read ${named}${by}: ${reasonFor(known)}.${tail}`,
-      { cause: known }
-    );
+    const { message, cause } = await describeUnreadableFile(given, error, {
+      what,
+      path,
+      ...(namedBy === undefined ? {} : { namedBy }),
+      ...(baseDir === undefined ? {} : { baseDir }),
+    });
+    throw new ServicePrincipalError('credential_unreadable', message, { cause });
   }
 }
 
@@ -389,6 +428,15 @@ export async function loadServicePrincipalCredential(
     );
   }
   const keyPath = file === undefined ? keyFile : path.resolve(path.dirname(file), keyFile);
-  const jwk = parseJson(await readText(keyPath, keyFile, 'the key file'), 'The key file');
+  const jwk = parseJson(
+    await readText(
+      keyPath,
+      keyFile,
+      'the key file',
+      undefined,
+      file === undefined ? undefined : path.dirname(file)
+    ),
+    'The key file'
+  );
   return parseServicePrincipalCredential({ ...raw, key_file: undefined, private_jwk: jwk });
 }

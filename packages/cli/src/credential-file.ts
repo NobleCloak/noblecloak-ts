@@ -5,6 +5,7 @@ import { parseServicePrincipalCredential } from '@noblecloak/client/service-prin
 import type { Registered } from './api.js';
 import { CliError, EXIT } from './errors.js';
 import type { PrivateJwk } from './keys.js';
+import { shownPath } from './terminal.js';
 
 /** The credential file: the fields the SDK loader reads, plus the ones `rotate` and the reader need. */
 export interface CredentialFile {
@@ -81,16 +82,22 @@ export async function assertDirectoryWritable(path: string, flag: string): Promi
   } catch (error) {
     throw new CliError(
       EXIT.usage,
-      `${flag} ${path}: its directory cannot be examined (${(error as NodeJS.ErrnoException).code ?? 'error'}).`
+      `${flag} ${shownPath(path)}: its directory cannot be examined (${(error as NodeJS.ErrnoException).code ?? 'error'}).`
     );
   }
   if (!isDirectory) {
-    throw new CliError(EXIT.usage, `${flag} ${path}: ${directory} is not a directory.`);
+    throw new CliError(
+      EXIT.usage,
+      `${flag} ${shownPath(path)}: ${shownPath(directory)} is not a directory.`
+    );
   }
   try {
     await access(directory, constants.W_OK);
   } catch {
-    throw new CliError(EXIT.usage, `${flag} ${path}: ${directory} is not writable.`);
+    throw new CliError(
+      EXIT.usage,
+      `${flag} ${shownPath(path)}: ${shownPath(directory)} is not writable.`
+    );
   }
 }
 

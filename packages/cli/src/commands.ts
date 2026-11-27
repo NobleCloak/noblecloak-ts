@@ -1,4 +1,5 @@
 import { lstat, readFile } from 'node:fs/promises';
+import { describeUnreadableFile } from '@noblecloak/client/service-principal';
 import { unlessInterrupted } from './abortable.js';
 import { SpApi, type Principal, type Registered } from './api.js';
 import {
@@ -20,7 +21,7 @@ import {
 import { CliError, EXIT } from './errors.js';
 import type { Io } from './io.js';
 import { generateKey } from './keys.js';
-import { jsonForTerminal, oneLine } from './terminal.js';
+import { jsonForTerminal, oneLine, shellQuote, shownPath } from './terminal.js';
 import { withSession } from './session.js';
 
 const NEXT_STEP_ENV = 'NOBLECLOAK_SP_CREDENTIALS';
@@ -46,9 +47,15 @@ async function assertOutFree(path: string): Promise<void> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return;
-    throw new CliError(EXIT.usage, `--out ${path} cannot be examined (${code ?? 'error'}).`);
+    throw new CliError(
+      EXIT.usage,
+      `--out ${shownPath(path)} cannot be examined (${code ?? 'error'}).`
+    );
   }
-  throw new CliError(EXIT.usage, `--out ${path} already exists; choose a path that does not.`);
+  throw new CliError(
+    EXIT.usage,
+    `--out ${shownPath(path)} already exists; choose a path that does not.`
+  );
 }
 
 /**
@@ -91,7 +98,7 @@ export async function createCommand(flags: ParsedFlags, io: Io): Promise<void> {
         public_jwk: key.publicJwk,
         ...(expiresInDays === undefined ? {} : { expires_in_days: expiresInDays }),
       },
-      ` If a new "${name}" is listed, it was created and has no credential file (${out} was not written): revoke it with\n  ${revokeHint(orgId, '<its id>')}`
+      ` If a new "${name}" is listed, it was created and has no credential file (${shownPath(out)} was not written): revoke it with\n  ${revokeHint(orgId, '<its id>')}`
     )
   );
 
@@ -133,10 +140,10 @@ export async function createCommand(flags: ParsedFlags, io: Io): Promise<void> {
       `  client_id  ${principal.client_id}`,
       `  sp_id      ${principal.id}`,
       `  expires_at ${principal.expires_at}`,
-      `  credential ${out} (mode 0600; never commit it)`,
+      `  credential ${shownPath(out)} (mode 0600; never commit it)`,
       '',
       'Next step:',
-      `  export ${NEXT_STEP_ENV}=${out}`,
+      `  export ${NEXT_STEP_ENV}=${shellQuote(out)}`,
       '',
     ].join('\n')
   );
@@ -201,17 +208,21 @@ async function readCredentialFile(path: string): Promise<Json> {
   let text: string;
   try {
     text = await readFile(path, 'utf8');
-  } catch {
-    throw new CliError(EXIT.usage, `--credentials ${path} cannot be read.`);
+  } catch (error) {
+    // The same wording and secret rule as `starter`: the path is shown only when the argument looks like one.
+    const { message } = await describeUnreadableFile(path, error, {
+      what: 'the --credentials file',
+    });
+    throw new CliError(EXIT.usage, message);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new CliError(EXIT.usage, `--credentials ${path} is not valid JSON.`);
+    throw new CliError(EXIT.usage, `--credentials ${shownPath(path)} is not valid JSON.`);
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new CliError(EXIT.usage, `--credentials ${path} is not a JSON object.`);
+    throw new CliError(EXIT.usage, `--credentials ${shownPath(path)} is not a JSON object.`);
   }
   return parsed as Json;
 }
@@ -228,7 +239,7 @@ export async function rotateCommand(flags: ParsedFlags, io: Io): Promise<void> {
   if (typeof orgId !== 'string' || typeof spId !== 'string') {
     throw new CliError(
       EXIT.usage,
-      `--credentials ${path} has no org_id or sp_id; only a file written by "noblecloak sp create" can be rotated.`
+      `--credentials ${shownPath(path)} has no org_id or sp_id; only a file written by "noblecloak sp create" can be rotated.`
     );
   }
   requireUuidValue(orgId, 'org_id');
@@ -236,7 +247,7 @@ export async function rotateCommand(flags: ParsedFlags, io: Io): Promise<void> {
   if (current.key_file !== undefined) {
     throw new CliError(
       EXIT.usage,
-      `--credentials ${path} names its key with key_file; sp rotate writes the new key inline. Move the key file's JWK into private_jwk, remove key_file, then rotate.`
+      `--credentials ${shownPath(path)} names its key with key_file; sp rotate writes the new key inline. Move the key file's JWK into private_jwk, remove key_file, then rotate.`
     );
   }
 
@@ -251,8 +262,8 @@ export async function rotateCommand(flags: ParsedFlags, io: Io): Promise<void> {
         ...(expiresInDays === undefined ? {} : { expires_in_days: expiresInDays }),
       },
       revokePrevious
-        ? ` ${path} was not changed. If the rotation was applied, the key in it was retired (its private_jwk kid is no longer among the key_thumbprints that sp list --json shows), so the service principal has no usable key: revoke it with\n  ${revokeHint(orgId, spId)}\nand create a new one.`
-        : ` ${path} was not changed, and its key still works either way.`
+        ? ` ${shownPath(path)} was not changed. If the rotation was applied, the key in it was retired (its private_jwk kid is no longer among the key_thumbprints that sp list --json shows), so the service principal has no usable key: revoke it with\n  ${revokeHint(orgId, spId)}\nand create a new one.`
+        : ` ${shownPath(path)} was not changed, and its key still works either way.`
     )
   );
 
@@ -290,7 +301,7 @@ export async function rotateCommand(flags: ParsedFlags, io: Io): Promise<void> {
   io.stdout(
     [
       `Rotated the key of "${principal.name}" (${principal.client_id}).`,
-      `  credential ${path} replaced (mode 0600)`,
+      `  credential ${shownPath(path)} replaced (mode 0600)`,
       `  expires_at ${principal.expires_at}`,
       revokePrevious
         ? '  The previous keys were retired.'
@@ -315,12 +326,12 @@ function rotationNotSaved(
   if (revokePrevious) {
     return new CliError(
       EXIT.failed,
-      `The server rotated the key and retired the previous keys, but ${detail}. ${path} still holds a retired key and the new key was discarded, so the service principal has no usable key: revoke it with\n  ${revokeHint(orgId, spId)}\nand create a new one.`
+      `The server rotated the key and retired the previous keys, but ${detail}. ${shownPath(path)} still holds a retired key and the new key was discarded, so the service principal has no usable key: revoke it with\n  ${revokeHint(orgId, spId)}\nand create a new one.`
     );
   }
   return new CliError(
     EXIT.failed,
-    `The server rotated the key, but ${detail}. ${path} was left unchanged and still works; the new key was discarded. Run the rotation again.`
+    `The server rotated the key, but ${detail}. ${shownPath(path)} was left unchanged and still works; the new key was discarded. Run the rotation again.`
   );
 }
 

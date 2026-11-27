@@ -5,13 +5,16 @@
  */
 export {
   CREDENTIAL_ENV,
+  describeUnreadableFile,
   loadServicePrincipalCredential,
   parseServicePrincipalCredential,
 } from './service-principal-credential.js';
 export type {
+  DescribeUnreadableOptions,
   LoadOptions,
   PrivateJwk,
   ServicePrincipalCredential,
+  UnreadableFileDescription,
 } from './service-principal-credential.js';
 export { ServicePrincipalError } from './service-principal-error.js';
 export type { ServicePrincipalErrorCode } from './service-principal-error.js';

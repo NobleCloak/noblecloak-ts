@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type { Io } from './io.js';
 
 /**
@@ -17,6 +18,32 @@ const REORDERING = /[\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
 /** `text` with every character a terminal would act on removed. Tabs and newlines are kept. */
 export function forTerminal(text: string): string {
   return text.replace(CONTROL, '').replace(REORDERING, '');
+}
+
+/** What `shownPath` escapes: everything `forTerminal` removes, and the tab and newline it keeps. */
+const ESCAPED_IN_PATH = new RegExp(`${CONTROL.source}|${REORDERING.source}|[\\t\\n]`, 'g');
+
+/**
+ * `path` as the absolute path to show in a message: every control character (a newline and a tab too) and
+ * every reordering character is written as a unicode escape (backslash, u, four hex digits), so a file name
+ * cannot start a line of its own or redraw the line. `forTerminal` keeps newlines, so it alone would not
+ * stop that.
+ */
+export function shownPath(path: string): string {
+  return resolve(path).replace(
+    ESCAPED_IN_PATH,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
+  );
+}
+
+/**
+ * `value` as one word for a POSIX shell: unchanged when it holds only characters that are safe unquoted,
+ * otherwise in single quotes with each `'` written as `'\''`. Used for the `export` line a user pastes.
+ */
+export function shellQuote(value: string): string {
+  // No `=` or `:`: zsh expands `=cmd` and `~` after a `:` in an assignment, so they are quoted too.
+  if (/^[A-Za-z0-9_./@%+,-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /**
